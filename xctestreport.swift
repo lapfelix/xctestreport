@@ -138,7 +138,7 @@ struct TestNode: Decodable {
     let children: [TestNode]?
     var attachments: [TestAttachment] = []
 
-    // Add CodingKeys to exclude 'attachments' from the Decodable protocol
+    // CodingKeys to exclude 'attachments' from the Decodable protocol
     enum CodingKeys: String, CodingKey {
         case name
         case nodeType
@@ -478,6 +478,14 @@ collectTestNodes(fullResults.testNodes)
 
 // Now 'allTests' contains all the test cases to generate reports for
 
+// After collecting allTests, group them by suite
+let groupedTests = Dictionary(grouping: allTests) { test -> String in
+    if let identifier = test.nodeIdentifier, let suite = identifier.split(separator: "/").first {
+        return String(suite)
+    }
+    return "Unknown Suite"
+}
+
 print("Generating HTML report...")
 
 // Prepare attachments dir (if needed)
@@ -486,17 +494,98 @@ try? FileManager.default.createDirectory(atPath: attachmentsDir, withIntermediat
 
 print("Generating HTML pages...")
 
-// Generate index.html
+// Generate index.html with grouped tests
 var indexHTML = """
 <!DOCTYPE html>
-<html><head><title>Test Report</title>
-<style>body { font-family: sans-serif; } .passed { color: green; } .failed { color: red; }</style>
-</head><body>
+<html>
+<head>
+<title>Test Report</title>
+<style>
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "San Francisco", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    color: #333;
+    margin: 20px;
+    background: #F9F9F9;
+}
+h1, h2, h3 {
+    font-weight: 600;
+    color: #000;
+}
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin-top: 20px;
+    background: #FFF;
+    border: 1px solid #DDD;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    table-layout: fixed;
+}
+th, td {
+    text-align: left;
+    padding: 12px;
+    border-bottom: 1px solid #EEE;
+    word-wrap: break-word; /* Ensure text wraps within fixed width */
+}
+th {
+    background: #F2F2F2;
+    font-weight: 600;
+}
+th:nth-child(1), td:nth-child(1) {
+    width: 60%; /* Set width for Test Name column */
+}
+th:nth-child(2), td:nth-child(2) {
+    width: 20%; /* Set width for Status column */
+}
+th:nth-child(3), td:nth-child(3) {
+    width: 20%; /* Set width for Duration column */
+}
+
+tr.failed {
+    background-color: #f8d7da; /* Light red background */
+}
+
+a {
+    color: #0077EE;
+    text-decoration: none;
+}
+a:hover {
+    text-decoration: underline;
+}
+.passed {
+    color: #28A745;
+    font-weight: 600;
+}
+.failed {
+    color: #DC3545;
+    font-weight: 600;
+}
+</style>
+</head>
+<body>
 <h1>Test Report: \(summary.title)</h1>
 <p>Total: \(summary.totalTestCount), Passed: \(summary.passedTests), Failed: \(summary.failedTests), Skipped: \(summary.skippedTests)</p>
-<table border="1" cellpadding="5" cellspacing="0">
-<tr><th>Test Name</th><th>Status</th><th>Duration</th></tr>
 """
+
+for (suite, tests) in groupedTests {
+    indexHTML += "<h2>Suite: \(suite)</h2>"
+    indexHTML += """
+    <table>
+    <tr><th>Test Name</th><th>Status</th><th>Duration</th></tr>
+    """
+    for test in tests {
+        let testPageName = "test_\(test.nodeIdentifier ?? test.name).html".replacingOccurrences(of: "/", with: "_")
+        let statusClass = test.result == "Passed" ? "passed" : "failed"
+        let duration = test.duration ?? "0s"
+        
+        // Determine if the row should be tinted based on test result
+        let rowClass = test.result == "Passed" ? "" : " class=\"failed\""
+        
+        indexHTML += "<tr\(rowClass)><td><a href=\"\(testPageName)\">\(test.name)</a></td><td class=\"\(statusClass)\">\(test.result)</td><td>\(duration)</td></tr>"
+    }
+    indexHTML += "</table>"
+}
+
+indexHTML += "</body></html>"
 
 // Generate individual test pages
 for test in allTests {
@@ -504,13 +593,11 @@ for test in allTests {
     let statusClass = test.result == "Passed" ? "passed" : "failed"
     let duration = test.duration ?? "0s"
 
-    // Prepare failure information
     var failureInfo = ""
     if test.result != "Passed", let details = test.details {
         failureInfo = "<p><strong>Details:</strong> \(details)</p>"
     }
 
-    // Get details for this test
     var testDetails: TestDetails?
     if let testIdentifier = test.nodeIdentifier {
         testDetails = getTestDetails(for: testIdentifier)
@@ -522,7 +609,7 @@ for test in allTests {
         let testRuns = testDetails.testRuns.map { run in
             let runDetails = run.children?.map { child in
                 let childDetails = child.children?.map { detail in
-                    return "<li>\(detail.name)</li>"
+                    return "<li><code>\(detail.name)</code></li>"
                 }.joined(separator: "") ?? ""
                 return "<li>\(child.name) (\(child.nodeType)): \(child.result)<ul>\(childDetails)</ul></li>"
             }.joined(separator: "") ?? ""
@@ -536,26 +623,50 @@ for test in allTests {
         """
     }
 
-    // Generate test detail HTML
     let testDetailHTML = """
     <!DOCTYPE html>
-    <html><head><title>Test Detail: \(test.name)</title>
-    <style>body { font-family: sans-serif; } .passed { color: green; } .failed { color: red; }</style>
-    </head><body>
+    <html>
+    <head>
+    <title>Test Detail: \(test.name)</title>
+    <style>
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "San Francisco", "Helvetica Neue", Helvetica, Arial, sans-serif;
+        color: #333;
+        margin: 20px;
+        background: #F9F9F9;
+    }
+    h1, h2, h3 {
+        font-weight: 600;
+        color: #000;
+    }
+    a {
+        color: #0077EE;
+        text-decoration: none;
+    }
+    a:hover {
+        text-decoration: underline;
+    }
+    .passed {
+        color: #28A745;
+        font-weight: 600;
+    }
+    .failed {
+        color: #DC3545;
+        font-weight: 600;
+    }
+    </style>
+    </head>
+    <body>
     <h1>\(test.name)</h1>
     <p>Status: <span class="\(statusClass)">\(test.result)</span><br>Duration: \(duration)</p>
     \(failureInfo)
     <p><a href="index.html">Back to index</a></p>
-    </body></html>
+    </body>
+    </html>
     """
     let testPagePath = (outputDir as NSString).appendingPathComponent(testPageName)
     try testDetailHTML.write(toFile: testPagePath, atomically: true, encoding: .utf8)
-
-    // Add to index
-    indexHTML += "<tr><td><a href=\"\(testPageName)\">\(test.name)</a></td><td class=\"\(statusClass)\">\(test.result)</td><td>\(duration)</td></tr>"
 }
-
-indexHTML += "</table></body></html>"
 
 let indexPath = (outputDir as NSString).appendingPathComponent("index.html")
 try indexHTML.write(toFile: indexPath, atomically: true, encoding: .utf8)

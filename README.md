@@ -16,3 +16,8 @@ ARGUMENTS:
 OPTIONS:
   -h, --help              Show help information.
 ```
+
+## What's missing
+
+- Support for attachments (the last screenshot of a failed test would be nice)
+- Support for multiple test plans

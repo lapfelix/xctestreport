@@ -6,6 +6,12 @@ import ArgumentParser
 // MARK: - Command-Line Interface
 
 struct XCTestReport: ParsableCommand {
+    // name fo the command
+    static let configuration = CommandConfiguration(
+        commandName: "xctestreport",
+        abstract: "A utility to generate simple HTML reports from XCTest results."
+    )
+
     @Argument(help: "Path to the .xcresult file.")
     var xcresultPath: String
 
@@ -577,7 +583,10 @@ struct XCTestReport: ParsableCommand {
         """
 
         for (suite, tests) in groupedTests {
-            indexHTML += "<h2>Suite: \(suite)</h2>"
+            // Calculate succeeded count
+            let succeeded = tests.filter { $0.result == "Passed" }.count
+            let total = tests.count
+            indexHTML += "<h2 class=\"collapsible\">\(suite) (\(succeeded)/\(total) Passed)</h2>"
             indexHTML += """
             <table>
             <tr><th>Test Name</th><th>Status</th><th>Duration</th></tr>

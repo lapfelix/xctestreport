@@ -580,6 +580,14 @@ struct XCTestReport: ParsableCommand {
             border-radius: 3px;
             font-size: 0.9em;
         }
+        [title] {
+            position: relative;
+            cursor: help;
+        }
+        .emoji-status {
+            text-decoration: none;
+            margin-left: 4px;
+        }
         </style>
         </head>
         <body>
@@ -614,18 +622,33 @@ struct XCTestReport: ParsableCommand {
                 let duration = test.duration ?? "0s"
                 let rowClass = test.result == "Passed" ? "" : " class=\"failed\""
                 
-                var statusExtra = ""
+                var statusEmoji = ""
                 if let previousResults = previousResults,
                    let testId = test.nodeIdentifier,
                    let previousResult = previousResults.results[testId] {
                     if test.result == "Failed" && previousResult.status == "Passed" {
-                        statusExtra = " (New Failure)"
+                        statusEmoji = """
+                         <span class="emoji-status" title="Newly failed test">⭕️</span>
+                        """
                     } else if test.result == "Passed" && previousResult.status == "Failed" {
-                        statusExtra = " (Fixed)"
+                        statusEmoji = """
+                         <span class="emoji-status" title="Fixed test">✨</span>
+                        """
                     }
                 }
                 
-                indexHTML += "<tr\(rowClass)><td><a href=\"\(testPageName)\">\(test.name)</a></td><td class=\"\(statusClass)\">\(test.result)\(statusExtra)</td><td>\(duration)</td></tr>"
+                // Add warning emoji only if first run failed but eventually succeeded
+                if test.result == "Passed",
+                   let testDetails = getTestDetails(for: test.nodeIdentifier ?? ""),
+                   testDetails.testRuns.count > 1,
+                   let firstRun = testDetails.testRuns.first,
+                   firstRun.result != "Passed" {
+                    statusEmoji += """
+                     <span class="emoji-status" title="Failed first attempt, succeeded on run #\(testDetails.testRuns.count)">⚠️</span>
+                    """
+                }
+                
+                indexHTML += "<tr\(rowClass)><td><a href=\"\(testPageName)\">\(test.name)</a></td><td class=\"\(statusClass)\">\(test.result)\(statusEmoji)</td><td>\(duration)</td></tr>"
             }
             indexHTML += "</table>"
         }

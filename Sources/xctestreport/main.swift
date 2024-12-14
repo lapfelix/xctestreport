@@ -39,6 +39,7 @@ struct XCTestReport: ParsableCommand {
             let statistics: [Statistic]
             let devicesAndConfigurations: [DeviceAndConfigurationSummary]
             let testFailures: [TestFailure]
+            // Remove testNodes field as it's not part of the summary
         }
 
         struct InsightSummary: Decodable {
@@ -96,6 +97,7 @@ struct XCTestReport: ParsableCommand {
             let duration: String?
             let details: String?
             let children: [TestNode]?
+            let startTime: Double?
 
             enum CodingKeys: String, CodingKey {
                 case name
@@ -105,6 +107,7 @@ struct XCTestReport: ParsableCommand {
                 case duration
                 case details
                 case children
+                case startTime
             }
         }
 
@@ -146,6 +149,17 @@ struct XCTestReport: ParsableCommand {
         struct TestRunChildDetail: Decodable {
             let name: String
             let nodeType: String
+        }
+
+        struct TestHistory {
+            let date: Date
+            let results: [String: TestResult]  // nodeIdentifier -> result
+        }
+
+        struct TestResult {
+            let name: String
+            let status: String
+            let duration: String?
         }
 
         func shell(_ args: [String], outputFile: String? = nil, captureOutput: Bool = true) -> (String?, Int32) {
@@ -202,16 +216,112 @@ struct XCTestReport: ParsableCommand {
             return try? decoder.decode(TestDetails.self, from: data)
         }
 
+        func findFirstValidStartTime(_ nodes: [TestNode]) -> Double {
+            for node in nodes {
+                if let startTime = node.startTime, startTime > 0 {
+                    return startTime
+                }
+                if let children = node.children {
+                    let childStartTime = findFirstValidStartTime(children)
+                    if childStartTime > 0 {
+                        return childStartTime
+                    }
+                }
+            }
+            return Date().timeIntervalSince1970 // fallback to current time if no valid startTime found
+        }
+
+        func findPreviousResults() -> TestHistory? {
+            let fileManager = FileManager.default
+            let parentDir = (outputDir as NSString).deletingLastPathComponent
+            let currentDirName = (outputDir as NSString).lastPathComponent
+            print("\nLooking for previous results...")
+            print("Current directory: \(currentDirName)")
+            print("Parent directory: \(parentDir)")
+            
+            // Get all directories and check each for tests_full.json
+            if let contents = try? fileManager.contentsOfDirectory(atPath: parentDir) {
+                let previousDirs = contents
+                    .filter { $0 != currentDirName && $0 != ".DS_Store" }
+                    .sorted()
+                    .reversed()
+                
+                print("Found \(previousDirs.count) potential previous directories:")
+                previousDirs.forEach { print("- \($0)") }
+                
+                for dir in previousDirs {
+                    let fullTestsPath = (parentDir as NSString).appendingPathComponent("\(dir)/tests_full.json")
+                    print("\nChecking directory: \(dir)")
+                    print("Looking for: \(fullTestsPath)")
+                    
+                    if FileManager.default.fileExists(atPath: fullTestsPath) {
+                        print("Found tests_full.json")
+                        if let fullData = try? Data(contentsOf: URL(fileURLWithPath: fullTestsPath)) {
+                            print("Loaded \(fullData.count) bytes")
+                            do {
+                                let previousResults = try JSONDecoder().decode(FullTestResults.self, from: fullData)
+                                print("Successfully decoded results with \(previousResults.testNodes.count) test nodes")
+                                
+                                // Convert to our simplified format
+                                var testResults = [String: TestResult]()
+                                func processNodes(_ nodes: [TestNode]) {
+                                    for node in nodes {
+                                        if node.nodeType == "Test Case", let identifier = node.nodeIdentifier {
+                                            testResults[identifier] = TestResult(
+                                                name: node.name,
+                                                status: node.result,
+                                                duration: node.duration
+                                            )
+                                        }
+                                        if let children = node.children {
+                                            processNodes(children)
+                                        }
+                                    }
+                                }
+                                processNodes(previousResults.testNodes)
+                                print("Processed \(testResults.count) individual test results")
+                                
+                                let startTime = findFirstValidStartTime(previousResults.testNodes)
+                                print("Found start time: \(startTime)")
+                                
+                                return TestHistory(
+                                    date: Date(timeIntervalSince1970: startTime),
+                                    results: testResults
+                                )
+                            } catch {
+                                print("Failed to decode results: \(error)")
+                                continue
+                            }
+                        } else {
+                            print("Could not read file data")
+                        }
+                    } else {
+                        print("No tests_full.json found")
+                    }
+                }
+                print("\nNo valid previous results found in any directory")
+            } else {
+                print("Could not read parent directory contents")
+            }
+            return nil
+        }
+
         try? FileManager.default.createDirectory(atPath: outputDir, withIntermediateDirectories: true)
 
         // Get summary
-        let summaryCmd = ["xcrun", "xcresulttool", "get", "test-results", "summary", "--path", xcresultPath, "--compact"]
+        let summaryCmd = ["xcrun", "xcresulttool", "get", "test-results", "summary", "--path", xcresultPath, "--format", "json", "--compact"]
+        print("Running summary command: \(summaryCmd.joined(separator: " "))")
         let (summaryJSON, summaryExit) = shell(summaryCmd)
         guard summaryExit == 0, let summaryData = summaryJSON?.data(using: .utf8) else {
             print("Failed to get test summary.")
             throw RuntimeError(message: "Failed to get test summary.")
         }
+
+        //print("Summary JSON content:")
+        //print(summaryJSON ?? "nil")
+
         let summaryJSONPath = (outputDir as NSString).appendingPathComponent("summary.json")
+        print("Writing summary to: \(summaryJSONPath)")
         try summaryJSON?.write(toFile: summaryJSONPath, atomically: true, encoding: .utf8)
 
         let decoder = JSONDecoder()
@@ -220,6 +330,12 @@ struct XCTestReport: ParsableCommand {
             summary = try decoder.decode(Summary.self, from: summaryData)
         } catch {
             print("Decode summary error: \(error)")
+            if let jsonObject = try? JSONSerialization.jsonObject(with: summaryData, options: []),
+               let prettyData = try? JSONSerialization.data(withJSONObject: jsonObject, options: .prettyPrinted),
+               let prettyString = String(data: prettyData, encoding: .utf8) {
+                print("JSON structure:")
+                print(prettyString)
+            }
             throw RuntimeError(message: "Failed to decode test summary.")
         }
 
@@ -330,6 +446,7 @@ struct XCTestReport: ParsableCommand {
                     <!DOCTYPE html>
                     <html>
                     <head>
+                    <meta charset="UTF-8">
                     <title>Test Detail: \(test.name)</title>
                     <style>
                     body {
@@ -384,10 +501,13 @@ struct XCTestReport: ParsableCommand {
         group.wait()
         print("\n")
 
+        let previousResults = findPreviousResults()
+
         var indexHTML = """
         <!DOCTYPE html>
         <html>
         <head>
+        <meta charset="UTF-8">
         <title>Test Report</title>
         <style>
         body {
@@ -446,12 +566,38 @@ struct XCTestReport: ParsableCommand {
             color: #DC3545;
             font-weight: 600;
         }
+        .new-failure {
+            color: #856404;
+            background-color: #fff3cd;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.9em;
+        }
+        .fixed {
+            color: #155724;
+            background-color: #d4edda;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.9em;
+        }
         </style>
         </head>
         <body>
         <h1>Test Report: \(summary.title)</h1>
         <p>Total: \(summary.totalTestCount), Passed: \(summary.passedTests), Failed: \(summary.failedTests), Skipped: \(summary.skippedTests)</p>
         """
+
+        if let previousResults = previousResults {
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateStyle = .medium
+            dateFormatter.timeStyle = .short
+            dateFormatter.timeZone = TimeZone.current
+            dateFormatter.locale = Locale(identifier: "en_US")
+            let dateString = dateFormatter.string(from: previousResults.date)
+                .replacingOccurrences(of: ":", with: "&#58;")
+                .replacingOccurrences(of: " ", with: "&#32;")
+            indexHTML += "<p>Compared with previous run from: \(dateString)</p>"
+        }
 
         for suite in groupedTests.keys.sorted() {
             let tests = groupedTests[suite]!
@@ -467,7 +613,19 @@ struct XCTestReport: ParsableCommand {
                 let statusClass = test.result == "Passed" ? "passed" : "failed"
                 let duration = test.duration ?? "0s"
                 let rowClass = test.result == "Passed" ? "" : " class=\"failed\""
-                indexHTML += "<tr\(rowClass)><td><a href=\"\(testPageName)\">\(test.name)</a></td><td class=\"\(statusClass)\">\(test.result)</td><td>\(duration)</td></tr>"
+                
+                var statusExtra = ""
+                if let previousResults = previousResults,
+                   let testId = test.nodeIdentifier,
+                   let previousResult = previousResults.results[testId] {
+                    if test.result == "Failed" && previousResult.status == "Passed" {
+                        statusExtra = " (New Failure)"
+                    } else if test.result == "Passed" && previousResult.status == "Failed" {
+                        statusExtra = " (Fixed)"
+                    }
+                }
+                
+                indexHTML += "<tr\(rowClass)><td><a href=\"\(testPageName)\">\(test.name)</a></td><td class=\"\(statusClass)\">\(test.result)\(statusExtra)</td><td>\(duration)</td></tr>"
             }
             indexHTML += "</table>"
         }

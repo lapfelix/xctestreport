@@ -2,6 +2,7 @@
 
 import Foundation
 import ArgumentParser
+import Dispatch
 
 // MARK: - Command-Line Interface
 
@@ -271,6 +272,117 @@ struct XCTestReport: ParsableCommand {
         }
 
         print("Generating HTML report...")
+        
+        let totalTests = allTests.count
+        var processedTests = Array<Int32>(repeating: 0, count: 1)
+        let processedTestsQueue = DispatchQueue(label: "processedTests")
+        let group = DispatchGroup()
+        let concurrentQueue = DispatchQueue(label: "testProcessing", attributes: .concurrent)
+        let maxConcurrent = ProcessInfo.processInfo.processorCount
+        
+        // Split tests into chunks for concurrent processing
+        let testsPerCore = (allTests.count + maxConcurrent - 1) / maxConcurrent
+        let testChunks = stride(from: 0, to: allTests.count, by: testsPerCore).map {
+            Array(allTests[$0..<min($0 + testsPerCore, allTests.count)])
+        }
+        
+        print("Processing \(allTests.count) tests using \(maxConcurrent) cores...")
+        
+        for chunk in testChunks {
+            group.enter()
+            concurrentQueue.async {
+                for test in chunk {
+                    let testPageName = "test_\(test.nodeIdentifier ?? test.name).html".replacingOccurrences(of: "/", with: "_")
+                    let statusClass = test.result == "Passed" ? "passed" : "failed"
+                    let duration = test.duration ?? "0s"
+
+                    var failureInfo = ""
+                    if test.result != "Passed", let details = test.details {
+                        failureInfo = "<p><strong>Details:</strong> \(details)</p>"
+                    }
+
+                    var testDetails: TestDetails?
+                    if let testIdentifier = test.nodeIdentifier {
+                        testDetails = getTestDetails(for: testIdentifier)
+                    }
+
+                    if let testDetails = testDetails {
+                        let testDescription = testDetails.testDescription
+                        let testResult = testDetails.testResult
+                        let testRuns = testDetails.testRuns.map { run in
+                            let runDetails = run.children?.map { child in
+                                let childDetails = child.children?.map { detail in
+                                    return "<li><code>\(detail.name)</code></li>"
+                                }.joined(separator: "") ?? ""
+                                return "<li>\(child.name) (\(child.nodeType)): \(child.result)<ul>\(childDetails)</ul></li>"
+                            }.joined(separator: "") ?? ""
+                            return "<li>\(run.name) (\(run.nodeType)): \(run.result)<ul>\(runDetails)</ul></li>"
+                        }.joined(separator: "")
+
+                        failureInfo += """
+                        <p><strong>Test Description:</strong> \(testDescription)<br>
+                        <strong>Test Result:</strong> \(testResult)</p>
+                        <ul>\(testRuns)</ul>
+                        """
+                    }
+
+                    let testDetailHTML = """
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                    <title>Test Detail: \(test.name)</title>
+                    <style>
+                    body {
+                        font-family: -apple-system, BlinkMacSystemFont, "San Francisco", "Helvetica Neue", Helvetica, Arial, sans-serif;
+                        color: #333;
+                        margin: 20px;
+                        background: #F9F9F9;
+                    }
+                    h1, h2, h3 {
+                        font-weight: 600;
+                        color: #000;
+                    }
+                    a {
+                        color: #0077EE;
+                        text-decoration: none;
+                    }
+                    a:hover {
+                        text-decoration: underline;
+                    }
+                    .passed {
+                        color: #28A745;
+                        font-weight: 600;
+                    }
+                    .failed {
+                        color: #DC3545;
+                        font-weight: 600;
+                    }
+                    </style>
+                    </head>
+                    <body>
+                    <h1>\(test.name)</h1>
+                    <p>Status: <span class="\(statusClass)">\(test.result)</span><br>Duration: \(duration)</p>
+                    \(failureInfo)
+                    <p><a href="index.html">Back to index</a></p>
+                    </body>
+                    </html>
+                    """
+                    let testPagePath = (outputDir as NSString).appendingPathComponent(testPageName)
+                    try? testDetailHTML.write(toFile: testPagePath, atomically: true, encoding: .utf8)
+
+                    processedTestsQueue.sync {
+                        processedTests[0] += 1
+                        let progress = Double(processedTests[0]) / Double(totalTests) * 100
+                        print(String(format: "\rProgress: %.2f%% (%d/%d)", progress, processedTests[0], totalTests), terminator: "")
+                        fflush(stdout)
+                    }
+                }
+                group.leave()
+            }
+        }
+        
+        group.wait()
+        print("\n")
 
         var indexHTML = """
         <!DOCTYPE html>
@@ -361,96 +473,6 @@ struct XCTestReport: ParsableCommand {
         }
 
         indexHTML += "</body></html>"
-
-        let totalTests = allTests.count
-        var processedTests = 0
-
-        for test in allTests {
-            let testPageName = "test_\(test.nodeIdentifier ?? test.name).html".replacingOccurrences(of: "/", with: "_")
-            let statusClass = test.result == "Passed" ? "passed" : "failed"
-            let duration = test.duration ?? "0s"
-
-            var failureInfo = ""
-            if test.result != "Passed", let details = test.details {
-                failureInfo = "<p><strong>Details:</strong> \(details)</p>"
-            }
-
-            var testDetails: TestDetails?
-            if let testIdentifier = test.nodeIdentifier {
-                testDetails = getTestDetails(for: testIdentifier)
-            }
-
-            if let testDetails = testDetails {
-                let testDescription = testDetails.testDescription
-                let testResult = testDetails.testResult
-                let testRuns = testDetails.testRuns.map { run in
-                    let runDetails = run.children?.map { child in
-                        let childDetails = child.children?.map { detail in
-                            return "<li><code>\(detail.name)</code></li>"
-                        }.joined(separator: "") ?? ""
-                        return "<li>\(child.name) (\(child.nodeType)): \(child.result)<ul>\(childDetails)</ul></li>"
-                    }.joined(separator: "") ?? ""
-                    return "<li>\(run.name) (\(run.nodeType)): \(run.result)<ul>\(runDetails)</ul></li>"
-                }.joined(separator: "")
-
-                failureInfo += """
-                <p><strong>Test Description:</strong> \(testDescription)<br>
-                <strong>Test Result:</strong> \(testResult)</p>
-                <ul>\(testRuns)</ul>
-                """
-            }
-
-            let testDetailHTML = """
-            <!DOCTYPE html>
-            <html>
-            <head>
-            <title>Test Detail: \(test.name)</title>
-            <style>
-            body {
-                font-family: -apple-system, BlinkMacSystemFont, "San Francisco", "Helvetica Neue", Helvetica, Arial, sans-serif;
-                color: #333;
-                margin: 20px;
-                background: #F9F9F9;
-            }
-            h1, h2, h3 {
-                font-weight: 600;
-                color: #000;
-            }
-            a {
-                color: #0077EE;
-                text-decoration: none;
-            }
-            a:hover {
-                text-decoration: underline;
-            }
-            .passed {
-                color: #28A745;
-                font-weight: 600;
-            }
-            .failed {
-                color: #DC3545;
-                font-weight: 600;
-            }
-            </style>
-            </head>
-            <body>
-            <h1>\(test.name)</h1>
-            <p>Status: <span class="\(statusClass)">\(test.result)</span><br>Duration: \(duration)</p>
-            \(failureInfo)
-            <p><a href="index.html">Back to index</a></p>
-            </body>
-            </html>
-            """
-            let testPagePath = (outputDir as NSString).appendingPathComponent(testPageName)
-            try testDetailHTML.write(toFile: testPagePath, atomically: true, encoding: .utf8)
-
-            processedTests += 1
-            let progress = Double(processedTests) / Double(totalTests) * 100
-            print(String(format: "\rProgress: %.2f%%", progress), terminator: "")
-            fflush(stdout)
-        }
-
-        print("\n")
 
         let indexPath = (outputDir as NSString).appendingPathComponent("index.html")
         try indexHTML.write(toFile: indexPath, atomically: true, encoding: .utf8)

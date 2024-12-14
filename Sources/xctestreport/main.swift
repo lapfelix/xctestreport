@@ -191,6 +191,12 @@ struct XCTestReport: ParsableCommand {
             guard exitCode == 0, let data = testDetailsJSON?.data(using: .utf8) else {
                 return nil
             }
+            // Save test details JSON to test_details folder
+            let testDetailsDir = (outputDir as NSString).appendingPathComponent("test_details")
+            try? FileManager.default.createDirectory(atPath: testDetailsDir, withIntermediateDirectories: true)
+            let safeTestIdentifier = testIdentifier.replacingOccurrences(of: "/", with: "_")
+            let testDetailsPath = (testDetailsDir as NSString).appendingPathComponent("\(safeTestIdentifier).json")
+            try? testDetailsJSON?.write(toFile: testDetailsPath, atomically: true, encoding: .utf8)
             let decoder = JSONDecoder()
             return try? decoder.decode(TestDetails.self, from: data)
         }
@@ -204,6 +210,8 @@ struct XCTestReport: ParsableCommand {
             print("Failed to get test summary.")
             throw RuntimeError(message: "Failed to get test summary.")
         }
+        let summaryJSONPath = (outputDir as NSString).appendingPathComponent("summary.json")
+        try summaryJSON?.write(toFile: summaryJSONPath, atomically: true, encoding: .utf8)
 
         let decoder = JSONDecoder()
         let summary: Summary
@@ -354,6 +362,9 @@ struct XCTestReport: ParsableCommand {
 
         indexHTML += "</body></html>"
 
+        let totalTests = allTests.count
+        var processedTests = 0
+
         for test in allTests {
             let testPageName = "test_\(test.nodeIdentifier ?? test.name).html".replacingOccurrences(of: "/", with: "_")
             let statusClass = test.result == "Passed" ? "passed" : "failed"
@@ -432,7 +443,14 @@ struct XCTestReport: ParsableCommand {
             """
             let testPagePath = (outputDir as NSString).appendingPathComponent(testPageName)
             try testDetailHTML.write(toFile: testPagePath, atomically: true, encoding: .utf8)
+
+            processedTests += 1
+            let progress = Double(processedTests) / Double(totalTests) * 100
+            print(String(format: "\rProgress: %.2f%%", progress), terminator: "")
+            fflush(stdout)
         }
+
+        print("\n")
 
         let indexPath = (outputDir as NSString).appendingPathComponent("index.html")
         try indexHTML.write(toFile: indexPath, atomically: true, encoding: .utf8)

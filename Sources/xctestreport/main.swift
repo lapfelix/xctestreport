@@ -787,14 +787,77 @@ struct XCTestReport: ParsableCommand {
         .suite {
             margin-bottom: 1px; /* Prevent margin collapse during animation */
         }
+        .summary-stats {
+            font-size: 1.2em;
+            margin: 20px 0;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .stat-number {
+            font-size: 1.3em;
+            font-weight: 600;
+            font-feature-settings: "tnum";
+            font-variant-numeric: tabular-nums;
+        }
+        
+        .passed-number {
+            color: #28A745;
+        }
+        
+        .failed-number {
+            color: #DC3545;
+        }
+        
+        .skipped-number {
+            color: #6c757d;
+        }
+        
         button#toggle-all {
-            margin-bottom: 20px;
+            padding: 8px 16px;
+            font-size: 14px;
+            font-weight: 500;
+            color: #24292e;
+            background-color: #fafbfc;
+            border: 1px solid rgba(27,31,35,0.15);
+            border-radius: 6px;
+            box-shadow: 0 1px 0 rgba(27,31,35,0.04);
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.2s ease;
+            width: 100%;
+        }
+        
+        @media (min-width: 768px) {
+            .summary-stats {
+                flex-direction: row;
+                align-items: center;
+                justify-content: space-between;
+            }
+            
+            button#toggle-all {
+                width: auto;
+                white-space: nowrap;
+            }
         }
         </style>
         </head>
         <body>
         <h1>Test Report: \(summary.title)</h1>
-        <p>Total: \(summary.totalTestCount), Passed: \(summary.passedTests), Failed: \(summary.failedTests), Skipped: \(summary.skippedTests)</p>
+        <div class="summary-stats">
+            <div>
+                Total: <span class="stat-number">\(summary.totalTestCount)</span>, 
+                Passed: <span class="stat-number passed-number">\(summary.passedTests)</span>, 
+                Failed: <span class="stat-number failed-number">\(summary.failedTests)</span>, 
+                Skipped: <span class="stat-number skipped-number">\(summary.skippedTests)</span>
+            </div>
+            <button id="toggle-all">Collapse All</button>
+        </div>
         """
 
         if let previousResults = previousResults {
@@ -806,10 +869,8 @@ struct XCTestReport: ParsableCommand {
             let dateString = dateFormatter.string(from: previousResults.date)
                 .replacingOccurrences(of: ":", with: "&#58;")
                 .replacingOccurrences(of: " ", with: "&#32;")
-            indexHTML += "<p>Compared with previous run from: \(dateString)</p>"
+            indexHTML += "<p class=\"comparison-info\">Compared with previous run from: \(dateString)</p>"
         }
-
-        indexHTML += "\n<button id=\"toggle-all\">Collapse All</button>"
 
         // Add suite sections to HTML in sorted order
         for suite in groupedTests.keys.sorted() {

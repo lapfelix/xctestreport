@@ -497,10 +497,38 @@ struct XCTestReport: ParsableCommand {
             let total = tests.count
             let percentagePassed = Double(succeeded) / Double(total) * 100.0
             
+            // Calculate total duration for the suite
+            let totalDuration = tests.compactMap { test -> TimeInterval? in
+                guard let durationStr = test.duration?.lowercased() else { return nil }
+                // Remove 's' suffix and handle potential subseconds with '.'
+                let numberStr = durationStr.replacingOccurrences(of: "s", with: "")
+                return Double(numberStr)
+            }.reduce(0, +)
+            
+            let durationText: String
+            if totalDuration >= 60 {
+                let minutes = floor(totalDuration / 60)
+                let seconds = totalDuration.truncatingRemainder(dividingBy: 60)
+                if seconds > 0 {
+                    durationText = String(format: "%.0f min %.0f sec", minutes, seconds)
+                } else {
+                    durationText = String(format: "%.0f min", minutes)
+                }
+            } else {
+                durationText = String(format: "%.1f sec", totalDuration)
+            }
+            
             suiteHTMLQueue.sync {
                 suiteSections[suite] = []
                 suiteSections[suite]?.append("""
-                    <div class="suite"><h2 class="collapsible">\(suite) (\(succeeded)/\(total) Passed ~ \(String(format: "%.2f", percentagePassed))%)</h2><div class="content">
+                    <div class="suite"><h2 class="collapsible">
+                        <span class="suite-name">\(suite)</span>
+                        <span class="suite-stats">
+                            <span class="stats-number">\(succeeded)/\(total)</span> Passed
+                            <span class="stats-percent">(\(String(format: "%.1f", percentagePassed))%)</span>
+                            <span class="suite-duration">\(durationText)</span>
+                        </span>
+                    </h2><div class="content">
                     <table style="margin-top:0px">
                     <tr><th>Test Name</th><th>Status</th><th>Duration</th></tr>
                     """)
@@ -587,11 +615,72 @@ struct XCTestReport: ParsableCommand {
             color: #000;
         }
         h2 {
-            padding: 8px;
+            padding: 8px 12px;
             border-radius: 6px 6px 0 0;
             background: lightgrey;
             margin-bottom: 0px;
             transition: border-radius 0.2s;
+        }
+        
+        .collapsible {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding-right: 25px; /* Space for arrow */
+            position: relative;
+        }
+        
+        .suite-name {
+            font-size: 1.1em;
+            font-weight: 600;
+            margin-right: 8px;
+        }
+        
+        .suite-stats {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 4px 8px;
+            font-size: 0.9em;
+            font-weight: normal;
+            color: #666;
+            padding-right: 15px;
+        }
+        
+        @media (min-width: 768px) {
+            .collapsible {
+                flex-direction: row;
+                align-items: center;
+                justify-content: space-between;
+            }
+            
+            .suite-name {
+                margin-right: 0;
+            }
+        }
+        
+        .stats-number {
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .stats-percent {
+            color: #666;
+            font-weight: normal;
+        }
+        
+        .suite-duration {
+            color: #666;
+        }
+
+        .collapsible::after {
+            content: "\\25BC";
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 0.8em;
+            transition: transform 0.2s;
         }
         .collapsed + .content {
             display: none;

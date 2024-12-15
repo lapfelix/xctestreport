@@ -39,7 +39,6 @@ struct XCTestReport: ParsableCommand {
             let statistics: [Statistic]
             let devicesAndConfigurations: [DeviceAndConfigurationSummary]
             let testFailures: [TestFailure]
-            // Remove testNodes field as it's not part of the summary
         }
 
         struct InsightSummary: Decodable {
@@ -98,17 +97,6 @@ struct XCTestReport: ParsableCommand {
             let details: String?
             let children: [TestNode]?
             let startTime: Double?
-
-            enum CodingKeys: String, CodingKey {
-                case name
-                case nodeType
-                case nodeIdentifier
-                case result
-                case duration
-                case details
-                case children
-                case startTime
-            }
         }
 
         struct TestPlanConfiguration: Decodable {
@@ -228,7 +216,7 @@ struct XCTestReport: ParsableCommand {
                     }
                 }
             }
-            return Date().timeIntervalSince1970 // fallback to current time if no valid startTime found
+            return Date().timeIntervalSince1970 // fallback
         }
 
         func findPreviousResults() -> TestHistory? {
@@ -238,22 +226,21 @@ struct XCTestReport: ParsableCommand {
             print("\nLooking for previous results...")
             print("Current directory: \(currentDirName)")
             print("Parent directory: \(parentDir)")
-            
-            // Get all directories and check each for tests_full.json
+
             if let contents = try? fileManager.contentsOfDirectory(atPath: parentDir) {
                 let previousDirs = contents
                     .filter { $0 != currentDirName && $0 != ".DS_Store" }
                     .sorted()
                     .reversed()
-                
+
                 print("Found \(previousDirs.count) potential previous directories:")
                 previousDirs.forEach { print("- \($0)") }
-                
+
                 for dir in previousDirs {
                     let fullTestsPath = (parentDir as NSString).appendingPathComponent("\(dir)/tests_full.json")
                     print("\nChecking directory: \(dir)")
                     print("Looking for: \(fullTestsPath)")
-                    
+
                     if FileManager.default.fileExists(atPath: fullTestsPath) {
                         print("Found tests_full.json")
                         if let fullData = try? Data(contentsOf: URL(fileURLWithPath: fullTestsPath)) {
@@ -261,8 +248,8 @@ struct XCTestReport: ParsableCommand {
                             do {
                                 let previousResults = try JSONDecoder().decode(FullTestResults.self, from: fullData)
                                 print("Successfully decoded results with \(previousResults.testNodes.count) test nodes")
-                                
-                                // Convert to our simplified format
+
+                                // Convert to simplified format
                                 var testResults = [String: TestResult]()
                                 func processNodes(_ nodes: [TestNode]) {
                                     for node in nodes {
@@ -280,10 +267,10 @@ struct XCTestReport: ParsableCommand {
                                 }
                                 processNodes(previousResults.testNodes)
                                 print("Processed \(testResults.count) individual test results")
-                                
+
                                 let startTime = findFirstValidStartTime(previousResults.testNodes)
                                 print("Found start time: \(startTime)")
-                                
+
                                 return TestHistory(
                                     date: Date(timeIntervalSince1970: startTime),
                                     results: testResults
@@ -316,9 +303,6 @@ struct XCTestReport: ParsableCommand {
             print("Failed to get test summary.")
             throw RuntimeError(message: "Failed to get test summary.")
         }
-
-        //print("Summary JSON content:")
-        //print(summaryJSON ?? "nil")
 
         let summaryJSONPath = (outputDir as NSString).appendingPathComponent("summary.json")
         print("Writing summary to: \(summaryJSONPath)")
@@ -366,7 +350,6 @@ struct XCTestReport: ParsableCommand {
         }
 
         var allTests = [TestNode]()
-
         func collectTestNodes(_ nodes: [TestNode]) {
             for node in nodes {
                 if node.nodeType == "Test Case" {
@@ -387,25 +370,23 @@ struct XCTestReport: ParsableCommand {
             return "Unknown Suite"
         }
 
-        print("Generating HTML report...")
-        
+        // Preprocessing step (parallelized)
         let totalTests = allTests.count
-        var processedTests = Array<Int32>(repeating: 0, count: 1)
+        var processedTests = 0
         let processedTestsQueue = DispatchQueue(label: "processedTests")
-        let group = DispatchGroup()
-        let concurrentQueue = DispatchQueue(label: "testProcessing", attributes: .concurrent)
+        let preprocessingGroup = DispatchGroup()
+        let concurrentQueue = DispatchQueue(label: "testPreprocessing", attributes: .concurrent)
         let maxConcurrent = ProcessInfo.processInfo.processorCount
-        
-        // Split tests into chunks for concurrent processing
+
         let testsPerCore = (allTests.count + maxConcurrent - 1) / maxConcurrent
-        let testChunks = stride(from: 0, to: allTests.count, by: testsPerCore).map {
+        let testChunks = stride(from: 0, through: allTests.count - 1, by: testsPerCore).map {
             Array(allTests[$0..<min($0 + testsPerCore, allTests.count)])
         }
-        
-        print("Processing \(allTests.count) tests using \(maxConcurrent) cores...")
-        
+
+        print("Preprocessing \(allTests.count) tests using \(maxConcurrent) cores...")
+
         for chunk in testChunks {
-            group.enter()
+            preprocessingGroup.enter()
             concurrentQueue.async {
                 for test in chunk {
                     let testPageName = "test_\(test.nodeIdentifier ?? test.name).html".replacingOccurrences(of: "/", with: "_")
@@ -488,21 +469,106 @@ struct XCTestReport: ParsableCommand {
                     try? testDetailHTML.write(toFile: testPagePath, atomically: true, encoding: .utf8)
 
                     processedTestsQueue.sync {
-                        processedTests[0] += 1
-                        let progress = Double(processedTests[0]) / Double(totalTests) * 100
-                        print(String(format: "\rProgress: %.2f%% (%d/%d)", progress, processedTests[0], totalTests), terminator: "")
+                        processedTests += 1
+                        let progress = Double(processedTests) / Double(totalTests) * 100
+                        print(String(format: "\rPreprocessing Progress: %.2f%% (%d/%d)", progress, processedTests, totalTests), terminator: "")
                         fflush(stdout)
                     }
                 }
-                group.leave()
+                preprocessingGroup.leave()
             }
         }
-        
-        group.wait()
+
+        preprocessingGroup.wait()
         print("\n")
 
         let previousResults = findPreviousResults()
 
+        // Parallelize test HTML generation for suites
+        print("Processing \(totalTests) tests for suite generation using \(maxConcurrent) cores...")
+        
+        let suiteHTMLQueue = DispatchQueue(label: "suiteHTML")
+        var suiteSections = [String: [String]](minimumCapacity: groupedTests.count)
+        var processedSuiteTests = 0
+        
+        // Initialize suite sections with headers
+        for (suite, tests) in groupedTests {
+            let succeeded = tests.filter { $0.result == "Passed" }.count
+            let total = tests.count
+            let percentagePassed = Double(succeeded) / Double(total) * 100.0
+            
+            suiteHTMLQueue.sync {
+                suiteSections[suite] = []
+                suiteSections[suite]?.append("""
+                    <div class="suite"><h2 class="collapsible">\(suite) (\(succeeded)/\(total) Passed ~ \(String(format: "%.2f", percentagePassed))%)</h2><div class="content">
+                    <table style="margin-top:0px">
+                    <tr><th>Test Name</th><th>Status</th><th>Duration</th></tr>
+                    """)
+            }
+        }
+        
+        let suiteGroup = DispatchGroup()
+        for chunk in testChunks {
+            suiteGroup.enter()
+            concurrentQueue.async {
+                for test in chunk {
+                    let suite = test.nodeIdentifier?.split(separator: "/").first.map(String.init) ?? "Unknown Suite"
+                    let testPageName = "test_\(test.nodeIdentifier ?? test.name).html".replacingOccurrences(of: "/", with: "_")
+                    let statusClass = test.result == "Passed" ? "passed" : "failed"
+                    let duration = test.duration ?? "0s"
+                    let rowClass = test.result == "Passed" ? "" : " class=\"failed\""
+
+                    var statusEmoji = ""
+                    if let previousResults = previousResults,
+                       let testId = test.nodeIdentifier,
+                       let previousResult = previousResults.results[testId] {
+                        if test.result == "Failed" && previousResult.status == "Passed" {
+                            statusEmoji = """
+                             <span class="emoji-status" title="Newly failed test">⭕️</span>
+                            """
+                        } else if test.result == "Passed" && previousResult.status == "Failed" {
+                            statusEmoji = """
+                             <span class="emoji-status" title="Fixed test">✨</span>
+                            """
+                        }
+                    }
+
+                    if test.result == "Passed",
+                       let testDetails = getTestDetails(for: test.nodeIdentifier ?? ""),
+                       testDetails.testRuns.count > 1,
+                       let firstRun = testDetails.testRuns.first,
+                       firstRun.result != "Passed" {
+                        statusEmoji += """
+                         <span class="emoji-status" title="Failed first attempt, succeeded on run #\(testDetails.testRuns.count)">⚠️</span>
+                        """
+                    }
+
+                    let testRow = "<tr\(rowClass)><td><a href=\"\(testPageName)\">\(test.name)</a></td><td class=\"\(statusClass)\">\(test.result)\(statusEmoji)</td><td>\(duration)</td></tr>"
+                    
+                    suiteHTMLQueue.sync {
+                        suiteSections[suite]?.append(testRow)
+                    }
+
+                    processedTestsQueue.sync {
+                        processedSuiteTests += 1
+                        let progress = Double(processedSuiteTests) / Double(totalTests) * 100
+                        print(String(format: "\rSuite Generation Progress: %.2f%% (%d/%d)", progress, processedSuiteTests, totalTests), terminator: "")
+                        fflush(stdout)
+                    }
+                }
+                suiteGroup.leave()
+            }
+        }
+
+        suiteGroup.wait()
+        print("\n")
+
+        // Close all suite sections
+        for suite in groupedTests.keys {
+            suiteSections[suite]?.append("</table></div></div>")
+        }
+
+        // Initialize the HTML template first
         var indexHTML = """
         <!DOCTYPE html>
         <html>
@@ -520,10 +586,22 @@ struct XCTestReport: ParsableCommand {
             font-weight: 600;
             color: #000;
         }
+        h2 {
+            padding: 8px;
+            border-radius: 6px 6px 0 0;
+            background: lightgrey;
+            margin-bottom: 0px;
+            transition: border-radius 0.2s;
+        }
+        .collapsed + .content {
+            display: none;
+        }
+        .collapsible.collapsed {
+            border-radius: 6px;
+        }
         table {
             border-collapse: collapse;
             width: 100%;
-            margin-top: 20px;
             background: #FFF;
             border: 1px solid #DDD;
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
@@ -588,6 +666,41 @@ struct XCTestReport: ParsableCommand {
             text-decoration: none;
             margin-left: 4px;
         }
+        .collapsible {
+            cursor: pointer;
+            user-select: none;
+            position: relative;
+            padding-right: 20px;
+        }
+        .collapsible::after {
+            content: "\\25BC"; /* Down arrow */
+            position: absolute;
+            right: 10px;
+            font-size: 0.8em;
+            transition: transform 0.2s;
+        }
+        .collapsed::after {
+            content: "\\25B6"; /* Right arrow */
+        }
+        .content {
+            max-height: 2000px; /* Should be larger than any potential content */
+            opacity: 1;
+            transition: max-height 0.3s ease-in-out, opacity 0.2s ease-in-out;
+            overflow: hidden;
+        }
+        
+        .collapsed + .content {
+            max-height: 0;
+            opacity: 0;
+            transition: max-height 0.3s ease-in-out, opacity 0.2s ease-in-out;
+        }
+
+        .suite {
+            margin-bottom: 1px; /* Prevent margin collapse during animation */
+        }
+        button#toggle-all {
+            margin-bottom: 20px;
+        }
         </style>
         </head>
         <body>
@@ -607,53 +720,52 @@ struct XCTestReport: ParsableCommand {
             indexHTML += "<p>Compared with previous run from: \(dateString)</p>"
         }
 
+        indexHTML += "\n<button id=\"toggle-all\">Collapse All</button>"
+
+        // Add suite sections to HTML in sorted order
         for suite in groupedTests.keys.sorted() {
-            let tests = groupedTests[suite]!
-            let succeeded = tests.filter { $0.result == "Passed" }.count
-            let total = tests.count
-            indexHTML += "<h2 class=\"collapsible\">\(suite) (\(succeeded)/\(total) Passed)</h2>"
-            indexHTML += """
-            <table>
-            <tr><th>Test Name</th><th>Status</th><th>Duration</th></tr>
-            """
-            for test in tests {
-                let testPageName = "test_\(test.nodeIdentifier ?? test.name).html".replacingOccurrences(of: "/", with: "_")
-                let statusClass = test.result == "Passed" ? "passed" : "failed"
-                let duration = test.duration ?? "0s"
-                let rowClass = test.result == "Passed" ? "" : " class=\"failed\""
-                
-                var statusEmoji = ""
-                if let previousResults = previousResults,
-                   let testId = test.nodeIdentifier,
-                   let previousResult = previousResults.results[testId] {
-                    if test.result == "Failed" && previousResult.status == "Passed" {
-                        statusEmoji = """
-                         <span class="emoji-status" title="Newly failed test">⭕️</span>
-                        """
-                    } else if test.result == "Passed" && previousResult.status == "Failed" {
-                        statusEmoji = """
-                         <span class="emoji-status" title="Fixed test">✨</span>
-                        """
-                    }
-                }
-                
-                // Add warning emoji only if first run failed but eventually succeeded
-                if test.result == "Passed",
-                   let testDetails = getTestDetails(for: test.nodeIdentifier ?? ""),
-                   testDetails.testRuns.count > 1,
-                   let firstRun = testDetails.testRuns.first,
-                   firstRun.result != "Passed" {
-                    statusEmoji += """
-                     <span class="emoji-status" title="Failed first attempt, succeeded on run #\(testDetails.testRuns.count)">⚠️</span>
-                    """
-                }
-                
-                indexHTML += "<tr\(rowClass)><td><a href=\"\(testPageName)\">\(test.name)</a></td><td class=\"\(statusClass)\">\(test.result)\(statusEmoji)</td><td>\(duration)</td></tr>"
+            if let section = suiteSections[suite] {
+                indexHTML += section.joined()
             }
-            indexHTML += "</table>"
         }
 
-        indexHTML += "</body></html>"
+        indexHTML += """
+        <script>
+        var coll = document.getElementsByClassName("collapsible");
+        var i;
+
+        // Initialize sections as expanded
+        for (i = 0; i < coll.length; i++) {
+          var content = coll[i].nextElementSibling;
+          content.style.display = "block";
+          // Don't add collapsed class initially since we're expanded
+        }
+
+        // Add click handlers
+        for (i = 0; i < coll.length; i++) {
+          coll[i].addEventListener("click", function() {
+            this.classList.toggle("collapsed");
+            // Remove display manipulation - CSS transitions will handle it
+          });
+        }
+
+        var toggleAllBtn = document.getElementById("toggle-all");
+        toggleAllBtn.textContent = "Collapse All";
+
+        toggleAllBtn.addEventListener("click", function() {
+          var expanded = toggleAllBtn.textContent === "Collapse All";
+          for (i = 0; i < coll.length; i++) {
+            if (expanded) {
+                coll[i].classList.add("collapsed");
+            } else {
+                coll[i].classList.remove("collapsed");
+            }
+          }
+          toggleAllBtn.textContent = expanded ? "Expand All" : "Collapse All";
+        });
+        </script>
+        </body></html>
+        """
 
         let indexPath = (outputDir as NSString).appendingPathComponent("index.html")
         try indexHTML.write(toFile: indexPath, atomically: true, encoding: .utf8)

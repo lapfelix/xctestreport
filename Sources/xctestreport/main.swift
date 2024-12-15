@@ -499,14 +499,23 @@ struct XCTestReport: ParsableCommand {
             
             // Calculate total duration for the suite
             let totalDuration = tests.compactMap { test -> TimeInterval? in
-                guard let durationStr = test.duration?.lowercased() else { return nil }
-                // Remove 's' suffix and handle potential subseconds with '.'
-                let numberStr = durationStr.replacingOccurrences(of: "s", with: "")
-                return Double(numberStr)
+                guard let durationStr = test.duration else { return nil }
+                return parseDuration(durationStr)
             }.reduce(0, +)
             
             let durationText: String
-            if totalDuration >= 60 {
+            if totalDuration >= 3600 {
+                let hours = floor(totalDuration / 3600)
+                let minutes = floor((totalDuration.truncatingRemainder(dividingBy: 3600)) / 60)
+                let seconds = totalDuration.truncatingRemainder(dividingBy: 60)
+                if seconds > 0 {
+                    durationText = String(format: "%.0f hr %.0f min %.0f sec", hours, minutes, seconds)
+                } else if minutes > 0 {
+                    durationText = String(format: "%.0f hr %.0f min", hours, minutes)
+                } else {
+                    durationText = String(format: "%.0f hr", hours)
+                }
+            } else if totalDuration >= 60 {
                 let minutes = floor(totalDuration / 60)
                 let seconds = totalDuration.truncatingRemainder(dividingBy: 60)
                 if seconds > 0 {
@@ -793,7 +802,7 @@ struct XCTestReport: ParsableCommand {
             padding: 15px;
             background: white;
             border-radius: 8px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            box-shadow: 0 1px 3px rgba(30, 26, 26, 0.1);
             display: flex;
             flex-direction: column;
             gap: 20px;
@@ -922,6 +931,28 @@ struct XCTestReport: ParsableCommand {
 
         print("HTML report generated at \(indexPath)")
     }
+}
+
+func parseDuration(_ durationStr: String) -> TimeInterval? {
+    let components = durationStr.split(separator: " ")
+    var totalDuration: TimeInterval = 0
+
+    for component in components {
+        if component.hasSuffix("h") {
+            if let hours = Double(component.dropLast()) {
+                totalDuration += hours * 3600
+            }
+        } else if component.hasSuffix("min") {
+            if let minutes = Double(component.dropLast()) {
+                totalDuration += minutes * 60
+            }
+        } else if component.hasSuffix("s") {
+            if let seconds = Double(component.dropLast()) {
+                totalDuration += seconds
+            }
+        }
+    }
+    return totalDuration
 }
 
 XCTestReport.main()

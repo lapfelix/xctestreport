@@ -943,7 +943,7 @@ func parseDuration(_ durationStr: String) -> TimeInterval? {
                 totalDuration += hours * 3600
             }
         } else if component.hasSuffix("min") {
-            if let minutes = Double(component.dropLast()) {
+            if let minutes = Double(component.dropLast(3)) {
                 totalDuration += minutes * 60
             }
         } else if component.hasSuffix("s") {

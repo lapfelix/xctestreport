@@ -116,6 +116,7 @@ struct XCTestReport: ParsableCommand {
             let testPlanConfigurations: [TestPlanConfiguration]
             let testResult: String
             let testRuns: [TestRunDetail]
+            let previousRuns: [TestRunDetail] // Paaa5
         }
 
         struct TestRunDetail: Decodable {
@@ -293,6 +294,31 @@ struct XCTestReport: ParsableCommand {
             return nil
         }
 
+        func getPreviousRuns(for testIdentifier: String) -> [TestRunDetail] {
+            var previousRuns = [TestRunDetail]()
+            let fileManager = FileManager.default
+            let parentDir = (outputDir as NSString).deletingLastPathComponent
+            let currentDirName = (outputDir as NSString).lastPathComponent
+
+            if let contents = try? fileManager.contentsOfDirectory(atPath: parentDir) {
+                let previousDirs = contents
+                    .filter { $0 != currentDirName && $0 != ".DS_Store" }
+                    .sorted()
+                    .reversed()
+
+                for dir in previousDirs.prefix(10) {
+                    let testDetailsPath = (parentDir as NSString).appendingPathComponent("\(dir)/test_details/\(testIdentifier.replacingOccurrences(of: "/", with: "_")).json")
+                    if FileManager.default.fileExists(atPath: testDetailsPath) {
+                        if let data = try? Data(contentsOf: URL(fileURLWithPath: testDetailsPath)),
+                           let testDetails = try? JSONDecoder().decode(TestDetails.self, from: data) {
+                            previousRuns.append(contentsOf: testDetails.testRuns)
+                        }
+                    }
+                }
+            }
+            return previousRuns
+        }
+
         try? FileManager.default.createDirectory(atPath: outputDir, withIntermediateDirectories: true)
 
         // Get summary
@@ -421,6 +447,21 @@ struct XCTestReport: ParsableCommand {
                         <strong>Test Result:</strong> \(testResult)</p>
                         <ul>\(testRuns)</ul>
                         """
+
+                        // Add previous runs information
+                        let previousRuns = getPreviousRuns(for: testIdentifier)
+                        if !previousRuns.isEmpty {
+                            let previousRunsHTML = previousRuns.map { run in
+                                return "<tr><td>\(run.name)</td><td>\(run.result)</td><td>\(run.duration)</td></tr>"
+                            }.joined(separator: "")
+                            failureInfo += """
+                            <h3>Previous Runs (Last 10)</h3>
+                            <table>
+                            <tr><th>Run</th><th>Status</th><th>Duration</th></tr>
+                            \(previousRunsHTML)
+                            </table>
+                            """
+                        }
                     }
 
                     let testDetailHTML = """
@@ -454,6 +495,33 @@ struct XCTestReport: ParsableCommand {
                     .failed {
                         color: #DC3545;
                         font-weight: 600;
+                    }
+                    table {
+                        border-collapse: collapse;
+                        width: 100%;
+                        background: #FFF;
+                        border: 1px solid #DDD;
+                        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+                        table-layout: fixed;
+                    }
+                    th, td {
+                        text-align: left;
+                        padding: 12px;
+                        border-bottom: 1px solid #EEE;
+                        word-wrap: break-word;
+                    }
+                    th {
+                        background: #F2F2F2;
+                        font-weight: 600;
+                    }
+                    th:nth-child(1), td:nth-child(1) {
+                        width: 60%;
+                    }
+                    th:nth-child(2), td:nth-child(2) {
+                        width: 20%;
+                    }
+                    th:nth-child(3), td:nth-child(3) {
+                        width: 20%;
                     }
                     </style>
                     </head>

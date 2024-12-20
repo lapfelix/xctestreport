@@ -23,3 +23,23 @@ OPTIONS:
 
 - Support for attachments (the last screenshot of a failed test would be nice)
 - Support for multiple test plans
+
+## Installation
+
+To install `xctestreport`, follow these steps:
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/xctestreport.git
+   cd xctestreport
+   ```
+
+2. Build the project using Swift Package Manager:
+   ```bash
+   swift build -c release
+   ```
+
+3. Copy the executable to a directory in your PATH:
+   ```bash
+   cp .build/release/xctestreport /usr/local/bin/xctestreport
+   ```

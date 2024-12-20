@@ -23,6 +23,15 @@ struct XCTestReport: ParsableCommand {
     }
 
     func run() throws {
+        do {
+            try generateHTMLReport()
+        } catch {
+            print("Error: \(error)")
+            throw error
+        }
+    }
+
+    func generateHTMLReport() throws {
         // MARK: - Structures
         struct Summary: Decodable {
             let title: String

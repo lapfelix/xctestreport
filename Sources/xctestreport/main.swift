@@ -109,30 +109,30 @@ struct XCTestReport: ParsableCommand {
             let duration: String
             let hasMediaAttachments: Bool
             let hasPerformanceMetrics: Bool
-            let startTime: Double
+            let startTime: Double?
             let testDescription: String
             let testIdentifier: String
             let testName: String
             let testPlanConfigurations: [TestPlanConfiguration]
             let testResult: String
-            let testRuns: [TestRunDetail]
-            let previousRuns: [TestRunDetail] // Paaa5
+            let testRuns: [TestRunDetail]?
+            var previousRuns: [TestRunDetail]?
         }
 
         struct TestRunDetail: Decodable {
             let children: [TestRunChild]?
             let duration: String
             let name: String
-            let nodeIdentifier: String
+            let nodeIdentifier: String?
             let nodeType: String
-            let result: String
+            let result: String?
         }
 
         struct TestRunChild: Decodable {
             let children: [TestRunChildDetail]?
             let name: String
             let nodeType: String
-            let result: String
+            let result: String?
         }
 
         struct TestRunChildDetail: Decodable {
@@ -193,16 +193,32 @@ struct XCTestReport: ParsableCommand {
             let testDetailsCmd = ["xcrun", "xcresulttool", "get", "test-results", "test-details", "--test-id", testIdentifier, "--path", xcresultPath, "--format", "json", "--compact"]
             let (testDetailsJSON, exitCode) = shell(testDetailsCmd)
             guard exitCode == 0, let data = testDetailsJSON?.data(using: .utf8) else {
+                print("Failed to get test details for: \(testIdentifier)")
                 return nil
             }
+
+            print("Got test details for: \(testIdentifier)")
+
             // Save test details JSON to test_details folder
             let testDetailsDir = (outputDir as NSString).appendingPathComponent("test_details")
+            print("Saving test details to: \(testDetailsDir)")
             try? FileManager.default.createDirectory(atPath: testDetailsDir, withIntermediateDirectories: true)
+            print("Test identifier: \(testIdentifier)")
             let safeTestIdentifier = testIdentifier.replacingOccurrences(of: "/", with: "_")
+            print("Safe test identifier: \(safeTestIdentifier)")
             let testDetailsPath = (testDetailsDir as NSString).appendingPathComponent("\(safeTestIdentifier).json")
+            print("Writing test details to: \(testDetailsPath)")
             try? testDetailsJSON?.write(toFile: testDetailsPath, atomically: true, encoding: .utf8)
+            print("Wrote \(testDetailsJSON?.count ?? 0) bytes")
             let decoder = JSONDecoder()
-            return try? decoder.decode(TestDetails.self, from: data)
+            do {
+                let result = try decoder.decode(TestDetails.self, from: data)
+                return result
+            } catch {
+                print("Failed to decode test details: \(error)")
+                print("What we tried to decode: \(String(data: data, encoding: .utf8) ?? "nil")")
+                return nil
+            }
         }
 
         func findFirstValidStartTime(_ nodes: [TestNode]) -> Double {
@@ -254,12 +270,9 @@ struct XCTestReport: ParsableCommand {
                                 var testResults = [String: TestResult]()
                                 func processNodes(_ nodes: [TestNode]) {
                                     for node in nodes {
-                                        if node.nodeType == "Test Case", let identifier = node.nodeIdentifier {
-                                            testResults[identifier] = TestResult(
-                                                name: node.name,
-                                                status: node.result,
-                                                duration: node.duration
-                                            )
+                                        if let ident = node.nodeIdentifier {
+                                            let testResult = TestResult(name: node.name, status: node.result, duration: node.duration)
+                                            testResults[ident] = testResult
                                         }
                                         if let children = node.children {
                                             processNodes(children)
@@ -299,23 +312,48 @@ struct XCTestReport: ParsableCommand {
             let fileManager = FileManager.default
             let parentDir = (outputDir as NSString).deletingLastPathComponent
             let currentDirName = (outputDir as NSString).lastPathComponent
-
+            
+            print("Parent directory: \(parentDir)")
+            print("Current directory name: \(currentDirName)")
+            
             if let contents = try? fileManager.contentsOfDirectory(atPath: parentDir) {
+                print("Contents of parent directory: \(contents)")
+                
                 let previousDirs = contents
                     .filter { $0 != currentDirName && $0 != ".DS_Store" }
                     .sorted()
                     .reversed()
-
+                
+                print("Filtered and sorted previous directories: \(previousDirs)")
+                
                 for dir in previousDirs.prefix(10) {
                     let testDetailsPath = (parentDir as NSString).appendingPathComponent("\(dir)/test_details/\(testIdentifier.replacingOccurrences(of: "/", with: "_")).json")
-                    if FileManager.default.fileExists(atPath: testDetailsPath) {
-                        if let data = try? Data(contentsOf: URL(fileURLWithPath: testDetailsPath)),
-                           let testDetails = try? JSONDecoder().decode(TestDetails.self, from: data) {
-                            previousRuns.append(contentsOf: testDetails.testRuns)
+                    print("Looking for test details file at path: \(testDetailsPath)")
+                    
+                    if fileManager.fileExists(atPath: testDetailsPath) {
+                        print("Found test details file: \(testDetailsPath)")
+                        
+                        do {
+                            let data = try Data(contentsOf: URL(fileURLWithPath: testDetailsPath))
+                            print("Loaded data from file.")
+                            
+                            let testDetails = try JSONDecoder().decode(TestDetails.self, from: data)
+                            
+                            if let testRuns = testDetails.testRuns {
+                                previousRuns.append(contentsOf: testRuns)
+                            }
+                        } catch {
+                            print("Failed to load or decode file at \(testDetailsPath). Error: \(error)")
                         }
+                    } else {
+                        print("Test details file does not exist: \(testDetailsPath)")
                     }
                 }
+            } else {
+                print("Failed to read contents of directory: \(parentDir)")
             }
+            
+            print("Collected \(previousRuns.count) previous runs")
             return previousRuns
         }
 
@@ -402,7 +440,7 @@ struct XCTestReport: ParsableCommand {
         let processedTestsQueue = DispatchQueue(label: "processedTests")
         let preprocessingGroup = DispatchGroup()
         let concurrentQueue = DispatchQueue(label: "testPreprocessing", attributes: .concurrent)
-        let maxConcurrent = ProcessInfo.processInfo.processorCount
+        let maxConcurrent = 1;//ProcessInfo.processInfo.processorCount
 
         let testsPerCore = (allTests.count + maxConcurrent - 1) / maxConcurrent
         let testChunks = stride(from: 0, through: allTests.count - 1, by: testsPerCore).map {
@@ -427,41 +465,59 @@ struct XCTestReport: ParsableCommand {
                     var testDetails: TestDetails?
                     if let testIdentifier = test.nodeIdentifier {
                         testDetails = getTestDetails(for: testIdentifier)
+                    } else {
+                        print("No test identifier for test: \(test.name)")
                     }
 
                     if let testDetails = testDetails {
                         let testDescription = testDetails.testDescription
                         let testResult = testDetails.testResult
-                        let testRuns = testDetails.testRuns.map { run in
-                            let runDetails = run.children?.map { child in
-                                let childDetails = child.children?.map { detail in
-                                    return "<li><code>\(detail.name)</code></li>"
-                                }.joined(separator: "") ?? ""
-                                return "<li>\(child.name) (\(child.nodeType)): \(child.result)<ul>\(childDetails)</ul></li>"
-                            }.joined(separator: "") ?? ""
-                            return "<li>\(run.name) (\(run.nodeType)): \(run.result)<ul>\(runDetails)</ul></li>"
-                        }.joined(separator: "")
-
-                        failureInfo += """
-                        <p><strong>Test Description:</strong> \(testDescription)<br>
-                        <strong>Test Result:</strong> \(testResult)</p>
-                        <ul>\(testRuns)</ul>
-                        """
-
-                        // Add previous runs information
-                        let previousRuns = getPreviousRuns(for: testIdentifier)
-                        if !previousRuns.isEmpty {
-                            let previousRunsHTML = previousRuns.map { run in
-                                return "<tr><td>\(run.name)</td><td>\(run.result)</td><td>\(run.duration)</td></tr>"
+                        if let testRuns = testDetails.testRuns {
+                            let runsHtml = testRuns.compactMap { run in
+                                guard let children = run.children else { return nil }
+                                let runDetails = children.compactMap { child in
+                                    let childDetails = child.children?.map { detail in
+                                        return "<li><code>\(detail.name)</code></li>"
+                                    }.joined(separator: "") ?? ""
+                                    return "<li>\(child.name) (\(child.nodeType)): \(child.result ?? "Unknown")<ul>\(childDetails)</ul></li>"
+                                }.joined(separator: "")
+                                return "<li>\(run.name) (\(run.nodeType)): \(run.result ?? "Unknown")<ul>\(runDetails)</ul></li>"
                             }.joined(separator: "")
+
                             failureInfo += """
-                            <h3>Previous Runs (Last 10)</h3>
-                            <table>
-                            <tr><th>Run</th><th>Status</th><th>Duration</th></tr>
-                            \(previousRunsHTML)
-                            </table>
+                            <p><strong>Test Description:</strong> \(testDescription)<br>
+                            <strong>Test Result:</strong> \(testResult)</p>
+                            <ul>\(runsHtml)</ul>
                             """
                         }
+
+                        // Add previous runs information
+                        if let testIdentifier = test.nodeIdentifier {
+                            let previousRuns = getPreviousRuns(for: testIdentifier)
+                            if !previousRuns.isEmpty {
+                                let runsEmoji = previousRuns.prefix(10).map { $0.result == "Passed" ? "✅" : "❌" }.joined()
+                                failureInfo += """
+                                <h3>Previous Runs (Last 10)</h3>
+                                <p>\(runsEmoji)</p>
+                                """
+                                let previousRunsHTML = previousRuns.map { run in
+                                    return "<tr><td>\(run.name)</td><td>\(run.result ?? "Unknown")</td><td>\(run.duration)</td></tr>"
+                                }.joined(separator: "")
+                                failureInfo += """
+                                <h3>Previous Runs (Last 10)</h3>
+                                <table>
+                                <tr><th>Run</th><th>Status</th><th>Duration</th></tr>
+                                \(previousRunsHTML)
+                                </table>
+                                """
+                            } else {
+                                print("No previous runs for test: \(test.name)")
+                            }
+                        } else {
+                            print("No test identifier for test: \(test.name)")
+                        }
+                    } else {
+                        print("No test details for test: \(test.name)")
                     }
 
                     let testDetailHTML = """
@@ -627,11 +683,14 @@ struct XCTestReport: ParsableCommand {
                     if let previousResults = previousResults,
                        let testId = test.nodeIdentifier,
                        let previousResult = previousResults.results[testId] {
+                        print("Comparing test [\(testId)]: Current=\(test.result) Previous=\(previousResult.status)")
                         if test.result == "Failed" && previousResult.status == "Passed" {
+                            print("Found newly failed test: \(test.name)")
                             statusEmoji = """
                              <span class="emoji-status" title="Newly failed test">⭕️</span>
                             """
                         } else if test.result == "Passed" && previousResult.status == "Failed" {
+                            print("Found fixed test: \(test.name)")
                             statusEmoji = """
                              <span class="emoji-status" title="Fixed test">✨</span>
                             """
@@ -639,12 +698,15 @@ struct XCTestReport: ParsableCommand {
                     }
 
                     if test.result == "Passed",
-                       let testDetails = getTestDetails(for: test.nodeIdentifier ?? ""),
-                       testDetails.testRuns.count > 1,
-                       let firstRun = testDetails.testRuns.first,
-                       firstRun.result != "Passed" {
+                       let testId = test.nodeIdentifier,
+                       let testDetails = getTestDetails(for: testId),
+                       let testRuns = testDetails.testRuns,
+                       testRuns.count > 1,
+                       let firstRun = testRuns.first,
+                       let firstRunResult = firstRun.result,
+                       firstRunResult != "Passed" {
                         statusEmoji += """
-                         <span class="emoji-status" title="Failed first attempt, succeeded on run #\(testDetails.testRuns.count)">⚠️</span>
+                         <span class="emoji-status" title="Failed first attempt, succeeded on run #\(testRuns.count)">⚠️</span>
                         """
                     }
 

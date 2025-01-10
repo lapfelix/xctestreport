@@ -599,6 +599,28 @@ struct XCTestReport: ParsableCommand {
                     th:nth-child(3), td:nth-child(3) {
                         width: 20%;
                     }
+                    @media (prefers-color-scheme: dark) {
+                        body {
+                            background-color: #121212;
+                            color: #EEEEEE;
+                        }
+                        .summary-stats, table {
+                            background: #1E1E1E;
+                            border-color: #333;
+                        }
+                        th {
+                            background: #242424;
+                        }
+                        a {
+                            color: #599efc;
+                        }
+                        .failed {
+                            color: #ff867c;
+                        }
+                        .passed {
+                            color: #7bd88f;
+                        }
+                    }
                     </style>
                     </head>
                     <body>
@@ -1002,6 +1024,28 @@ struct XCTestReport: ParsableCommand {
             button#toggle-all {
                 width: auto;
                 white-space: nowrap;
+            }
+        }
+        @media (prefers-color-scheme: dark) {
+            body {
+                background-color: #121212;
+                color: #EEEEEE;
+            }
+            .summary-stats, table {
+                background: #1E1E1E;
+                border-color: #333;
+            }
+            th {
+                background: #242424;
+            }
+            a {
+                color: #599efc;
+            }
+            .failed {
+                color: #ff867c;
+            }
+            .passed {
+                color: #7bd88f;
             }
         }
         </style>

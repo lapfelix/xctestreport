@@ -23,6 +23,15 @@ struct XCTestReport: ParsableCommand {
     }
 
     func run() throws {
+        do {
+            try generateHTMLReport()
+        } catch {
+            print("Error: \(error)")
+            throw error
+        }
+    }
+
+    func generateHTMLReport() throws {
         // MARK: - Structures
         struct Summary: Decodable {
             let title: String
@@ -149,6 +158,17 @@ struct XCTestReport: ParsableCommand {
             let name: String
             let status: String
             let duration: String?
+        }
+
+        struct BuildResults: Decodable {
+            let startTime: Double
+            let endTime: Double
+            let errorCount: Int
+            let warningCount: Int
+
+            var buildTime: Double {
+                return endTime - startTime
+            }
         }
 
         func shell(_ args: [String], outputFile: String? = nil, captureOutput: Bool = true) -> (String?, Int32) {
@@ -1015,6 +1035,16 @@ struct XCTestReport: ParsableCommand {
         for suite in groupedTests.keys.sorted() {
             if let section = suiteSections[suite] {
                 indexHTML += section.joined()
+            }
+        }
+
+        let buildResultsCmd = ["xcrun", "xcresulttool", "get", "build-results", "--path", xcresultPath, "--format", "json"]
+        let (buildResultsJSON, buildResultsExit) = shell(buildResultsCmd)
+        if buildResultsExit == 0, let jsonStr = buildResultsJSON, let bdData = jsonStr.data(using: .utf8) {
+            let buildResults = try? decoder.decode(BuildResults.self, from: bdData)
+            if let buildResults = buildResults {
+                indexHTML += "<p>Build Time: \(buildResults.buildTime) seconds</p>"
+                indexHTML += "<p>🛑 Errors: \(buildResults.errorCount) &nbsp; ⚠️ Warnings: \(buildResults.warningCount)</p>"
             }
         }
 

@@ -604,6 +604,9 @@ struct XCTestReport: ParsableCommand {
                             background-color: #121212;
                             color: #EEEEEE;
                         }
+                        h1, h2, h3 {
+                            color: #FFFFFF;
+                        }
                         .summary-stats, table {
                             background: #1E1E1E;
                             border-color: #333;
@@ -619,6 +622,17 @@ struct XCTestReport: ParsableCommand {
                         }
                         .passed {
                             color: #7bd88f;
+                        }
+                        tr.failed {
+                            background-color: #3d2e2e;
+                        }
+                        .new-failure {
+                            background-color: #514116;
+                            color: #f5d7a1;
+                        }
+                        .fixed {
+                            background-color: #1b3d2f;
+                            color: #b1e3bf;
                         }
                     }
                     </style>
@@ -1047,6 +1061,17 @@ struct XCTestReport: ParsableCommand {
             .passed {
                 color: #7bd88f;
             }
+            tr.failed {
+                background-color: #3d2e2e;
+            }
+            .new-failure {
+                background-color: #514116;
+                color: #f5d7a1;
+            }
+            .fixed {
+                background-color: #1b3d2f;
+                color: #b1e3bf;
+            }
         }
         </style>
         </head>
@@ -1065,7 +1090,7 @@ struct XCTestReport: ParsableCommand {
 
         let buildResultsCmd = ["xcrun", "xcresulttool", "get", "build-results", "--path", xcresultPath, "--format", "json"]
         let (buildResultsJSON, buildResultsExit) = shell(buildResultsCmd)
-        if buildResultsExit == 0, let jsonStr = buildResultsJSON, let bdData = jsonStr.data(using: .utf8) {
+        if (buildResultsExit == 0), let jsonStr = buildResultsJSON, let bdData = jsonStr.data(using: .utf8) {
             let buildResults = try? decoder.decode(BuildResults.self, from: bdData)
             if let buildResults = buildResults {
                 indexHTML += "<p>🛑 Errors: \(buildResults.errorCount) &nbsp; ⚠️ Warnings: \(buildResults.warningCount)</p>"

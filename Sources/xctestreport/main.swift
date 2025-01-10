@@ -615,13 +615,13 @@ struct XCTestReport: ParsableCommand {
                             background: #242424;
                         }
                         a {
-                            color: #599efc;
+                            color:rgb(28, 48, 76);
                         }
                         .failed {
-                            color: #ff867c;
+                            color:rgb(71, 26, 22);
                         }
                         .passed {
-                            color: #7bd88f;
+                            color:rgb(29, 51, 34);
                         }
                         tr.failed {
                             background-color: #3d2e2e;

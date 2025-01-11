@@ -4,6 +4,346 @@ import Foundation
 import ArgumentParser
 import Dispatch
 
+let sharedStyles = """
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "San Francisco", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    color: #333;
+    margin: 20px;
+    background: #F9F9F9;
+}
+
+h1, h2, h3 {
+    font-weight: 600;
+    color: #000;
+}
+
+h2 {
+    padding: 8px 12px;
+    border-radius: 6px 6px 0 0;
+    background: lightgrey;
+    margin-bottom: 0px;
+    transition: border-radius 0.2s;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.summary {
+    margin-bottom: 20px;
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.summary-stats {
+    font-size: 1.2em;
+    margin: 20px 0;
+    padding: 15px;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(30, 26, 26, 0.1);
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.stat-number {
+    font-size: 1.3em;
+    font-weight: 600;
+    font-feature-settings: "tnum";
+    font-variant-numeric: tabular-nums;
+}
+
+.failure, .failed {
+    color: #DC3545;
+}
+
+.success, .passed {
+    color: #28A745;
+}
+
+.failed-number {
+    color: #DC3545;
+}
+
+.passed-number {
+    color: #28A745;
+}
+
+.skipped-number {
+    color: #6c757d;
+}
+
+.details {
+    margin-top: 20px;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 20px;
+    background: #FFF;
+    border: 1px solid #DDD;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    table-layout: fixed;
+}
+
+th, td {
+    text-align: left;
+    padding: 12px;
+    border-bottom: 1px solid #EEE;
+    word-wrap: break-word;
+}
+
+th {
+    background: #F2F2F2;
+    font-weight: 600;
+}
+
+th:nth-child(1), td:nth-child(1) {
+    width: 60%;
+}
+
+th:nth-child(2), td:nth-child(2) {
+    width: 20%;
+}
+
+th:nth-child(3), td:nth-child(3) {
+    width: 20%;
+}
+
+.test-case {
+    margin-bottom: 20px;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+tr.failed {
+    background-color: #f8d7da;
+}
+
+.status-badge {
+    display: inline-block;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.status-failed {
+    background-color: #ffebee;
+    color: #c62828;
+}
+
+.status-passed {
+    background-color: #e8f5e9;
+    color: #2e7d32;
+}
+
+.error-message {
+    color: #c62828;
+    margin-top: 10px;
+    font-family: monospace;
+    white-space: pre-wrap;
+}
+
+.duration {
+    color: #666;
+    font-size: 0.9em;
+}
+
+.screenshot {
+    max-width: 100%;
+    margin-top: 10px;
+}
+
+.new-failure {
+    color: #856404;
+    background-color: #fff3cd;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+
+.fixed {
+    color: #155724;
+    background-color: #d4edda;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+
+.emoji-status {
+    text-decoration: none;
+    margin-left: 4px;
+}
+
+a {
+    color: #0077EE;
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+/* Collapsible sections */
+.collapsible {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-right: 25px;
+    position: relative;
+    cursor: pointer;
+    user-select: none;
+}
+
+.collapsible::after {
+    content: "\\25BC";
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 0.8em;
+    transition: transform 0.2s;
+}
+
+.collapsed::after {
+    content: "\\25B6";
+}
+
+.suite-name {
+    font-size: 1.1em;
+    font-weight: 600;
+    margin-right: 8px;
+}
+
+.suite-stats {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    font-size: 0.9em;
+    font-weight: normal;
+    color: #666;
+    padding-right: 15px;
+}
+
+.content {
+    max-height: 2000px;
+    opacity: 1;
+    transition: max-height 0.3s ease-in-out, opacity 0.2s ease-in-out;
+    overflow: hidden;
+}
+
+.collapsed + .content {
+    max-height: 0;
+    opacity: 0;
+}
+
+.suite {
+    margin-bottom: 1px;
+}
+
+button#toggle-all {
+    padding: 8px 16px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #24292e;
+    background-color: #fafbfc;
+    border: 1px solid rgba(27,31,35,0.15);
+    border-radius: 6px;
+    box-shadow: 0 1px 0 rgba(27,31,35,0.04);
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.2s ease;
+    width: 100%;
+}
+
+[title] {
+    position: relative;
+    cursor: help;
+}
+
+/* Media Queries */
+@media (min-width: 768px) {
+    .summary-stats {
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+    }
+    
+    button#toggle-all {
+        width: auto;
+        white-space: nowrap;
+    }
+
+    .collapsible {
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+    }
+    
+    .suite-name {
+        margin-right: 0;
+    }
+}
+
+@media (prefers-color-scheme: dark) {
+    body {
+        background-color: #121212;
+        color: #EEEEEE;
+    }
+    
+    h1, h2, h3 {
+        color: #FFFFFF;
+    }
+    
+    .summary-stats, table {
+        background: #1E1E1E;
+        border-color: #333;
+    }
+    
+    th {
+        background: #242424;
+    }
+    
+    a {
+        color: #599efc;
+    }
+    
+    .failed {
+        color: #ff867c;
+    }
+    
+    .passed {
+        color: #7bd88f;
+    }
+    
+    tr.failed {
+        background-color: #3d2e2e;
+    }
+    
+    .new-failure {
+        background-color: #514116;
+        color: #f5d7a1;
+    }
+    
+    .fixed {
+        background-color: #1b3d2f;
+        color: #b1e3bf;
+    }
+}
+"""
+
 // MARK: - Command-Line Interface
 
 struct XCTestReport: ParsableCommand {
@@ -547,94 +887,7 @@ struct XCTestReport: ParsableCommand {
                     <meta charset="UTF-8">
                     <title>Test Detail: \(test.name)</title>
                     <style>
-                    body {
-                        font-family: -apple-system, BlinkMacSystemFont, "San Francisco", "Helvetica Neue", Helvetica, Arial, sans-serif;
-                        color: #333;
-                        margin: 20px;
-                        background: #F9F9F9;
-                    }
-                    h1, h2, h3 {
-                        font-weight: 600;
-                        color: #000;
-                    }
-                    a {
-                        color: #0077EE;
-                        text-decoration: none;
-                    }
-                    a:hover {
-                        text-decoration: underline;
-                    }
-                    .passed {
-                        color: #28A745;
-                        font-weight: 600;
-                    }
-                    .failed {
-                        color: #DC3545;
-                        font-weight: 600;
-                    }
-                    table {
-                        border-collapse: collapse;
-                        width: 100%;
-                        background: #FFF;
-                        border: 1px solid #DDD;
-                        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-                        table-layout: fixed;
-                    }
-                    th, td {
-                        text-align: left;
-                        padding: 12px;
-                        border-bottom: 1px solid #EEE;
-                        word-wrap: break-word;
-                    }
-                    th {
-                        background: #F2F2F2;
-                        font-weight: 600;
-                    }
-                    th:nth-child(1), td:nth-child(1) {
-                        width: 60%;
-                    }
-                    th:nth-child(2), td:nth-child(2) {
-                        width: 20%;
-                    }
-                    th:nth-child(3), td:nth-child(3) {
-                        width: 20%;
-                    }
-                    @media (prefers-color-scheme: dark) {
-                        body {
-                            background-color: #121212;
-                            color: #EEEEEE;
-                        }
-                        h1, h2, h3 {
-                            color: #FFFFFF;
-                        }
-                        .summary-stats, table {
-                            background: #1E1E1E;
-                            border-color: #333;
-                        }
-                        th {
-                            background: #242424;
-                        }
-                        a {
-                            color:rgb(28, 48, 76);
-                        }
-                        .failed {
-                            color:rgb(71, 26, 22);
-                        }
-                        .passed {
-                            color:rgb(29, 51, 34);
-                        }
-                        tr.failed {
-                            background-color: #3d2e2e;
-                        }
-                        .new-failure {
-                            background-color: #514116;
-                            color: #f5d7a1;
-                        }
-                        .fixed {
-                            background-color: #1b3d2f;
-                            color: #b1e3bf;
-                        }
-                    }
+                    \(sharedStyles)
                     </style>
                     </head>
                     <body>
@@ -799,280 +1052,7 @@ struct XCTestReport: ParsableCommand {
         <meta charset="UTF-8">
         <title>Test Report</title>
         <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "San Francisco", "Helvetica Neue", Helvetica, Arial, sans-serif;
-            color: #333;
-            margin: 20px;
-            background: #F9F9F9;
-        }
-        h1, h2, h3 {
-            font-weight: 600;
-            color: #000;
-        }
-        h2 {
-            padding: 8px 12px;
-            border-radius: 6px 6px 0 0;
-            background: lightgrey;
-            margin-bottom: 0px;
-            transition: border-radius 0.2s;
-        }
-        
-        .collapsible {
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-            padding-right: 25px; /* Space for arrow */
-            position: relative;
-        }
-        
-        .suite-name {
-            font-size: 1.1em;
-            font-weight: 600;
-            margin-right: 8px;
-        }
-        
-        .suite-stats {
-            display: flex;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 4px 8px;
-            font-size: 0.9em;
-            font-weight: normal;
-            color: #666;
-            padding-right: 15px;
-        }
-        
-        @media (min-width: 768px) {
-            .collapsible {
-                flex-direction: row;
-                align-items: center;
-                justify-content: space-between;
-            }
-            
-            .suite-name {
-                margin-right: 0;
-            }
-        }
-        
-        .stats-number {
-            font-weight: 600;
-            color: #333;
-        }
-        
-        .stats-percent {
-            color: #666;
-            font-weight: normal;
-        }
-        
-        .suite-duration {
-            color: #666;
-        }
-
-        .collapsible::after {
-            content: "\\25BC";
-            position: absolute;
-            right: 10px;
-            top: 50%;
-            transform: translateY(-50%);
-            font-size: 0.8em;
-            transition: transform 0.2s;
-        }
-        .collapsed + .content {
-            display: none;
-        }
-        .collapsible.collapsed {
-            border-radius: 6px;
-        }
-        table {
-            border-collapse: collapse;
-            width: 100%;
-            background: #FFF;
-            border: 1px solid #DDD;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            table-layout: fixed;
-        }
-        th, td {
-            text-align: left;
-            padding: 12px;
-            border-bottom: 1px solid #EEE;
-            word-wrap: break-word;
-        }
-        th {
-            background: #F2F2F2;
-            font-weight: 600;
-        }
-        th:nth-child(1), td:nth-child(1) {
-            width: 60%;
-        }
-        th:nth-child(2), td:nth-child(2) {
-            width: 20%;
-        }
-        th:nth-child(3), td:nth-child(3) {
-            width: 20%;
-        }
-        tr.failed {
-            background-color: #f8d7da;
-        }
-        a {
-            color: #0077EE;
-            text-decoration: none;
-        }
-        a:hover {
-            text-decoration: underline;
-        }
-        .passed {
-            color: #28A745;
-            font-weight: 600;
-        }
-        .failed {
-            color: #DC3545;
-            font-weight: 600;
-        }
-        .new-failure {
-            color: #856404;
-            background-color: #fff3cd;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-size: 0.9em;
-        }
-        .fixed {
-            color: #155724;
-            background-color: #d4edda;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-size: 0.9em;
-        }
-        [title] {
-            position: relative;
-            cursor: help;
-        }
-        .emoji-status {
-            text-decoration: none;
-            margin-left: 4px;
-        }
-        .collapsible {
-            cursor: pointer;
-            user-select: none;
-            position: relative;
-            padding-right: 20px;
-        }
-        .collapsible::after {
-            content: "\\25BC"; /* Down arrow */
-            position: absolute;
-            right: 10px;
-            font-size: 0.8em;
-            transition: transform 0.2s;
-        }
-        .collapsed::after {
-            content: "\\25B6"; /* Right arrow */
-        }
-        .content {
-            max-height: 2000px; /* Should be larger than any potential content */
-            opacity: 1;
-            transition: max-height 0.3s ease-in-out, opacity 0.2s ease-in-out;
-            overflow: hidden;
-        }
-        
-        .collapsed + .content {
-            max-height: 0;
-            opacity: 0;
-            transition: max-height 0.3s ease-in-out, opacity 0.2s ease-in-out;
-        }
-
-        .suite {
-            margin-bottom: 1px; /* Prevent margin collapse during animation */
-        }
-        .summary-stats {
-            font-size: 1.2em;
-            margin: 20px 0;
-            padding: 15px;
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 1px 3px rgba(30, 26, 26, 0.1);
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
-        
-        .stat-number {
-            font-size: 1.3em;
-            font-weight: 600;
-            font-feature-settings: "tnum";
-            font-variant-numeric: tabular-nums;
-        }
-        
-        .passed-number {
-            color: #28A745;
-        }
-        
-        .failed-number {
-            color: #DC3545;
-        }
-        
-        .skipped-number {
-            color: #6c757d;
-        }
-        
-        button#toggle-all {
-            padding: 8px 16px;
-            font-size: 14px;
-            font-weight: 500;
-            color: #24292e;
-            background-color: #fafbfc;
-            border: 1px solid rgba(27,31,35,0.15);
-            border-radius: 6px;
-            box-shadow: 0 1px 0 rgba(27,31,35,0.04);
-            cursor: pointer;
-            user-select: none;
-            transition: all 0.2s ease;
-            width: 100%;
-        }
-        
-        @media (min-width: 768px) {
-            .summary-stats {
-                flex-direction: row;
-                align-items: center;
-                justify-content: space-between;
-            }
-            
-            button#toggle-all {
-                width: auto;
-                white-space: nowrap;
-            }
-        }
-        @media (prefers-color-scheme: dark) {
-            body {
-                background-color: #121212;
-                color: #EEEEEE;
-            }
-            .summary-stats, table {
-                background: #1E1E1E;
-                border-color: #333;
-            }
-            th {
-                background: #242424;
-            }
-            a {
-                color: #599efc;
-            }
-            .failed {
-                color: #ff867c;
-            }
-            .passed {
-                color: #7bd88f;
-            }
-            tr.failed {
-                background-color: #3d2e2e;
-            }
-            .new-failure {
-                background-color: #514116;
-                color: #f5d7a1;
-            }
-            .fixed {
-                background-color: #1b3d2f;
-                color: #b1e3bf;
-            }
-        }
+        \(sharedStyles)
         </style>
         </head>
         <body>

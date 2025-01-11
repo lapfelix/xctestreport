@@ -306,14 +306,44 @@ button#toggle-all {
     h1, h2, h3 {
         color: #FFFFFF;
     }
+
+    h2 {
+        background: rgb(59, 59, 59);
+    }
+
+    .suite-stats {
+        color: #e0e0e0;
+    }
     
+    .skipped-number {
+        color: #a8aaab;
+    }
+
+    .summary-stats {
+        background: #202020;
+    }
+
+    table {
+        background: #171717;
+    }
+
     .summary-stats, table {
-        background: #1E1E1E;
-        border-color: #333;
+        background: #171717;
+        border-color: #DDD;
     }
     
     th {
         background: #242424;
+    }
+
+    th, td {
+        border-bottom: 1px solid #424242;
+    }
+
+    button#toggle-all {
+        color: #e7e7e7;
+        background-color: #4a4a4a;
+        border: 1px solid rgba(255, 255, 255, 0.15);
     }
     
     a {
@@ -325,11 +355,11 @@ button#toggle-all {
     }
     
     .passed {
-        color: #7bd88f;
+        color: #2eaa48;
     }
     
     tr.failed {
-        background-color: #3d2e2e;
+        background-color: #241414;
     }
     
     .new-failure {

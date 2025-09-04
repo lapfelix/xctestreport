@@ -603,13 +603,15 @@ struct XCTestReport: ParsableCommand {
             }
 
             do { try task.run() } catch { return (nil, 1) }
-            task.waitUntilExit()
-
+            
+            // For captured output, read data BEFORE waiting for exit to avoid deadlock
             var output: String? = nil
             if captureOutput, let pipe = task.standardOutput as? Pipe {
                 let data = pipe.fileHandleForReading.readDataToEndOfFile()
                 output = String(data: data, encoding: .utf8)
             }
+            
+            task.waitUntilExit()
             return (output, task.terminationStatus)
         }
 
@@ -802,13 +804,30 @@ struct XCTestReport: ParsableCommand {
         try? FileManager.default.createDirectory(
             atPath: outputDir, withIntermediateDirectories: true)
 
+        // Check xcresult file size
+        let fileManager = FileManager.default
+        var sizeInGB: Double = 0
+        if let attributes = try? fileManager.attributesOfItem(atPath: xcresultPath),
+           let fileSize = attributes[.size] as? Int64 {
+            sizeInGB = Double(fileSize) / 1_073_741_824
+            print("XCResult file size: \(String(format: "%.2f", sizeInGB)) GB")
+            if sizeInGB > 5.0 {
+                print("WARNING: Large xcresult file detected (\(String(format: "%.2f", sizeInGB)) GB)")
+                print("This may take a very long time to process...")
+                print("Consider using smaller test batches or filtering tests")
+            }
+        }
+
         // Get summary
         let summaryCmd = [
             "xcrun", "xcresulttool", "get", "test-results", "summary", "--path", xcresultPath,
             "--format", "json", "--compact",
         ]
         print("Running summary command: \(summaryCmd.joined(separator: " "))")
+        let startTime = Date()
         let (summaryJSON, summaryExit) = shell(summaryCmd)
+        let summaryDuration = Date().timeIntervalSince(startTime)
+        print("Summary command completed in \(String(format: "%.2f", summaryDuration)) seconds")
         guard summaryExit == 0, let summaryData = summaryJSON?.data(using: .utf8) else {
             print("Failed to get test summary.")
             throw RuntimeError(message: "Failed to get test summary.")
@@ -843,7 +862,10 @@ struct XCTestReport: ParsableCommand {
             "xcrun", "xcresulttool", "get", "test-results", "tests", "--path", xcresultPath,
         ]
         print("Running: \(fullCmd.joined(separator: " "))")
+        let fullStartTime = Date()
         let (_, fullExit) = shell(fullCmd, outputFile: fullJSONPath, captureOutput: false)
+        let fullDuration = Date().timeIntervalSince(fullStartTime)
+        print("Full results command completed in \(String(format: "%.2f", fullDuration)) seconds")
         print("Full results exit code: \(fullExit)")
 
         guard fullExit == 0 else {
@@ -916,10 +938,16 @@ struct XCTestReport: ParsableCommand {
                     }
 
                     var testDetails: TestDetails?
-                    if let testIdentifier = test.nodeIdentifier {
-                        testDetails = getTestDetails(for: testIdentifier)
-                    } else {
-                        print("No test identifier for test: \(test.name)")
+                    // Skip getTestDetails for large xcresult files to avoid timeout
+                    if sizeInGB < 10.0 {  // Only get details for xcresults < 10GB
+                        if let testIdentifier = test.nodeIdentifier {
+                            testDetails = getTestDetails(for: testIdentifier)
+                        } else {
+                            print("No test identifier for test: \(test.name)")
+                        }
+                    } else if test.result != "Passed" {
+                        // For large files, only log failed tests
+                        print("Skipping details for \(test.name) (large xcresult: \(String(format: "%.2f", sizeInGB)) GB)")
                     }
 
                     if let testDetails = testDetails {
@@ -947,8 +975,8 @@ struct XCTestReport: ParsableCommand {
                                 """
                         }
 
-                        // Add previous runs information
-                        if let testIdentifier = test.nodeIdentifier {
+                        // Add previous runs information (skip for large files)
+                        if sizeInGB < 10.0, let testIdentifier = test.nodeIdentifier {
                             let previousRuns = getPreviousRuns(for: testIdentifier)
                             if !previousRuns.isEmpty {
                                 let runsEmoji = previousRuns.prefix(10).map {
@@ -1117,7 +1145,8 @@ struct XCTestReport: ParsableCommand {
                         }
                     }
 
-                    if test.result == "Passed",
+                    if sizeInGB < 10.0,
+                        test.result == "Passed",
                         let testId = test.nodeIdentifier,
                         let testDetails = getTestDetails(for: testId),
                         let testRuns = testDetails.testRuns,

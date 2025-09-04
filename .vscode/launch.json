@@ -1,0 +1,22 @@
+{
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:xctestreport}",
+            "name": "Debug xctestreport",
+            "program": "${workspaceFolder:xctestreport}/.build/debug/xctestreport",
+            "preLaunchTask": "swift: Build Debug xctestreport"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:xctestreport}",
+            "name": "Release xctestreport",
+            "program": "${workspaceFolder:xctestreport}/.build/release/xctestreport",
+            "preLaunchTask": "swift: Build Release xctestreport"
+        }
+    ]
+}

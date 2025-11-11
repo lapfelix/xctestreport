@@ -471,7 +471,7 @@ struct XCTestReport: ParsableCommand {
             let name: String
             let nodeType: String
             let nodeIdentifier: String?
-            let result: String
+            let result: String?
             let duration: String?
             let details: String?
             let children: [TestNode]?
@@ -707,9 +707,9 @@ struct XCTestReport: ParsableCommand {
                                 var testResults = [String: TestResult]()
                                 func processNodes(_ nodes: [TestNode]) {
                                     for node in nodes {
-                                        if let ident = node.nodeIdentifier {
+                                        if let ident = node.nodeIdentifier, let result = node.result {
                                             let testResult = TestResult(
-                                                name: node.name, status: node.result,
+                                                name: node.name, status: result,
                                                 duration: node.duration)
                                             testResults[ident] = testResult
                                         }
@@ -929,11 +929,12 @@ struct XCTestReport: ParsableCommand {
                 for test in chunk {
                     let testPageName = "test_\(test.nodeIdentifier ?? test.name).html"
                         .replacingOccurrences(of: "/", with: "_")
-                    let statusClass = test.result == "Passed" ? "passed" : "failed"
+                    let result = test.result ?? "Unknown"
+                    let statusClass = result == "Passed" ? "passed" : "failed"
                     let duration = test.duration ?? "0s"
 
                     var failureInfo = ""
-                    if test.result != "Passed", let details = test.details {
+                    if result != "Passed", let details = test.details {
                         failureInfo = "<p><strong>Details:</strong> \(details)</p>"
                     }
 
@@ -945,7 +946,7 @@ struct XCTestReport: ParsableCommand {
                         } else {
                             print("No test identifier for test: \(test.name)")
                         }
-                    } else if test.result != "Passed" {
+                    } else if result != "Passed" {
                         // For large files, only log failed tests
                         print("Skipping details for \(test.name) (large xcresult: \(String(format: "%.2f", sizeInGB)) GB)")
                     }
@@ -1019,7 +1020,7 @@ struct XCTestReport: ParsableCommand {
                         </head>
                         <body>
                         <h1>\(test.name)</h1>
-                        <p>Status: <span class="\(statusClass)">\(test.result)</span><br>Duration: \(duration)</p>
+                        <p>Status: <span class="\(statusClass)">\(result)</span><br>Duration: \(duration)</p>
                         \(failureInfo)
                         <p><a href="index.html">Back to index</a></p>
                         </body>
@@ -1120,9 +1121,10 @@ struct XCTestReport: ParsableCommand {
                         ?? "Unknown Suite"
                     let testPageName = "test_\(test.nodeIdentifier ?? test.name).html"
                         .replacingOccurrences(of: "/", with: "_")
-                    let statusClass = test.result == "Passed" ? "passed" : "failed"
+                    let result = test.result ?? "Unknown"
+                    let statusClass = result == "Passed" ? "passed" : "failed"
                     let duration = test.duration ?? "0s"
-                    let rowClass = test.result == "Passed" ? "" : " class=\"failed\""
+                    let rowClass = result == "Passed" ? "" : " class=\"failed\""
 
                     var statusEmoji = ""
                     if let previousResults = previousResults,
@@ -1130,14 +1132,14 @@ struct XCTestReport: ParsableCommand {
                         let previousResult = previousResults.results[testId]
                     {
                         print(
-                            "Comparing test [\(testId)]: Current=\(test.result) Previous=\(previousResult.status)"
+                            "Comparing test [\(testId)]: Current=\(result) Previous=\(previousResult.status)"
                         )
-                        if test.result == "Failed" && previousResult.status == "Passed" {
+                        if result == "Failed" && previousResult.status == "Passed" {
                             print("Found newly failed test: \(test.name)")
                             statusEmoji = """
                                  <span class="emoji-status" title="Newly failed test">⭕️</span>
                                 """
-                        } else if test.result == "Passed" && previousResult.status == "Failed" {
+                        } else if result == "Passed" && previousResult.status == "Failed" {
                             print("Found fixed test: \(test.name)")
                             statusEmoji = """
                                  <span class="emoji-status" title="Fixed test">✨</span>
@@ -1146,7 +1148,7 @@ struct XCTestReport: ParsableCommand {
                     }
 
                     if sizeInGB < 10.0,
-                        test.result == "Passed",
+                        result == "Passed",
                         let testId = test.nodeIdentifier,
                         let testDetails = getTestDetails(for: testId),
                         let testRuns = testDetails.testRuns,
@@ -1161,7 +1163,7 @@ struct XCTestReport: ParsableCommand {
                     }
 
                     let testRow =
-                        "<tr\(rowClass)><td><a href=\"\(testPageName)\">\(test.name)</a></td><td class=\"\(statusClass)\">\(test.result)\(statusEmoji)</td><td>\(duration)</td></tr>"
+                        "<tr\(rowClass)><td><a href=\"\(testPageName)\">\(test.name)</a></td><td class=\"\(statusClass)\">\(result)\(statusEmoji)</td><td>\(duration)</td></tr>"
 
                     suiteHTMLQueue.sync {
                         suiteSections[suite]?.append(testRow)
@@ -1202,7 +1204,7 @@ struct XCTestReport: ParsableCommand {
             let testItems = tests.map { test -> TestExportItem in
                 return TestExportItem(
                     name: test.name,
-                    result: test.result,
+                    result: test.result ?? "Unknown",
                     duration: test.duration,
                     nodeIdentifier: test.nodeIdentifier,
                     details: test.details

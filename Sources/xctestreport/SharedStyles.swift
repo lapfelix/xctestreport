@@ -783,12 +783,12 @@ let sharedStyles = """
     }
 
     .timeline-video-card {
-        width: min(100%, 390px);
+        width: min(100%, 360px);
         margin: 0 auto;
     }
 
     .test-detail-page .timeline-video-card {
-        width: min(100%, 390px, calc((100dvh - 380px) * 9 / 16));
+        width: min(100%, 360px, calc((100dvh - 450px) * var(--media-aspect, 9 / 16)));
     }
 
     .timeline-video-frame {
@@ -799,6 +799,11 @@ let sharedStyles = """
         overflow: hidden;
         border: 1px solid #D5DCE7;
         background: #0a0a0a;
+    }
+
+    .test-detail-page .timeline-video-frame {
+        max-height: calc(100dvh - 450px);
+        margin: 0 auto;
     }
 
     .timeline-video {
@@ -1023,11 +1028,11 @@ let sharedStyles = """
         }
 
         .test-detail-page .timeline-video-card {
-            width: min(100%, 320px);
+            width: min(100%, 300px, calc((100dvh - 460px) * var(--media-aspect, 9 / 16)));
         }
 
         .test-detail-page .timeline-video-frame {
-            max-height: 36vh;
+            max-height: calc(100dvh - 460px);
         }
 
         .test-detail-page .test-meta-content {

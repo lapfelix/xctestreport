@@ -1628,7 +1628,11 @@ extension XCTestReport {
                     var width = media.videoWidth || media.naturalWidth || 0;
                     var height = media.videoHeight || media.naturalHeight || 0;
                     if (width > 0 && height > 0) {
-                      frame.style.setProperty('--media-aspect', width + ' / ' + height);
+                      var ratioValue = width + ' / ' + height;
+                      frame.style.setProperty('--media-aspect', ratioValue);
+                      if (card) {
+                        card.style.setProperty('--media-aspect', ratioValue);
+                      }
                     }
                   }
 

@@ -1200,10 +1200,14 @@ extension XCTestReport {
                 }
                 let eventClasses = eventClassList.joined(separator: " ")
                 let displayTitle = htmlEscape(timelineDisplayTitle(node, baseTime: baseTime))
+                let disclosure = hasChildren
+                    ? "<span class=\"timeline-disclosure\" aria-hidden=\"true\"></span>"
+                    : "<span class=\"timeline-disclosure timeline-disclosure-placeholder\" aria-hidden=\"true\"></span>"
                 let row = """
                     <div class="\(eventClasses)" data-event-id="\(node.id)" data-event-time="\(timeAttribute)">
-                        <span class="timeline-time">\(timeLabel)</span>
+                        \(disclosure)
                         <span class="timeline-title">\(displayTitle)</span>
+                        <span class="timeline-time">\(timeLabel)</span>
                     </div>
                     """
 

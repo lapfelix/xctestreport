@@ -107,6 +107,12 @@ let sharedStyles = """
         background: #FFFFFF;
         overflow: hidden;
         min-height: 0;
+        position: relative;
+        z-index: 30;
+    }
+
+    .test-meta-details[open] {
+        overflow: visible;
     }
 
     .test-meta-details > summary {
@@ -116,6 +122,19 @@ let sharedStyles = """
         font-size: 0.88rem;
         font-weight: 600;
         border-bottom: 1px solid transparent;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border-radius: 8px;
+        user-select: none;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .test-meta-details > summary::before {
+        content: "\\25B6";
+        font-size: 0.72rem;
+        color: #4D5C77;
     }
 
     .test-meta-details > summary::-webkit-details-marker {
@@ -123,14 +142,31 @@ let sharedStyles = """
     }
 
     .test-meta-details[open] > summary {
-        border-bottom-color: #E5EAF3;
         background: #F8FAFD;
+        border-bottom-color: transparent;
+    }
+
+    .test-meta-details[open] > summary::before {
+        content: "\\25BC";
     }
 
     .test-meta-content {
-        padding: 8px 10px;
-        max-height: 30vh;
+        display: none;
+    }
+
+    .test-meta-details[open] > .test-meta-content {
+        display: block;
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 0;
+        right: 0;
+        padding: 10px 12px;
+        max-height: min(44vh, 460px);
         overflow: auto;
+        border: 1px solid #D6DEEC;
+        border-radius: 8px;
+        background: #FFFFFF;
+        box-shadow: 0 10px 26px rgba(21, 34, 57, 0.18);
     }
 
     .test-meta-content h3 {
@@ -443,19 +479,6 @@ let sharedStyles = """
         padding-left: 0;
     }
 
-    .timeline-node > details > summary::before {
-        content: "\\25BC";
-        position: absolute;
-        left: calc(68px + (var(--timeline-depth, 0) * 14px));
-        top: 7px;
-        font-size: 0.75em;
-        color: #666;
-    }
-
-    .timeline-node > details:not([open]) > summary::before {
-        content: "\\25B6";
-    }
-
     .timeline-node summary::-webkit-details-marker {
         display: none;
     }
@@ -466,9 +489,46 @@ let sharedStyles = """
         cursor: pointer;
         border: 1px solid transparent;
         display: grid;
-        grid-template-columns: 62px minmax(0, 1fr);
+        grid-template-columns: 14px minmax(0, 1fr) 62px;
         column-gap: 10px;
         align-items: flex-start;
+    }
+
+    .timeline-disclosure {
+        width: 14px;
+        height: 14px;
+        margin-top: 1px;
+        border-radius: 4px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: #6D7890;
+        font-size: 0.62rem;
+        line-height: 1;
+        border: 1px solid transparent;
+        background: transparent;
+        user-select: none;
+    }
+
+    .timeline-disclosure::before {
+        content: "";
+    }
+
+    .timeline-disclosure.timeline-disclosure-placeholder {
+        visibility: hidden;
+    }
+
+    .timeline-event.timeline-has-children .timeline-disclosure {
+        border-color: #D7DFED;
+        background: #F3F7FD;
+    }
+
+    .timeline-node > details > summary > .timeline-event.timeline-has-children .timeline-disclosure::before {
+        content: "\\25B6";
+    }
+
+    .timeline-node > details[open] > summary > .timeline-event.timeline-has-children .timeline-disclosure::before {
+        content: "\\25BC";
     }
 
     .timeline-tree ul > li.timeline-node:nth-child(odd) > .timeline-event,
@@ -520,17 +580,18 @@ let sharedStyles = """
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
         font-size: 0.83em;
         font-variant-numeric: tabular-nums;
-        width: 62px;
+        min-width: 62px;
         text-align: right;
+        justify-self: end;
         position: relative;
-        padding-right: 12px;
+        padding-left: 12px;
         margin-top: 1px;
     }
 
-    .timeline-event.timeline-interaction .timeline-time::after {
+    .timeline-event.timeline-interaction .timeline-time::before {
         content: "";
         position: absolute;
-        right: 2px;
+        left: 2px;
         top: 50%;
         width: 6px;
         height: 6px;
@@ -547,13 +608,9 @@ let sharedStyles = """
         padding-left: calc(var(--timeline-depth, 0) * 14px);
     }
 
-    .timeline-event.timeline-has-children .timeline-title {
-        padding-left: calc((var(--timeline-depth, 0) * 14px) + 14px);
-    }
-
     .timeline-attachments {
         margin: 4px 0 8px;
-        padding-left: calc(80px + (var(--timeline-depth, 0) * 14px));
+        padding-left: calc(24px + (var(--timeline-depth, 0) * 14px));
     }
 
     .timeline-attachment {
@@ -640,8 +697,8 @@ let sharedStyles = """
     }
 
     .video-selector {
-        width: min(100%, 430px);
-        margin-bottom: 10px;
+        width: min(100%, 390px);
+        margin-bottom: 6px;
         padding: 6px 8px;
         border-radius: 6px;
         border: 1px solid #CBD5E3;
@@ -650,12 +707,12 @@ let sharedStyles = """
     }
 
     .timeline-video-card {
-        width: min(100%, 430px);
+        width: min(100%, 390px);
         margin: 0 auto;
     }
 
     .test-detail-page .timeline-video-card {
-        width: min(100%, 430px, calc((100dvh - 310px) * 9 / 16));
+        width: min(100%, 390px, calc((100dvh - 380px) * 9 / 16));
     }
 
     .timeline-video-frame {
@@ -933,7 +990,17 @@ let sharedStyles = """
 
         .test-meta-details[open] > summary {
             background: #1f1f1f;
-            border-bottom-color: #424242;
+            border-bottom-color: transparent;
+        }
+
+        .test-meta-details > summary::before {
+            color: #C0CCE2;
+        }
+
+        .test-meta-details[open] > .test-meta-content {
+            background: #171717;
+            border-color: #424242;
+            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
         }
 
         .video-card {
@@ -1016,7 +1083,7 @@ let sharedStyles = """
             color: #ffbcc6;
         }
 
-        .timeline-event.timeline-interaction .timeline-time::after {
+        .timeline-event.timeline-interaction .timeline-time::before {
             background: #73A7FF;
             box-shadow: 0 0 0 2px rgba(115, 167, 255, 0.25);
         }
@@ -1034,8 +1101,13 @@ let sharedStyles = """
             color: #cfd5de;
         }
 
-        .timeline-node > details > summary::before {
+        .timeline-disclosure {
             color: #cfd5de;
+        }
+
+        .timeline-event.timeline-has-children .timeline-disclosure {
+            background: #253043;
+            border-color: #4B5E80;
         }
 
         .timeline-button {

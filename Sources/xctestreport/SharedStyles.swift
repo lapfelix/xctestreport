@@ -424,6 +424,10 @@ let sharedStyles = """
         align-items: start;
     }
 
+    .timeline-video-layout.timeline-layout-single {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
     .test-detail-page .timeline-video-layout {
         height: 100%;
         min-height: 0;
@@ -776,6 +780,14 @@ let sharedStyles = """
     .timeline-video {
         width: 100%;
         height: 100%;
+        background: #000;
+        object-fit: contain;
+    }
+
+    .timeline-still {
+        width: 100%;
+        height: 100%;
+        display: block;
         background: #000;
         object-fit: contain;
     }

@@ -215,6 +215,13 @@ extension XCTestReport {
             let failureAssociated: Bool
         }
 
+        struct ScreenshotSource: Codable {
+            let label: String
+            let src: String
+            let time: Double
+            let failureAssociated: Bool
+        }
+
         struct TimelineAttachment {
             let name: String
             let timestamp: Double?
@@ -718,6 +725,42 @@ extension XCTestReport {
             return false
         }
 
+        func parseSnapshotTimestamp(from label: String) -> Double? {
+            let patterns = [
+                ("'UI Snapshot 'yyyy-MM-dd 'at' h.mm.ss a", "UI Snapshot "),
+                ("'Screenshot 'yyyy-MM-dd 'at' h.mm.ss a", "Screenshot "),
+            ]
+
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone.current
+
+            for (format, prefix) in patterns where label.hasPrefix(prefix) {
+                formatter.dateFormat = format
+                if let date = formatter.date(from: label) {
+                    return date.timeIntervalSince1970
+                }
+            }
+
+            return nil
+        }
+
+        func isScreenshotAttachment(_ attachment: AttachmentManifestItem) -> Bool {
+            let ext = URL(fileURLWithPath: attachment.exportedFileName).pathExtension.lowercased()
+            if ["png", "jpg", "jpeg", "heic", "gif", "webp", "tiff", "bmp"].contains(ext) {
+                return true
+            }
+
+            if let humanReadableName = attachment.suggestedHumanReadableName?.lowercased(),
+                humanReadableName.contains("snapshot")
+                    || humanReadableName.contains("screenshot")
+            {
+                return true
+            }
+
+            return false
+        }
+
         func jsStringEscape(_ input: String) -> String {
             return input
                 .replacingOccurrences(of: "\\", with: "\\\\")
@@ -1045,6 +1088,45 @@ extension XCTestReport {
             }
         }
 
+        func buildScreenshotSources(
+            for testIdentifier: String, activities: TestActivities?,
+            attachmentsByTestIdentifier: [String: [AttachmentManifestItem]]
+        ) -> [ScreenshotSource] {
+            let allAttachments = attachmentsByTestIdentifier[testIdentifier] ?? []
+            let screenshotAttachments = allAttachments.filter { isScreenshotAttachment($0) }
+            guard !screenshotAttachments.isEmpty else { return [] }
+
+            let rootActivities = activities?.testRuns.flatMap { $0.activities } ?? []
+            var attachmentTimestamps = [String: [Double]]()
+            collectActivityAttachmentTimestamps(from: rootActivities, into: &attachmentTimestamps)
+            let fallbackStartTime = collectEarliestActivityTimestamp(from: rootActivities)
+
+            var seenSources = Set<String>()
+            let mapped = screenshotAttachments.compactMap { attachment -> ScreenshotSource? in
+                let label = attachment.suggestedHumanReadableName ?? attachment.exportedFileName
+                let timestamp =
+                    attachmentTimestamps[label]?.min() ?? parseSnapshotTimestamp(from: label)
+                    ?? fallbackStartTime
+                guard let timestamp else { return nil }
+
+                let src = "attachments/\(urlEncodePath(attachment.exportedFileName))"
+                guard !seenSources.contains(src) else { return nil }
+                seenSources.insert(src)
+
+                return ScreenshotSource(
+                    label: label,
+                    src: src,
+                    time: timestamp,
+                    failureAssociated: attachment.isAssociatedWithFailure ?? false
+                )
+            }
+
+            return mapped.sorted { lhs, rhs in
+                if lhs.time == rhs.time { return lhs.label < rhs.label }
+                return lhs.time < rhs.time
+            }
+        }
+
         func buildTimelineNodes(
             from activities: [TestActivity], attachmentLookup: [String: [AttachmentManifestItem]],
             nextId: inout Int
@@ -1265,6 +1347,9 @@ extension XCTestReport {
             let videoSources = buildVideoSources(
                 for: testIdentifier, activities: activities,
                 attachmentsByTestIdentifier: attachmentsByTestIdentifier)
+            let screenshotSources = buildScreenshotSources(
+                for: testIdentifier, activities: activities,
+                attachmentsByTestIdentifier: attachmentsByTestIdentifier)
             let attachmentLookup = buildAttachmentLookup(
                 for: testIdentifier, attachmentsByTestIdentifier: attachmentsByTestIdentifier)
 
@@ -1288,11 +1373,18 @@ extension XCTestReport {
                 guard let encoded = try? JSONEncoder().encode(touchGestures) else { return "[]" }
                 return String(data: encoded, encoding: .utf8) ?? "[]"
             }()
+            let screenshotJSON: String = {
+                guard !screenshotSources.isEmpty else { return "[]" }
+                guard let encoded = try? JSONEncoder().encode(screenshotSources) else { return "[]" }
+                return String(data: encoded, encoding: .utf8) ?? "[]"
+            }()
 
             let timelineBaseTime =
-                timestampedNodes.first?.timestamp ?? videoSources.first?.startTime ?? Date()
+                timestampedNodes.first?.timestamp ?? videoSources.first?.startTime
+                ?? screenshotSources.first?.time ?? Date()
                 .timeIntervalSince1970
-            let defaultVideoStart = videoSources.first?.startTime ?? timelineBaseTime
+            let defaultVideoStart =
+                videoSources.first?.startTime ?? screenshotSources.first?.time ?? timelineBaseTime
 
             let timelineTree: String
             if collapsedTimelineNodes.isEmpty {
@@ -1305,11 +1397,11 @@ extension XCTestReport {
 
             let videoSelector: String
             let videoElements: String
-            if videoSources.isEmpty {
-                videoSelector = ""
-                videoElements =
-                    "<div class=\"timeline-status\">No video attachment found for this test.</div>"
-            } else {
+            let mediaMode: String
+            let layoutClass: String
+            if !videoSources.isEmpty {
+                mediaMode = "video"
+                layoutClass = ""
                 if videoSources.count > 1 {
                     let options = videoSources.enumerated().map { index, source in
                         "<option value=\"\(index)\">\(htmlEscape(source.label))</option>"
@@ -1335,6 +1427,25 @@ extension XCTestReport {
                         </div>
                         """
                 }.joined(separator: "")
+            } else if !screenshotSources.isEmpty {
+                mediaMode = "screenshot"
+                layoutClass = ""
+                videoSelector = ""
+                let firstScreenshot = screenshotSources.first!
+                let firstAlt = htmlEscape(firstScreenshot.label)
+                videoElements = """
+                    <div class="video-card timeline-video-card" data-video-index="0">
+                        <div class="timeline-video-frame">
+                            <img class="timeline-still" data-still-frame src="\(firstScreenshot.src)" alt="\(firstAlt)">
+                            <div class="touch-overlay-layer" data-touch-overlay></div>
+                        </div>
+                    </div>
+                    """
+            } else {
+                mediaMode = "none"
+                layoutClass = " timeline-layout-single"
+                videoSelector = ""
+                videoElements = ""
             }
 
             let firstEventLabel = timestampedNodes.first.map {
@@ -1346,18 +1457,24 @@ extension XCTestReport {
                 return "{id:'\(node.id)',title:'\(title)',time:\(time)}"
             }.joined(separator: ",")
             let initialFailureEventIndex = timestampedNodes.firstIndex { $0.failureAssociated } ?? -1
+            let videoPanelHtml: String =
+                mediaMode == "none"
+                ? ""
+                : """
+                    <div class="video-panel">
+                        \(videoSelector)
+                        \(videoElements)
+                    </div>
+                    """
 
             return """
                 <div class="timeline-video-section">
-                    <div class="timeline-video-layout" data-timeline-root data-timeline-base="\(timelineBaseTime)" data-video-base="\(defaultVideoStart)">
+                    <div class="timeline-video-layout\(layoutClass)" data-timeline-root data-media-mode="\(mediaMode)" data-timeline-base="\(timelineBaseTime)" data-video-base="\(defaultVideoStart)">
                         <div class="timeline-panel">
                             <div class="timeline-current" data-active-event>\(firstEventLabel)</div>
                             \(timelineTree)
                         </div>
-                        <div class="video-panel">
-                            \(videoSelector)
-                            \(videoElements)
-                        </div>
+                        \(videoPanelHtml)
                     </div>
                     <div class="timeline-controls" data-timeline-controls>
                         <input type="range" class="timeline-scrubber" min="0" max="0" step="0.05" value="0" data-scrubber>
@@ -1401,13 +1518,20 @@ extension XCTestReport {
                   var cards = Array.prototype.slice.call(root.querySelectorAll('[data-video-index]'));
                   var events = [\(eventData)];
                   var initialFailureEventIndex = \(initialFailureEventIndex);
+                  var mediaMode = root.dataset.mediaMode || 'video';
                   var touchGestures = \(touchGestureJSON);
+                  var screenshots = \(screenshotJSON);
                   var timelineBase = parseFloat(root.dataset.timelineBase || '0');
                   var fallbackVideoBase = parseFloat(root.dataset.videoBase || '0');
                   var activeIndex = 0;
                   var activeEventId = null;
                   var activeEventIndex = -1;
                   var pendingSeekTime = null;
+                  var virtualCurrentTime = 0;
+                  var virtualDuration = 0;
+                  var virtualPlaying = false;
+                  var virtualAnimationFrame = 0;
+                  var virtualLastTick = 0;
                   var touchMarker = null;
                   var touchAnimationFrame = 0;
                   var PLAY_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 6V18L18 12Z"></path></svg>';
@@ -1436,37 +1560,83 @@ extension XCTestReport {
                     return card ? card.querySelector('video') : null;
                   }
 
+                  function getActiveMediaElement() {
+                    var video = getActiveVideo();
+                    if (video) return video;
+                    var card = getActiveVideoCard();
+                    return card ? card.querySelector('[data-still-frame]') : null;
+                  }
+
                   function getActiveTouchLayer() {
                     var card = getActiveVideoCard();
                     return card ? card.querySelector('[data-touch-overlay]') : null;
                   }
 
-                  function activeVideoStartTime() {
+                  function activeMediaStartTime() {
                     var video = getActiveVideo();
-                    if (!video) return fallbackVideoBase || timelineBase || 0;
+                    if (!video) return timelineBase || fallbackVideoBase || 0;
                     var value = parseFloat(video.dataset.videoStart || '');
                     if (Number.isFinite(value)) return value;
                     return fallbackVideoBase || timelineBase || 0;
                   }
 
-                  function getDisplayedVideoRect(video) {
-                    var containerWidth = video.clientWidth || 0;
-                    var containerHeight = video.clientHeight || 0;
-                    var videoWidth = video.videoWidth || 0;
-                    var videoHeight = video.videoHeight || 0;
-                    if (!containerWidth || !containerHeight || !videoWidth || !videoHeight) {
+                  function currentAbsoluteTime() {
+                    var video = getActiveVideo();
+                    if (video) return activeMediaStartTime() + (video.currentTime || 0);
+                    return (timelineBase || 0) + (virtualCurrentTime || 0);
+                  }
+
+                  function getDisplayedMediaRect(mediaElement) {
+                    var containerWidth = mediaElement.clientWidth || 0;
+                    var containerHeight = mediaElement.clientHeight || 0;
+                    var mediaWidth = mediaElement.videoWidth || mediaElement.naturalWidth || 0;
+                    var mediaHeight = mediaElement.videoHeight || mediaElement.naturalHeight || 0;
+                    if (!containerWidth || !containerHeight || !mediaWidth || !mediaHeight) {
                       return { x: 0, y: 0, width: containerWidth, height: containerHeight };
                     }
 
-                    var scale = Math.min(containerWidth / videoWidth, containerHeight / videoHeight);
-                    var width = videoWidth * scale;
-                    var height = videoHeight * scale;
+                    var scale = Math.min(containerWidth / mediaWidth, containerHeight / mediaHeight);
+                    var width = mediaWidth * scale;
+                    var height = mediaHeight * scale;
                     return {
                       x: (containerWidth - width) / 2,
                       y: (containerHeight - height) / 2,
                       width: width,
                       height: height
                     };
+                  }
+
+                  function updateStillFrameForTime(absoluteTime) {
+                    if (mediaMode !== 'screenshot' || !screenshots.length) return;
+                    var frame = root.querySelector('[data-still-frame]');
+                    if (!frame) return;
+
+                    var idx = 0;
+                    while (idx + 1 < screenshots.length && screenshots[idx + 1].time <= absoluteTime + 0.05) idx += 1;
+                    var nextShot = screenshots[idx];
+                    if (!nextShot) return;
+
+                    if (frame.dataset.currentSrc !== nextShot.src) {
+                      frame.src = nextShot.src;
+                      frame.dataset.currentSrc = nextShot.src;
+                    }
+                    frame.alt = nextShot.label || 'Screenshot';
+                  }
+
+                  function setAbsoluteTime(absoluteTime) {
+                    var video = getActiveVideo();
+                    if (video) {
+                      var target = Math.max(0, absoluteTime - activeMediaStartTime());
+                      if (video.readyState < 1) {
+                        pendingSeekTime = target;
+                      } else {
+                        video.currentTime = target;
+                      }
+                      return;
+                    }
+
+                    virtualCurrentTime = Math.max(0, Math.min(virtualDuration, absoluteTime - (timelineBase || 0)));
+                    updateStillFrameForTime((timelineBase || 0) + virtualCurrentTime);
                   }
 
                   function ensureTouchMarker(layer) {
@@ -1524,14 +1694,14 @@ extension XCTestReport {
                   }
 
                   function updateTouchOverlay() {
-                    var video = getActiveVideo();
+                    var media = getActiveMediaElement();
                     var layer = getActiveTouchLayer();
-                    if (!video || !layer || !touchGestures.length) {
+                    if (!media || !layer || !touchGestures.length) {
                       hideTouchMarker();
                       return;
                     }
 
-                    var absoluteTime = activeVideoStartTime() + (video.currentTime || 0);
+                    var absoluteTime = currentAbsoluteTime();
                     var gesture = activeGestureAtTime(absoluteTime);
                     if (!gesture) {
                       hideTouchMarker();
@@ -1546,7 +1716,7 @@ extension XCTestReport {
                       return;
                     }
 
-                    var rect = getDisplayedVideoRect(video);
+                    var rect = getDisplayedMediaRect(media);
                     if (rect.width <= 0 || rect.height <= 0 || gesture.width <= 0 || gesture.height <= 0) {
                       hideTouchMarker();
                       return;
@@ -1582,11 +1752,48 @@ extension XCTestReport {
                       touchAnimationFrame = 0;
                       updateTouchOverlay();
                       var video = getActiveVideo();
-                      if (video && !video.paused) {
+                      var shouldContinue = (video && !video.paused) || (!video && virtualPlaying);
+                      if (shouldContinue) {
                         touchAnimationFrame = requestAnimationFrame(tick);
                       }
                     }
                     touchAnimationFrame = requestAnimationFrame(tick);
+                  }
+
+                  function stopVirtualPlayback() {
+                    if (!virtualPlaying && !virtualAnimationFrame) return;
+                    virtualPlaying = false;
+                    virtualLastTick = 0;
+                    if (virtualAnimationFrame) {
+                      cancelAnimationFrame(virtualAnimationFrame);
+                      virtualAnimationFrame = 0;
+                    }
+                    stopTouchAnimation();
+                    updateFromVideoTime();
+                  }
+
+                  function startVirtualPlayback() {
+                    if (virtualPlaying || virtualDuration <= 0) return;
+                    virtualPlaying = true;
+                    virtualLastTick = 0;
+
+                    function tick(timestamp) {
+                      if (!virtualPlaying) return;
+                      if (!virtualLastTick) virtualLastTick = timestamp;
+                      var delta = Math.max(0, (timestamp - virtualLastTick) / 1000);
+                      virtualLastTick = timestamp;
+                      virtualCurrentTime = Math.min(virtualDuration, virtualCurrentTime + delta);
+                      updateFromVideoTime();
+                      if (virtualCurrentTime >= virtualDuration) {
+                        stopVirtualPlayback();
+                        return;
+                      }
+                      virtualAnimationFrame = requestAnimationFrame(tick);
+                    }
+
+                    virtualAnimationFrame = requestAnimationFrame(tick);
+                    startTouchAnimation();
+                    updateFromVideoTime();
                   }
 
                   function eventIndexById(eventId) {
@@ -1631,15 +1838,8 @@ extension XCTestReport {
                     var event = events[index];
                     setActiveEvent(event.id, shouldReveal);
                     if (eventLabel) eventLabel.textContent = event.title;
-                    var video = getActiveVideo();
-                    if (video) {
-                      var target = Math.max(0, event.time - activeVideoStartTime());
-                      if (video.readyState < 1) {
-                        pendingSeekTime = target;
-                      } else {
-                        video.currentTime = target;
-                      }
-                    }
+                    setAbsoluteTime(event.time);
+                    updateFromVideoTime();
                   }
 
                   function eventIndexForAbsoluteTime(absTime) {
@@ -1651,9 +1851,8 @@ extension XCTestReport {
 
                   function currentEventIndexForNavigation() {
                     if (activeEventIndex >= 0 && activeEventIndex < events.length) return activeEventIndex;
-                    var video = getActiveVideo();
-                    if (!video) return events.length ? 0 : -1;
-                    var absoluteTime = activeVideoStartTime() + (video.currentTime || 0);
+                    if (!events.length) return -1;
+                    var absoluteTime = currentAbsoluteTime();
                     return eventIndexForAbsoluteTime(absoluteTime);
                   }
 
@@ -1673,11 +1872,18 @@ extension XCTestReport {
 
                   function togglePlayback() {
                     var video = getActiveVideo();
-                    if (!video) return;
-                    if (video.paused) {
-                      video.play().catch(function() {});
+                    if (video) {
+                      if (video.paused) {
+                        video.play().catch(function() {});
+                      } else {
+                        video.pause();
+                      }
+                      return;
+                    }
+                    if (virtualPlaying) {
+                      stopVirtualPlayback();
                     } else {
-                      video.pause();
+                      startVirtualPlayback();
                     }
                   }
 
@@ -1692,14 +1898,20 @@ extension XCTestReport {
 
                   function updateFromVideoTime() {
                     var video = getActiveVideo();
-                    if (!video) return;
-                    scrubber.value = video.currentTime || 0;
-                    var absoluteTime = activeVideoStartTime() + (video.currentTime || 0);
+                    var absoluteTime = 0;
+                    if (video) {
+                      scrubber.value = video.currentTime || 0;
+                      absoluteTime = activeMediaStartTime() + (video.currentTime || 0);
+                    } else {
+                      scrubber.value = virtualCurrentTime || 0;
+                      absoluteTime = (timelineBase || 0) + (virtualCurrentTime || 0);
+                      updateStillFrameForTime(absoluteTime);
+                    }
                     var idx = eventIndexForAbsoluteTime(absoluteTime);
-                    if (pendingSeekTime != null && activeEventIndex >= 0 && activeEventIndex < events.length) {
+                    if (video && pendingSeekTime != null && activeEventIndex >= 0 && activeEventIndex < events.length) {
                       idx = activeEventIndex;
                     }
-                    if (video.paused && activeEventIndex >= 0 && activeEventIndex < events.length) {
+                    if (video && video.paused && activeEventIndex >= 0 && activeEventIndex < events.length) {
                       var selected = events[activeEventIndex];
                       if (Math.abs((selected.time || 0) - absoluteTime) <= 0.06) {
                         idx = activeEventIndex;
@@ -1709,15 +1921,20 @@ extension XCTestReport {
                       setActiveEvent(events[idx].id, false);
                       if (eventLabel) eventLabel.textContent = events[idx].title;
                     }
-                    timeLabel.textContent = formatSeconds(video.currentTime || 0);
-                    var duration = Number.isFinite(video.duration) ? video.duration : 0;
+                    var currentOffset = video ? (video.currentTime || 0) : (virtualCurrentTime || 0);
+                    timeLabel.textContent = formatSeconds(currentOffset);
+                    var duration = video ? (Number.isFinite(video.duration) ? video.duration : 0) : virtualDuration;
                     if (totalTimeLabel) totalTimeLabel.textContent = formatSeconds(duration);
-                    setPlayButtonIcon(!video.paused);
+                    setPlayButtonIcon(video ? !video.paused : virtualPlaying);
                     updateTouchOverlay();
                   }
 
                   function clampScrubber(video) {
-                    if (!video) return;
+                    if (!video) {
+                      scrubber.max = virtualDuration;
+                      updateFromVideoTime();
+                      return;
+                    }
                     var hasMetadata = video.readyState >= 1 && Number.isFinite(video.duration);
                     var duration = hasMetadata ? Math.max(0, video.duration) : 0;
                     scrubber.max = duration;
@@ -1756,14 +1973,7 @@ extension XCTestReport {
                     if (!raw) return;
                     var absoluteTime = parseFloat(raw);
                     if (!Number.isFinite(absoluteTime)) return;
-                    var video = getActiveVideo();
-                    if (!video) return;
-                    var target = Math.max(0, absoluteTime - activeVideoStartTime());
-                    if (video.readyState < 1) {
-                      pendingSeekTime = target;
-                    } else {
-                      video.currentTime = target;
-                    }
+                    setAbsoluteTime(absoluteTime);
                     setActiveEvent(node.getAttribute('data-event-id'), true);
                     var matched = events.find(function(item) { return item.id === node.getAttribute('data-event-id'); });
                     if (matched && eventLabel) eventLabel.textContent = matched.title;
@@ -1784,14 +1994,19 @@ extension XCTestReport {
 
                   scrubber.addEventListener('input', function() {
                     var video = getActiveVideo();
-                    if (!video) return;
-                    video.currentTime = parseFloat(scrubber.value || '0');
+                    var value = parseFloat(scrubber.value || '0');
+                    if (video) {
+                      video.currentTime = value;
+                    } else {
+                      virtualCurrentTime = Math.max(0, Math.min(virtualDuration, value));
+                    }
                     updateFromVideoTime();
                   });
 
                   if (selector) {
                     selector.addEventListener('change', function() {
                       stopTouchAnimation();
+                      stopVirtualPlayback();
                       activeIndex = parseInt(selector.value, 10) || 0;
                       cards.forEach(function(card, idx) {
                         var video = card.querySelector('video');
@@ -1838,6 +2053,10 @@ extension XCTestReport {
                     }
                   });
 
+                  var lastEventTime = events.length ? events[events.length - 1].time : (timelineBase || 0);
+                  var lastScreenshotTime = screenshots.length ? screenshots[screenshots.length - 1].time : (timelineBase || 0);
+                  virtualDuration = Math.max(0, Math.max(lastEventTime, lastScreenshotTime) - (timelineBase || 0));
+                  setPlayButtonIcon(false);
                   var startingVideo = getActiveVideo();
                   var didFocusFailureOnLoad = false;
                   if (initialFailureEventIndex >= 0 && events.length) {
@@ -1852,6 +2071,11 @@ extension XCTestReport {
                     }
                     if (!startingVideo.paused) {
                       startTouchAnimation();
+                    }
+                  } else {
+                    clampScrubber(null);
+                    if (!didFocusFailureOnLoad) {
+                      updateFromVideoTime();
                     }
                   }
                 })();

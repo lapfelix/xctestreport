@@ -1534,6 +1534,7 @@ extension XCTestReport {
                   var virtualLastTick = 0;
                   var touchMarker = null;
                   var touchAnimationFrame = 0;
+                  var scrubPreviewState = null;
                   var TOUCH_RELEASE_DURATION = 0.18;
                   var SCRUB_PREVIEW_WINDOW = 0.22;
                   var PLAY_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 6V18L18 12Z"></path></svg>';
@@ -1686,15 +1687,39 @@ extension XCTestReport {
                     var lead = previewMode ? SCRUB_PREVIEW_WINDOW : 0.02;
                     var tail = previewMode ? SCRUB_PREVIEW_WINDOW : TOUCH_RELEASE_DURATION;
                     var best = null;
+                    var bestIndex = -1;
                     for (var i = 0; i < touchGestures.length; i += 1) {
                       var gesture = touchGestures[i];
                       if (absoluteTime < gesture.startTime - lead) continue;
                       if (absoluteTime > gesture.endTime + tail) continue;
                       if (!best || gesture.startTime >= best.startTime) {
                         best = gesture;
+                        bestIndex = i;
                       }
                     }
-                    return best;
+                    return best ? { gesture: best, index: bestIndex } : null;
+                  }
+
+                  function maybeStartScrubPreview(absoluteTime) {
+                    var info = activeGestureAtTime(absoluteTime, true);
+                    if (!info) {
+                      scrubPreviewState = null;
+                      return;
+                    }
+
+                    if (scrubPreviewState && scrubPreviewState.index === info.index) {
+                      if (Math.abs(absoluteTime - scrubPreviewState.anchorTime) <= 0.35) {
+                        return;
+                      }
+                    }
+
+                    var gesture = info.gesture;
+                    scrubPreviewState = {
+                      index: info.index,
+                      anchorTime: Math.max(gesture.startTime, Math.min(gesture.endTime, absoluteTime)),
+                      startedAt: performance.now()
+                    };
+                    startTouchAnimation();
                   }
 
                   function updateTouchOverlay() {
@@ -1707,7 +1732,38 @@ extension XCTestReport {
 
                     var absoluteTime = currentAbsoluteTime();
                     var previewMode = !(mediaMode === 'video' && getActiveVideo() && !getActiveVideo().paused) && !virtualPlaying;
-                    var gesture = activeGestureAtTime(absoluteTime, previewMode);
+                    var gesture = null;
+                    var pointTime = absoluteTime;
+                    var releaseProgress = 0;
+
+                    if (previewMode && scrubPreviewState) {
+                      gesture = touchGestures[scrubPreviewState.index] || null;
+                      if (gesture) {
+                        var elapsed = Math.max(0, (performance.now() - scrubPreviewState.startedAt) / 1000);
+                        var animatedTime = scrubPreviewState.anchorTime + elapsed;
+                        pointTime = Math.max(gesture.startTime, Math.min(gesture.endTime, animatedTime));
+                        if (animatedTime > gesture.endTime) {
+                          releaseProgress = Math.min(1, (animatedTime - gesture.endTime) / TOUCH_RELEASE_DURATION);
+                        }
+                        if (releaseProgress >= 1) {
+                          scrubPreviewState = null;
+                        }
+                      } else {
+                        scrubPreviewState = null;
+                      }
+                    }
+
+                    if (!gesture) {
+                      var gestureInfo = activeGestureAtTime(absoluteTime, previewMode);
+                      gesture = gestureInfo ? gestureInfo.gesture : null;
+                      if (previewMode && !gesture) {
+                        scrubPreviewState = null;
+                      }
+                      if (previewMode && gesture) {
+                        pointTime = Math.max(gesture.startTime, Math.min(gesture.endTime, absoluteTime));
+                      }
+                    }
+
                     if (!gesture) {
                       hideTouchMarker();
                       return;
@@ -1715,10 +1771,6 @@ extension XCTestReport {
 
                     var marker = ensureTouchMarker(layer);
                     if (!marker) return;
-                    var pointTime = absoluteTime;
-                    if (previewMode) {
-                      pointTime = Math.max(gesture.startTime, Math.min(gesture.endTime, absoluteTime));
-                    }
                     var point = pointForGestureAtTime(gesture, pointTime);
                     if (!point) {
                       hideTouchMarker();
@@ -1736,14 +1788,12 @@ extension XCTestReport {
                     var x = rect.x + normalizedX * rect.width;
                     var y = rect.y + normalizedY * rect.height;
 
-                    var releaseProgress = 0;
                     if (!previewMode && absoluteTime > gesture.endTime) {
                       releaseProgress = Math.min(1, (absoluteTime - gesture.endTime) / TOUCH_RELEASE_DURATION);
                     }
                     var scale = 1 + (releaseProgress * 0.65);
-                    var opacity = previewMode
-                      ? 0.9
-                      : (absoluteTime <= gesture.endTime ? 0.9 : (1 - releaseProgress) * 0.9);
+                    var isActiveTouch = previewMode ? (releaseProgress <= 0) : (absoluteTime <= gesture.endTime);
+                    var opacity = isActiveTouch ? 0.9 : (1 - releaseProgress) * 0.9;
 
                     marker.style.left = x + 'px';
                     marker.style.top = y + 'px';
@@ -1763,7 +1813,7 @@ extension XCTestReport {
                       touchAnimationFrame = 0;
                       updateTouchOverlay();
                       var video = getActiveVideo();
-                      var shouldContinue = (video && !video.paused) || (!video && virtualPlaying);
+                      var shouldContinue = (video && !video.paused) || (!video && virtualPlaying) || !!scrubPreviewState;
                       if (shouldContinue) {
                         touchAnimationFrame = requestAnimationFrame(tick);
                       }
@@ -1885,6 +1935,7 @@ extension XCTestReport {
                     var video = getActiveVideo();
                     if (video) {
                       if (video.paused) {
+                        scrubPreviewState = null;
                         video.play().catch(function() {});
                       } else {
                         video.pause();
@@ -2017,6 +2068,7 @@ extension XCTestReport {
                       setActiveEvent(events[idx].id, false);
                       if (eventLabel) eventLabel.textContent = events[idx].title;
                     }
+                    maybeStartScrubPreview(absoluteTime);
                     if (!video) {
                       updateStillFrameForTime(absoluteTime);
                     }

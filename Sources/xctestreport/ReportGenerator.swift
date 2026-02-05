@@ -1366,9 +1366,21 @@ extension XCTestReport {
                             <span data-total-time>00:00</span>
                         </div>
                         <div class="timeline-buttons">
-                            <button type="button" class="timeline-button" data-nav="prev" aria-label="Previous event">◀︎</button>
-                            <button type="button" class="timeline-button timeline-button-play" data-nav="play" aria-label="Play or pause">▶︎</button>
-                            <button type="button" class="timeline-button" data-nav="next" aria-label="Next event">▶︎</button>
+                            <button type="button" class="timeline-button" data-nav="prev" aria-label="Previous event">
+                                <svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                    <path d="M15.5 6L9.5 12L15.5 18L17 16.5L12.5 12L17 7.5Z"></path>
+                                </svg>
+                            </button>
+                            <button type="button" class="timeline-button timeline-button-play" data-nav="play" aria-label="Play or pause">
+                                <svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                    <path d="M8 6V18L18 12Z"></path>
+                                </svg>
+                            </button>
+                            <button type="button" class="timeline-button" data-nav="next" aria-label="Next event">
+                                <svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                    <path d="M8.5 6L14.5 12L8.5 18L7 16.5L11.5 12L7 7.5Z"></path>
+                                </svg>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -1398,6 +1410,8 @@ extension XCTestReport {
                   var pendingSeekTime = null;
                   var touchMarker = null;
                   var touchAnimationFrame = 0;
+                  var PLAY_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 6V18L18 12Z"></path></svg>';
+                  var PAUSE_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="6" width="4" height="12" rx="1"></rect><rect x="13" y="6" width="4" height="12" rx="1"></rect></svg>';
 
                   function formatSeconds(seconds) {
                     var safe = Math.max(0, Math.floor(seconds));
@@ -1406,6 +1420,11 @@ extension XCTestReport {
                     var s = safe % 60;
                     if (h > 0) return h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
                     return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+                  }
+
+                  function setPlayButtonIcon(isPlaying) {
+                    if (!playButton) return;
+                    playButton.innerHTML = isPlaying ? PAUSE_ICON : PLAY_ICON;
                   }
 
                   function getActiveVideoCard() {
@@ -1693,7 +1712,7 @@ extension XCTestReport {
                     timeLabel.textContent = formatSeconds(video.currentTime || 0);
                     var duration = Number.isFinite(video.duration) ? video.duration : 0;
                     if (totalTimeLabel) totalTimeLabel.textContent = formatSeconds(duration);
-                    playButton.textContent = video.paused ? '▶︎' : '❚❚';
+                    setPlayButtonIcon(!video.paused);
                     updateTouchOverlay();
                   }
 
@@ -2161,6 +2180,7 @@ extension XCTestReport {
                             </details>
                             """
                     }
+                    let testSubtitle = htmlEscape(test.nodeIdentifier ?? "Test report")
 
                     let testDetailHTML = """
                         <!DOCTYPE html>
@@ -2175,12 +2195,21 @@ extension XCTestReport {
                         <body class="test-detail-page">
                         <div class="test-detail-shell">
                             <header class="test-header-compact">
-                                <div class="test-title-row">
-                                    <h1 class="test-title-compact">\(htmlEscape(test.name))</h1>
-                                    <span class="status-badge \(statusBadgeClass)">\(htmlEscape(result))</span>
-                                    <span class="test-duration-pill">\(htmlEscape(duration))</span>
+                                <a class="test-back-link" href="index.html" aria-label="Back to report index">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                        <path fill="currentColor" d="M14.71 5.29a1 1 0 0 1 0 1.42L10.41 11H20a1 1 0 1 1 0 2h-9.59l4.3 4.29a1 1 0 1 1-1.42 1.42l-6-6a1 1 0 0 1 0-1.42l6-6a1 1 0 0 1 1.42 0Z"/>
+                                    </svg>
+                                    <span>Back</span>
+                                </a>
+                                <div class="test-title-group">
+                                    <div class="test-title-row">
+                                        <h1 class="test-title-compact">\(htmlEscape(test.name))</h1>
+                                        <span class="status-badge \(statusBadgeClass)">\(htmlEscape(result))</span>
+                                        <span class="test-duration-pill">\(htmlEscape(duration))</span>
+                                    </div>
+                                    <div class="test-subtitle">\(testSubtitle)</div>
                                 </div>
-                                <a class="test-back-link" href="index.html">Back to index</a>
+                                <div class="test-header-spacer" aria-hidden="true"></div>
                             </header>
                             \(compactFailureBoxHtml)
                             \(detailsPanelHtml)

@@ -39,17 +39,26 @@ let sharedStyles = """
     }
 
     .test-header-compact {
-        display: flex;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
         align-items: center;
-        justify-content: space-between;
         gap: 10px;
         min-height: 0;
+    }
+
+    .test-title-group {
+        min-width: 0;
+        justify-self: center;
+        text-align: center;
+        display: grid;
+        gap: 2px;
     }
 
     .test-title-row {
         display: flex;
         align-items: center;
         flex-wrap: wrap;
+        justify-content: center;
         gap: 6px 10px;
         min-width: 0;
     }
@@ -77,8 +86,36 @@ let sharedStyles = """
     }
 
     .test-back-link {
-        font-size: 0.85rem;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 0.82rem;
         white-space: nowrap;
+        color: #334155;
+        border: 1px solid #D4DEED;
+        background: #F6F9FF;
+        border-radius: 999px;
+        padding: 5px 10px;
+    }
+
+    .test-back-link svg {
+        width: 14px;
+        height: 14px;
+    }
+
+    .test-header-spacer {
+        justify-self: end;
+    }
+
+    .test-subtitle {
+        color: #66758D;
+        font-size: 0.76rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: min(70vw, 980px);
     }
 
     .test-error-box {
@@ -656,11 +693,22 @@ let sharedStyles = """
 
     .timeline-button-play {
         width: 40px;
-        font-size: 1.05em;
     }
 
     .timeline-button:hover {
         background: #F0F0F0;
+    }
+
+    .timeline-icon {
+        width: 16px;
+        height: 16px;
+        display: block;
+        fill: currentColor;
+    }
+
+    .timeline-button-play .timeline-icon {
+        width: 17px;
+        height: 17px;
     }
 
     .timeline-scrubber {
@@ -905,12 +953,31 @@ let sharedStyles = """
         }
 
         .test-detail-page .test-header-compact {
-            align-items: flex-start;
-            flex-direction: column;
+            grid-template-columns: auto 1fr;
+            align-items: start;
+            row-gap: 6px;
         }
 
         .test-detail-page .test-title-compact {
             max-width: 100%;
+        }
+
+        .test-detail-page .test-title-group {
+            grid-column: 1 / -1;
+            justify-self: start;
+            text-align: left;
+        }
+
+        .test-detail-page .test-title-row {
+            justify-content: flex-start;
+        }
+
+        .test-detail-page .test-subtitle {
+            max-width: 100%;
+        }
+
+        .test-detail-page .test-header-spacer {
+            display: none;
         }
 
         .test-detail-page .timeline-video-layout {
@@ -975,6 +1042,16 @@ let sharedStyles = """
             background: #1F2B42;
             border-color: #355590;
             color: #CFDAF8;
+        }
+
+        .test-subtitle {
+            color: #AEBAD0;
+        }
+
+        .test-back-link {
+            color: #E1E8F5;
+            border-color: #3C4A62;
+            background: #1B2432;
         }
 
         .test-error-box {

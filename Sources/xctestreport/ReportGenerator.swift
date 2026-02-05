@@ -2011,6 +2011,16 @@ extension XCTestReport {
                     } else {
                       virtualCurrentTime = Math.max(0, Math.min(virtualDuration, value));
                     }
+                    var absoluteTime = video ? (activeMediaStartTime() + value) : ((timelineBase || 0) + virtualCurrentTime);
+                    var idx = eventIndexForAbsoluteTime(absoluteTime);
+                    if (idx >= 0) {
+                      setActiveEvent(events[idx].id, false);
+                      if (eventLabel) eventLabel.textContent = events[idx].title;
+                    }
+                    if (!video) {
+                      updateStillFrameForTime(absoluteTime);
+                    }
+                    updateTouchOverlay();
                     updateFromVideoTime();
                   });
 

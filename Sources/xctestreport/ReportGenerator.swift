@@ -1394,6 +1394,14 @@ extension XCTestReport {
                 timelineTree =
                     "<div class=\"timeline-tree\"><ul class=\"timeline-root\">\(renderTimelineNodesHTML(collapsedTimelineNodes, baseTime: timelineBaseTime, depth: 0))</ul></div>"
             }
+            let timelineTreeControls = collapsedTimelineNodes.isEmpty
+                ? ""
+                : """
+                    <div class="timeline-tree-actions">
+                        <button type="button" class="timeline-tree-action-btn" data-tree-action="collapse">Collapse all</button>
+                        <button type="button" class="timeline-tree-action-btn" data-tree-action="expand">Expand all</button>
+                    </div>
+                    """
 
             let videoSelector: String
             let videoElements: String
@@ -1473,6 +1481,7 @@ extension XCTestReport {
                         <div class="timeline-panel">
                             <div class="timeline-current" data-active-event>\(firstEventLabel)</div>
                             \(timelineTree)
+                            \(timelineTreeControls)
                         </div>
                         \(videoPanelHtml)
                     </div>
@@ -1511,9 +1520,12 @@ extension XCTestReport {
                   var timeLabel = controls.querySelector('[data-playback-time]');
                   var totalTimeLabel = controls.querySelector('[data-total-time]');
                   var eventLabel = root.querySelector('[data-active-event]');
+                  var timelineTree = root.querySelector('.timeline-tree');
                   var playButton = controls.querySelector('[data-nav=\"play\"]');
                   var prevButton = controls.querySelector('[data-nav=\"prev\"]');
                   var nextButton = controls.querySelector('[data-nav=\"next\"]');
+                  var collapseAllButton = root.querySelector('[data-tree-action=\"collapse\"]');
+                  var expandAllButton = root.querySelector('[data-tree-action=\"expand\"]');
                   var selector = root.querySelector('[data-video-selector]');
                   var cards = Array.prototype.slice.call(root.querySelectorAll('[data-video-index]'));
                   var events = [\(eventData)];
@@ -1606,6 +1618,18 @@ extension XCTestReport {
                       width: width,
                       height: height
                     };
+                  }
+
+                  function updateActiveMediaAspect() {
+                    var card = getActiveVideoCard();
+                    var frame = card ? card.querySelector('.timeline-video-frame') : null;
+                    var media = getActiveMediaElement();
+                    if (!frame || !media) return;
+                    var width = media.videoWidth || media.naturalWidth || 0;
+                    var height = media.videoHeight || media.naturalHeight || 0;
+                    if (width > 0 && height > 0) {
+                      frame.style.setProperty('--media-aspect', width + ' / ' + height);
+                    }
                   }
 
                   function updateStillFrameForTime(absoluteTime) {
@@ -1823,21 +1847,27 @@ extension XCTestReport {
                     }
                   }
 
-                  function setActiveEvent(eventId, shouldReveal) {
+                  function setActiveEvent(eventId, shouldReveal, scrollBehavior) {
                     if (!eventId) return;
                     var idx = eventIndexById(eventId);
                     if (idx >= 0) activeEventIndex = idx;
-                    if (eventId === activeEventId) return;
+                    var next = root.querySelector('.timeline-event[data-event-id=\"' + eventId + '\"]');
+                    if (eventId === activeEventId) {
+                      if (next && shouldReveal) {
+                        expandAncestorDetails(next);
+                        next.scrollIntoView({ block: 'nearest', behavior: scrollBehavior || 'smooth' });
+                      }
+                      return;
+                    }
                     var oldActive = root.querySelector('.timeline-event.timeline-active');
                     if (oldActive) oldActive.classList.remove('timeline-active');
-                    var next = root.querySelector('.timeline-event[data-event-id=\"' + eventId + '\"]');
                     if (next) {
                       if (shouldReveal) {
                         expandAncestorDetails(next);
                       }
                       next.classList.add('timeline-active');
                       if (shouldReveal) {
-                        next.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                        next.scrollIntoView({ block: 'nearest', behavior: scrollBehavior || 'smooth' });
                       }
                     }
                     activeEventId = eventId;
@@ -1958,7 +1988,10 @@ extension XCTestReport {
 
                   function attachVideoHandlers(video) {
                     if (!video) return;
-                    video.addEventListener('loadedmetadata', function() { clampScrubber(video); });
+                    video.addEventListener('loadedmetadata', function() {
+                      updateActiveMediaAspect();
+                      clampScrubber(video);
+                    });
                     video.addEventListener('timeupdate', updateFromVideoTime);
                     video.addEventListener('play', function() {
                       updateFromVideoTime();
@@ -1975,7 +2008,33 @@ extension XCTestReport {
                   cards.forEach(function(card) {
                     var video = card.querySelector('video');
                     attachVideoHandlers(video);
+                    var still = card.querySelector('[data-still-frame]');
+                    if (still) {
+                      still.addEventListener('load', function() {
+                        updateActiveMediaAspect();
+                        updateTouchOverlay();
+                      });
+                      if (still.complete) {
+                        updateActiveMediaAspect();
+                      }
+                    }
                   });
+
+                  if (collapseAllButton && timelineTree) {
+                    collapseAllButton.addEventListener('click', function() {
+                      Array.prototype.forEach.call(timelineTree.querySelectorAll('details'), function(detail) {
+                        detail.open = false;
+                      });
+                    });
+                  }
+
+                  if (expandAllButton && timelineTree) {
+                    expandAllButton.addEventListener('click', function() {
+                      Array.prototype.forEach.call(timelineTree.querySelectorAll('details'), function(detail) {
+                        detail.open = true;
+                      });
+                    });
+                  }
 
                   root.addEventListener('click', function(event) {
                     var node = event.target.closest('.timeline-event[data-event-time]');
@@ -2014,7 +2073,7 @@ extension XCTestReport {
                     var absoluteTime = video ? (activeMediaStartTime() + value) : ((timelineBase || 0) + virtualCurrentTime);
                     var idx = eventIndexForAbsoluteTime(absoluteTime);
                     if (idx >= 0) {
-                      setActiveEvent(events[idx].id, false);
+                      setActiveEvent(events[idx].id, true, 'auto');
                       if (eventLabel) eventLabel.textContent = events[idx].title;
                     }
                     if (!video) {
@@ -2040,6 +2099,7 @@ extension XCTestReport {
                       });
                       var activeVideo = getActiveVideo();
                       if (activeVideo) {
+                        updateActiveMediaAspect();
                         clampScrubber(activeVideo);
                         updateFromVideoTime();
                         if (!activeVideo.paused) {
@@ -2086,6 +2146,7 @@ extension XCTestReport {
                     didFocusFailureOnLoad = true;
                   }
                   if (startingVideo) {
+                    updateActiveMediaAspect();
                     clampScrubber(startingVideo);
                     if (!didFocusFailureOnLoad || pendingSeekTime == null) {
                       updateFromVideoTime();
@@ -2094,6 +2155,7 @@ extension XCTestReport {
                       startTouchAnimation();
                     }
                   } else {
+                    updateActiveMediaAspect();
                     clampScrubber(null);
                     if (!didFocusFailureOnLoad) {
                       updateFromVideoTime();

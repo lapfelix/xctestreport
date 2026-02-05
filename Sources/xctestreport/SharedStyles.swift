@@ -96,6 +96,8 @@ let sharedStyles = """
         background: #F6F9FF;
         border-radius: 999px;
         padding: 5px 10px;
+        justify-self: start;
+        width: fit-content;
     }
 
     .test-back-link svg {
@@ -499,6 +501,28 @@ let sharedStyles = """
         min-height: 0;
     }
 
+    .timeline-tree-actions {
+        margin-top: 8px;
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+    }
+
+    .timeline-tree-action-btn {
+        border: 1px solid #CBD5E3;
+        background: #FAFAFA;
+        color: #334155;
+        border-radius: 6px;
+        padding: 4px 9px;
+        font-size: 0.78rem;
+        line-height: 1;
+        cursor: pointer;
+    }
+
+    .timeline-tree-action-btn:hover {
+        background: #F0F3F8;
+    }
+
     .timeline-tree ul {
         list-style: none;
         margin: 0;
@@ -770,7 +794,7 @@ let sharedStyles = """
     .timeline-video-frame {
         position: relative;
         width: 100%;
-        aspect-ratio: 9 / 16;
+        aspect-ratio: var(--media-aspect, 9 / 16);
         border-radius: 8px;
         overflow: hidden;
         border: 1px solid #D5DCE7;
@@ -1203,6 +1227,16 @@ let sharedStyles = """
             color: #e7e7e7;
             background-color: #4a4a4a;
             border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+
+        .timeline-tree-action-btn {
+            color: #E1E8F5;
+            background-color: #253043;
+            border-color: #4B5E80;
+        }
+
+        .timeline-tree-action-btn:hover {
+            background-color: #2D3A52;
         }
 
         .timeline-button:hover {

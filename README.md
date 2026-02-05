@@ -21,7 +21,7 @@ OPTIONS:
 
 ## What's missing
 
-- Support for attachments (the last screenshot of a failed test would be nice)
+- Support for non-video attachments (for example screenshots and text logs) in test detail pages
 - Support for multiple test plans
 
 ## Installation

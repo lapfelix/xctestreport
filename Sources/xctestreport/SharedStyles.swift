@@ -804,12 +804,12 @@ let sharedStyles = """
         width: 24px;
         height: 24px;
         border-radius: 999px;
-        border: 2px solid rgba(255, 255, 255, 0.95);
-        background: rgba(255, 255, 255, 0.32);
-        box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.28), 0 6px 18px rgba(0, 0, 0, 0.25);
+        border: 2px solid rgba(58, 130, 246, 0.96);
+        background: rgba(59, 130, 246, 0.34);
+        box-shadow: 0 0 0 1px rgba(16, 64, 152, 0.35), 0 6px 18px rgba(16, 46, 102, 0.28);
         transform: translate(-50%, -50%) scale(0.9);
         opacity: 0;
-        transition: opacity 120ms linear, transform 120ms linear;
+        transition: opacity 60ms linear, transform 60ms linear;
         will-change: transform, opacity, left, top;
     }
 

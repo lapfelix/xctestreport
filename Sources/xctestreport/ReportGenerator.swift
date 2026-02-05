@@ -1534,6 +1534,8 @@ extension XCTestReport {
                   var virtualLastTick = 0;
                   var touchMarker = null;
                   var touchAnimationFrame = 0;
+                  var TOUCH_RELEASE_DURATION = 0.18;
+                  var SCRUB_PREVIEW_WINDOW = 0.22;
                   var PLAY_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 6V18L18 12Z"></path></svg>';
                   var PAUSE_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="6" width="4" height="12" rx="1"></rect><rect x="13" y="6" width="4" height="12" rx="1"></rect></svg>';
 
@@ -1679,13 +1681,15 @@ extension XCTestReport {
                     return { x: last.x, y: last.y };
                   }
 
-                  function activeGestureAtTime(absoluteTime) {
+                  function activeGestureAtTime(absoluteTime, previewMode) {
                     if (!touchGestures.length) return null;
+                    var lead = previewMode ? SCRUB_PREVIEW_WINDOW : 0.02;
+                    var tail = previewMode ? SCRUB_PREVIEW_WINDOW : TOUCH_RELEASE_DURATION;
                     var best = null;
                     for (var i = 0; i < touchGestures.length; i += 1) {
                       var gesture = touchGestures[i];
-                      if (absoluteTime < gesture.startTime - 0.02) continue;
-                      if (absoluteTime > gesture.endTime + 0.45) continue;
+                      if (absoluteTime < gesture.startTime - lead) continue;
+                      if (absoluteTime > gesture.endTime + tail) continue;
                       if (!best || gesture.startTime >= best.startTime) {
                         best = gesture;
                       }
@@ -1702,7 +1706,8 @@ extension XCTestReport {
                     }
 
                     var absoluteTime = currentAbsoluteTime();
-                    var gesture = activeGestureAtTime(absoluteTime);
+                    var previewMode = !(mediaMode === 'video' && getActiveVideo() && !getActiveVideo().paused) && !virtualPlaying;
+                    var gesture = activeGestureAtTime(absoluteTime, previewMode);
                     if (!gesture) {
                       hideTouchMarker();
                       return;
@@ -1710,7 +1715,11 @@ extension XCTestReport {
 
                     var marker = ensureTouchMarker(layer);
                     if (!marker) return;
-                    var point = pointForGestureAtTime(gesture, absoluteTime);
+                    var pointTime = absoluteTime;
+                    if (previewMode) {
+                      pointTime = Math.max(gesture.startTime, Math.min(gesture.endTime, absoluteTime));
+                    }
+                    var point = pointForGestureAtTime(gesture, pointTime);
                     if (!point) {
                       hideTouchMarker();
                       return;
@@ -1728,11 +1737,13 @@ extension XCTestReport {
                     var y = rect.y + normalizedY * rect.height;
 
                     var releaseProgress = 0;
-                    if (absoluteTime > gesture.endTime) {
-                      releaseProgress = Math.min(1, (absoluteTime - gesture.endTime) / 0.45);
+                    if (!previewMode && absoluteTime > gesture.endTime) {
+                      releaseProgress = Math.min(1, (absoluteTime - gesture.endTime) / TOUCH_RELEASE_DURATION);
                     }
-                    var scale = 1 + (releaseProgress * 0.9);
-                    var opacity = absoluteTime <= gesture.endTime ? 0.86 : (1 - releaseProgress) * 0.86;
+                    var scale = 1 + (releaseProgress * 0.65);
+                    var opacity = previewMode
+                      ? 0.9
+                      : (absoluteTime <= gesture.endTime ? 0.9 : (1 - releaseProgress) * 0.9);
 
                     marker.style.left = x + 'px';
                     marker.style.top = y + 'px';

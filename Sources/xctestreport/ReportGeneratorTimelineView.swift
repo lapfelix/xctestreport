@@ -258,7 +258,7 @@ extension XCTestReport {
                                 <div class="hierarchy-candidate-list" data-hierarchy-candidate-list></div>
                             </div>
                             <div class="hierarchy-inspector" data-hierarchy-inspector>
-                                <div class="hierarchy-inspector-title" data-hierarchy-selected-title>UI Hierarchy</div>
+                                <div class="hierarchy-inspector-title" data-hierarchy-selected-title>Selected element</div>
                                 <div class="hierarchy-inspector-subtitle" data-hierarchy-selected-subtitle>Click inside the media to inspect overlapping elements.</div>
                                 <div class="hierarchy-inspector-properties" data-hierarchy-properties></div>
                             </div>

@@ -474,10 +474,10 @@
     }, 260);
   }
 
-  function showHierarchyCandidateEmpty(snapshot, message) {
+  function showHierarchyCandidateEmpty(snapshot, message, pointLabel) {
     if (!hierarchyCandidatePanel || !hierarchyCandidateEmpty || !hierarchyCandidateHeading || !hierarchyCandidateList) return;
     hierarchyCandidatePanel.hidden = false;
-    hierarchyCandidateHeading.textContent = 'Elements at point';
+    hierarchyCandidateHeading.textContent = pointLabel ? ('Elements at point ' + pointLabel) : 'Elements at point';
     hierarchyCandidateList.innerHTML = '';
     hierarchyCandidateEmpty.textContent = message || 'No elements at this point.';
     hierarchyCandidateEmpty.hidden = false;
@@ -618,7 +618,7 @@
 
     if (!snapshot) {
       hierarchyStatus.textContent = 'No hierarchy snapshot near this moment.';
-      hierarchySelectedTitle.textContent = 'UI Hierarchy';
+      hierarchySelectedTitle.textContent = 'Selected element';
       hierarchySelectedSubtitle.textContent = 'Scrub near a hierarchy snapshot, then click inside the media.';
       hierarchyProperties.innerHTML = '';
       if (hierarchyCandidatePanel) hierarchyCandidatePanel.hidden = true;
@@ -636,15 +636,14 @@
     hierarchyStatus.textContent = snapshot.label + ' @ ' + formatSeconds(offset) + ' (' + elementCount + ' nodes)';
 
     if (!element) {
-      hierarchySelectedTitle.textContent = snapshot.label;
-      hierarchySelectedSubtitle.textContent = 'Click inside the media to choose from overlapping elements.';
-      hierarchyProperties.innerHTML = '<div class="hierarchy-prop-row"><span class="hierarchy-prop-key">Snapshot</span><span class="hierarchy-prop-value">' + escapeHTML(snapshot.label) + '</span></div>'
-        + '<div class="hierarchy-prop-row"><span class="hierarchy-prop-key">Nodes</span><span class="hierarchy-prop-value">' + String(elementCount) + '</span></div>';
+      hierarchySelectedTitle.textContent = 'Selected element';
+      hierarchySelectedSubtitle.textContent = 'Choose an item from “Elements at point”.';
+      hierarchyProperties.innerHTML = '<div class="hierarchy-prop-row"><span class="hierarchy-prop-key">Selection</span><span class="hierarchy-prop-value">None</span></div>';
       return;
     }
 
-    hierarchySelectedTitle.textContent = hierarchyElementTitle(element);
-    hierarchySelectedSubtitle.textContent = 'x ' + Number(element.x).toFixed(1) + ' · y ' + Number(element.y).toFixed(1) + ' · ' + Number(element.width).toFixed(1) + ' × ' + Number(element.height).toFixed(1);
+    hierarchySelectedTitle.textContent = 'Selected element';
+    hierarchySelectedSubtitle.textContent = hierarchyElementTitle(element) + ' · x ' + Number(element.x).toFixed(1) + ' · y ' + Number(element.y).toFixed(1) + ' · ' + Number(element.width).toFixed(1) + ' × ' + Number(element.height).toFixed(1);
 
     var rows = [];
     function pushRow(key, value, valueClassName) {
@@ -726,14 +725,14 @@
     return matches;
   }
 
-  function openHierarchyCandidateMenu(snapshot, candidates) {
+  function openHierarchyCandidateMenu(snapshot, candidates, pointLabel) {
     if (!hierarchyCandidateList || !candidates.length) return;
 
     setHierarchyPanelExpanded(true);
     var options = candidates.slice(0, 20);
     currentHierarchyCandidateIds = options.map(function(element) { return element.id; });
-    if (selectedHierarchyElementId && currentHierarchyCandidateIds.indexOf(selectedHierarchyElementId) === -1) {
-      selectedHierarchyElementId = null;
+    if (!selectedHierarchyElementId || currentHierarchyCandidateIds.indexOf(selectedHierarchyElementId) === -1) {
+      selectedHierarchyElementId = options[0] ? options[0].id : null;
     }
     hierarchyCandidateList.innerHTML = options.map(function(element) {
       return '<button type="button" class="hierarchy-candidate-item" data-hierarchy-element-id="' + escapeHTML(element.id) + '">'
@@ -745,7 +744,7 @@
       hierarchyCandidatePanel.hidden = false;
     }
     if (hierarchyCandidateHeading) {
-      hierarchyCandidateHeading.textContent = 'Elements at point';
+      hierarchyCandidateHeading.textContent = pointLabel ? ('Elements at point ' + pointLabel) : 'Elements at point';
     }
     if (hierarchyCandidateEmpty) {
       hierarchyCandidateEmpty.textContent = 'Tap any item below to inspect it.';
@@ -775,6 +774,7 @@
     });
     updateHierarchyHintOverlays(snapshot);
     updateHierarchyCandidateSelectionState();
+    updateHierarchyInspector(snapshot, hierarchyElementById(snapshot, selectedHierarchyElementId));
     flashHierarchyCandidatePanel();
   }
 
@@ -798,19 +798,20 @@
     var normalizedY = (localY - mediaRect.y) / Math.max(1, mediaRect.height);
     var hierarchyX = normalizedX * snapshot.width;
     var hierarchyY = normalizedY * snapshot.height;
+    var pointLabel = '(' + Number(hierarchyX).toFixed(0) + ', ' + Number(hierarchyY).toFixed(0) + ')';
     var candidates = hierarchyElementsAtPoint(snapshot, hierarchyX, hierarchyY);
 
     if (!candidates.length) {
       selectedHierarchyElementId = null;
       hoveredHierarchyElementId = null;
-      showHierarchyCandidateEmpty(snapshot, 'No elements at this point.');
+      showHierarchyCandidateEmpty(snapshot, 'No elements at this point.', pointLabel);
       updateHierarchyOverlay();
       event.preventDefault();
       event.stopPropagation();
       return;
     }
 
-    openHierarchyCandidateMenu(snapshot, candidates);
+    openHierarchyCandidateMenu(snapshot, candidates, pointLabel);
     event.preventDefault();
     event.stopPropagation();
   }

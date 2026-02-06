@@ -358,7 +358,7 @@ extension XCTestReport {
             }
             try? fileManager.removeItem(atPath: tempOutputPath)
 
-            let compressCmd = [
+            let hardwareCompressCmd = [
                 "ffmpeg",
                 "-nostdin",
                 "-hide_banner",
@@ -398,24 +398,96 @@ extension XCTestReport {
                 tempOutputPath,
             ]
 
-            let startTime = Date()
-            let compressResult = runFFmpegCommand(
-                compressCmd, timeoutSeconds: ffmpegTimeoutSeconds)
-            let elapsed = Date().timeIntervalSince(startTime)
-            if compressResult.timedOut {
-                failedCount += 1
-                try? fileManager.removeItem(atPath: tempOutputPath)
+            let softwareCompressCmd = [
+                "ffmpeg",
+                "-nostdin",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                inputPath,
+                "-map",
+                "0:0",
+                "-map_chapters",
+                "0",
+                "-threads",
+                "0",
+                "-vf",
+                scaleFilter,
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-crf",
+                "32",
+                "-pix_fmt",
+                "yuv420p",
+                "-movflags",
+                "+faststart",
+                "-profile:v",
+                "high",
+                "-an",
+                "-sn",
+                "-max_muxing_queue_size",
+                "40000",
+                "-map_metadata",
+                "0",
+                tempOutputPath,
+            ]
+
+            let hardwareStartTime = Date()
+            let hardwareResult = runFFmpegCommand(
+                hardwareCompressCmd, timeoutSeconds: ffmpegTimeoutSeconds)
+            let hardwareElapsed = Date().timeIntervalSince(hardwareStartTime)
+
+            var compressionSucceeded = false
+            var successfulMode = "videotoolbox"
+            var successfulElapsed = hardwareElapsed
+
+            if hardwareResult.timedOut {
                 print(
-                    "Video compression timed out after \(Int(elapsed))s: \(exportedFileName)")
-                continue
-            }
-            let compressExit = compressResult.exitCode
-            guard compressExit == 0, fileManager.fileExists(atPath: tempOutputPath) else {
-                failedCount += 1
-                try? fileManager.removeItem(atPath: tempOutputPath)
-                print(
-                    "Video compression failed (\(String(format: "%.1f", elapsed))s): \(exportedFileName)"
+                    "Video compression timed out after \(Int(hardwareElapsed))s (videotoolbox): \(exportedFileName)"
                 )
+            } else if hardwareResult.exitCode != 0 || !fileManager.fileExists(atPath: tempOutputPath) {
+                print(
+                    "Video compression failed (\(String(format: "%.1f", hardwareElapsed))s, videotoolbox): \(exportedFileName)"
+                )
+            } else if !isCompressionOutputUsable(sourcePath: inputPath, outputPath: tempOutputPath) {
+                print("Video compression output failed validation (videotoolbox): \(exportedFileName)")
+            } else {
+                compressionSucceeded = true
+            }
+
+            if !compressionSucceeded {
+                try? fileManager.removeItem(atPath: tempOutputPath)
+                print("Retrying with software encoder (libx264): \(exportedFileName)")
+
+                let softwareStartTime = Date()
+                let softwareResult = runFFmpegCommand(softwareCompressCmd, timeoutSeconds: 300)
+                let softwareElapsed = Date().timeIntervalSince(softwareStartTime)
+                successfulElapsed = softwareElapsed
+                successfulMode = "libx264"
+
+                if softwareResult.timedOut {
+                    print(
+                        "Video compression timed out after \(Int(softwareElapsed))s (libx264): \(exportedFileName)"
+                    )
+                } else if softwareResult.exitCode != 0 || !fileManager.fileExists(atPath: tempOutputPath) {
+                    print(
+                        "Video compression failed (\(String(format: "%.1f", softwareElapsed))s, libx264): \(exportedFileName)"
+                    )
+                } else if !isCompressionOutputUsable(sourcePath: inputPath, outputPath: tempOutputPath) {
+                    print("Video compression output failed validation (libx264): \(exportedFileName)")
+                } else {
+                    compressionSucceeded = true
+                }
+            }
+
+            guard compressionSucceeded else {
+                failedCount += 1
+                try? fileManager.removeItem(atPath: tempOutputPath)
+                print("Video compression skipped after encoder failures: \(exportedFileName)")
                 continue
             }
 
@@ -424,7 +496,7 @@ extension XCTestReport {
                 try fileManager.moveItem(atPath: tempOutputPath, toPath: inputPath)
                 compressedCount += 1
                 print(
-                    "Video compression complete (\(String(format: "%.1f", elapsed))s): \(exportedFileName)"
+                    "Video compression complete (\(String(format: "%.1f", successfulElapsed))s, \(successfulMode)): \(exportedFileName)"
                 )
             } catch {
                 failedCount += 1
@@ -479,5 +551,70 @@ extension XCTestReport {
             task.interrupt()
         }
         return (124, true)
+    }
+
+    private func isCompressionOutputUsable(sourcePath: String, outputPath: String) -> Bool {
+        guard let sourceSize = fileSizeInBytes(at: sourcePath),
+            let outputSize = fileSizeInBytes(at: outputPath),
+            outputSize > 0
+        else {
+            return false
+        }
+
+        if outputSize >= sourceSize {
+            print(
+                "Compressed output is not smaller (\(outputSize) >= \(sourceSize)); keeping original."
+            )
+            return false
+        }
+
+        guard let sourceDuration = probeVideoDurationSeconds(at: sourcePath),
+            let outputDuration = probeVideoDurationSeconds(at: outputPath),
+            sourceDuration > 0
+        else {
+            return true
+        }
+
+        let minExpectedDuration = sourceDuration * 0.95
+        if outputDuration + 0.25 < minExpectedDuration {
+            print(
+                "Compressed output duration mismatch (\(String(format: "%.2f", outputDuration))s vs \(String(format: "%.2f", sourceDuration))s)."
+            )
+            return false
+        }
+
+        return true
+    }
+
+    private func fileSizeInBytes(at path: String) -> UInt64? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path) else {
+            return nil
+        }
+        if let size = attributes[.size] as? UInt64 {
+            return size
+        }
+        if let size = attributes[.size] as? Int64, size >= 0 {
+            return UInt64(size)
+        }
+        if let size = attributes[.size] as? NSNumber, size.int64Value >= 0 {
+            return UInt64(size.int64Value)
+        }
+        return nil
+    }
+
+    private func probeVideoDurationSeconds(at path: String) -> Double? {
+        let ffprobeCmd = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=nokey=1:noprint_wrappers=1",
+            path,
+        ]
+        let (output, exitCode) = shell(ffprobeCmd)
+        guard exitCode == 0, let output else { return nil }
+        return Double(output.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 }

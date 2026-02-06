@@ -15,7 +15,6 @@ extension XCTestReport {
         if let attributes = try? fileManager.attributesOfItem(atPath: xcresultPath),
            let fileSize = attributes[.size] as? Int64 {
             sizeInGB = Double(fileSize) / 1_073_741_824
-            print("XCResult file size: \(String(format: "%.2f", sizeInGB)) GB")
             if sizeInGB > 5.0 {
                 print("WARNING: Large xcresult file detected (\(String(format: "%.2f", sizeInGB)) GB)")
                 print("This may take a very long time to process...")

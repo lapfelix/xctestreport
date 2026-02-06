@@ -13,6 +13,7 @@
   var playButton = controls.querySelector('[data-nav=\"play\"]');
   var prevButton = controls.querySelector('[data-nav=\"prev\"]');
   var nextButton = controls.querySelector('[data-nav=\"next\"]');
+  var downloadVideoButton = controls.querySelector('[data-download-video]');
   var collapseAllButton = null;
   var expandAllButton = null;
   var previewModal = document.querySelector('[data-attachment-modal]');
@@ -85,6 +86,40 @@
     playButton.innerHTML = isPlaying ? PAUSE_ICON : PLAY_ICON;
   }
 
+  function updateDownloadVideoButton() {
+    if (!downloadVideoButton) return;
+    if (mediaMode !== 'video') {
+      downloadVideoButton.hidden = true;
+      downloadVideoButton.removeAttribute('href');
+      downloadVideoButton.removeAttribute('download');
+      return;
+    }
+
+    var video = getActiveVideo();
+    var source = '';
+    if (video) {
+      source = video.currentSrc || '';
+      if (!source) {
+        var sourceNode = video.querySelector('source');
+        source = sourceNode ? (sourceNode.getAttribute('src') || '') : '';
+      }
+    }
+
+    if (!source) {
+      downloadVideoButton.hidden = true;
+      downloadVideoButton.removeAttribute('href');
+      downloadVideoButton.removeAttribute('download');
+      return;
+    }
+
+    var sourcePath = source.split('#')[0].split('?')[0];
+    var sourceParts = sourcePath.split('/');
+    var fileName = sourceParts[sourceParts.length - 1] || 'timeline-video';
+    downloadVideoButton.href = source;
+    downloadVideoButton.setAttribute('download', fileName);
+    downloadVideoButton.hidden = false;
+  }
+
   function currentRunPanel() {
     return runPanels[activeRunIndex] || runPanels[0] || null;
   }
@@ -130,6 +165,7 @@
       closeHierarchyMenu();
       refreshRunScopedBindings();
       refreshHierarchyPanelVisibility();
+      updateDownloadVideoButton();
       return;
     }
 
@@ -159,6 +195,7 @@
     hideTouchMarker();
     refreshRunScopedBindings();
     refreshHierarchyPanelVisibility();
+    updateDownloadVideoButton();
     if (eventLabel) {
       eventLabel.textContent = runState.firstEventLabel || 'No event selected';
     }
@@ -1260,6 +1297,7 @@
     var duration = video ? (Number.isFinite(video.duration) ? video.duration : 0) : virtualDuration;
     if (totalTimeLabel) totalTimeLabel.textContent = formatSeconds(duration);
     setPlayButtonIcon(video ? !video.paused : virtualPlaying);
+    updateDownloadVideoButton();
     updateTouchOverlay();
     updateHierarchyOverlay();
   }
@@ -1466,6 +1504,8 @@
         if (!activeVideo.paused) {
           startTouchAnimation();
         }
+      } else {
+        updateDownloadVideoButton();
       }
     });
   }

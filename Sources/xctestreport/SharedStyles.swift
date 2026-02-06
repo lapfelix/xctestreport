@@ -984,8 +984,17 @@ let sharedStyles = """
         line-height: 1;
     }
 
+    .timeline-button[hidden] {
+        display: none;
+    }
+
     .timeline-button-play {
         width: 40px;
+    }
+
+    .timeline-button-download {
+        color: inherit;
+        text-decoration: none;
     }
 
     .timeline-button:hover {

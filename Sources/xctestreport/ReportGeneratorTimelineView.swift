@@ -303,6 +303,11 @@ extension XCTestReport {
                                 <path d="M8.5 6L14.5 12L8.5 18L7 16.5L11.5 12L7 7.5Z"></path>
                             </svg>
                         </button>
+                        <a class="timeline-button timeline-button-download" data-download-video aria-label="Download active video" title="Download active video" hidden>
+                            <svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                <path d="M12 4A1 1 0 0 1 13 5V13.59L15.3 11.29A1 1 0 1 1 16.7 12.7L12.7 16.7A1 1 0 0 1 11.3 16.7L7.3 12.7A1 1 0 1 1 8.7 11.29L11 13.59V5A1 1 0 0 1 12 4ZM5 18A1 1 0 0 1 6 17H18A1 1 0 1 1 18 19H6A1 1 0 0 1 5 18Z"></path>
+                            </svg>
+                        </a>
                     </div>
                 </div>
             </div>

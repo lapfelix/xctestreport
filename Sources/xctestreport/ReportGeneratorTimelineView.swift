@@ -19,7 +19,8 @@ extension XCTestReport {
 
     func renderTimelineVideoSection(
         for testIdentifier: String?, activities: TestActivities?,
-        attachmentsByTestIdentifier: [String: [AttachmentManifestItem]]
+        attachmentsByTestIdentifier: [String: [AttachmentManifestItem]],
+        sourceReferenceHTML: String = ""
     ) -> String {
         guard let testIdentifier else { return "" }
 
@@ -165,6 +166,14 @@ extension XCTestReport {
                 </div>
                 """
         }()
+        let sourceReferenceTimelinePanel: String =
+            sourceReferenceHTML.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? ""
+            : """
+                <section class="timeline-source-ref-panel">
+                    \(sourceReferenceHTML)
+                </section>
+                """
 
         let defaultTimelineBase = runStates.first?.timelineBase ?? fallbackTimelineBase
         let defaultVideoStart =
@@ -276,6 +285,7 @@ extension XCTestReport {
             <div class="timeline-video-section">
                 <div class="timeline-video-layout\(layoutClass)" data-timeline-root data-media-mode="\(mediaMode)" data-timeline-base="\(defaultTimelineBase)" data-video-base="\(defaultVideoStart)">
                     <div class="timeline-panel-stack">
+                        \(sourceReferenceTimelinePanel)
                         \(runSelectorHTML)
                         \(runPanelsHTML.joined(separator: ""))
                     </div>

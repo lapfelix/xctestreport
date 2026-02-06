@@ -114,18 +114,12 @@ extension XCTestReport {
 
             var suffix = ""
             if let location {
-                let lineBadge = "<span class=\"source-ref-line\">L\(location.line)</span>"
+                let lineBadge = "<span class=\"source-ref-line\">Line \(location.line)</span>"
                 let fileName = (location.filePath as NSString).lastPathComponent
                 let fileLabel = "<span class=\"source-ref-file\">\(htmlEscape("\(fileName):\(location.line)"))</span>"
-                if let xcodeLink = xcodeURL(
-                    filePath: location.filePath, line: location.line, column: location.column)
-                {
-                    suffix = " \(lineBadge) \(fileLabel) <a href=\"\(xcodeLink)\">Open in Xcode</a>"
-                } else {
-                    suffix = " \(lineBadge) \(fileLabel)"
-                }
+                suffix = " \(lineBadge) \(fileLabel)"
             } else {
-                suffix = " <span class=\"source-ref-line source-ref-line-missing\">L?</span>"
+                suffix = " <span class=\"source-ref-line source-ref-line-missing\">Line ?</span>"
             }
 
             return "<li><code class=\"source-ref-code\">\(sourceName)</code>\(suffix)</li>"
@@ -332,12 +326,6 @@ extension XCTestReport {
             let columnSuffix = location.column.map { ":\($0)" } ?? ""
             let locationLabel = "\(location.filePath):\(location.line)\(columnSuffix)"
             let locationCode = "<code>\(htmlEscape(locationLabel))</code>"
-
-            if let xcodeUrl = xcodeURL(
-                filePath: location.filePath, line: location.line, column: location.column)
-            {
-                return "<li>\(locationCode) <a href=\"\(xcodeUrl)\">Open in Xcode</a></li>"
-            }
             return "<li>\(locationCode)</li>"
         }.joined(separator: "")
 

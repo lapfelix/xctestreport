@@ -246,12 +246,6 @@ extension XCTestReport {
                         }
                     }
 
-                    let timelineAndVideoSection = renderTimelineVideoSection(
-                        for: test.nodeIdentifier,
-                        activities: testActivities,
-                        attachmentsByTestIdentifier: attachmentsByTestIdentifier
-                    )
-
                     let compactFailureBoxHtml: String
                     if let primaryFailureMessage,
                         !primaryFailureMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -263,7 +257,7 @@ extension XCTestReport {
                         compactFailureBoxHtml = ""
                     }
 
-                    let sourceReferencePanelHtml: String
+                    let sourceReferenceHtmlForTimeline: String
                     if result != "Passed", let testRuns = testDetails?.testRuns {
                         let sourceReferenceHtml = renderSourceReferenceSection(
                             from: testRuns,
@@ -272,17 +266,20 @@ extension XCTestReport {
                         if sourceReferenceHtml.trimmingCharacters(in: .whitespacesAndNewlines)
                             .isEmpty
                         {
-                            sourceReferencePanelHtml = ""
+                            sourceReferenceHtmlForTimeline = ""
                         } else {
-                            sourceReferencePanelHtml = """
-                                <section class="test-source-ref-panel">
-                                    \(sourceReferenceHtml)
-                                </section>
-                                """
+                            sourceReferenceHtmlForTimeline = sourceReferenceHtml
                         }
                     } else {
-                        sourceReferencePanelHtml = ""
+                        sourceReferenceHtmlForTimeline = ""
                     }
+
+                    let timelineAndVideoSection = renderTimelineVideoSection(
+                        for: test.nodeIdentifier,
+                        activities: testActivities,
+                        attachmentsByTestIdentifier: attachmentsByTestIdentifier,
+                        sourceReferenceHTML: sourceReferenceHtmlForTimeline
+                    )
 
                     let detailsPanelHtml: String
                     if failureInfo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -290,7 +287,7 @@ extension XCTestReport {
                     } else {
                         detailsPanelHtml = """
                             <details class="test-meta-details">
-                                <summary>Details</summary>
+                                <summary>Summary</summary>
                                 <div class="test-meta-content">
                                     \(failureInfo)
                                 </div>
@@ -329,7 +326,6 @@ extension XCTestReport {
                                 <div class="test-header-spacer" aria-hidden="true"></div>
                             </header>
                             \(compactFailureBoxHtml)
-                            \(sourceReferencePanelHtml)
                             \(detailsPanelHtml)
                             <main class="test-main-content">
                                 \(timelineAndVideoSection)

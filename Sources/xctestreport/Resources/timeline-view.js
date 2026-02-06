@@ -1055,13 +1055,11 @@
     var y = rect.y + normalizedY * rect.height;
 
     var releaseProgress = 0;
-    if (!previewMode && absoluteTime > gesture.endTime) {
+    if (absoluteTime > gesture.endTime) {
       releaseProgress = Math.min(1, (absoluteTime - gesture.endTime) / TOUCH_RELEASE_DURATION);
     }
     var scale = 1 + (releaseProgress * 0.65);
-    var opacity = previewMode
-      ? 0.9
-      : (absoluteTime <= gesture.endTime ? 0.9 : (1 - releaseProgress) * 0.9);
+    var opacity = absoluteTime <= gesture.endTime ? 0.9 : (1 - releaseProgress) * 0.9;
 
     marker.style.left = x + 'px';
     marker.style.top = y + 'px';

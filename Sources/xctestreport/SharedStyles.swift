@@ -1191,9 +1191,9 @@ let sharedStyles = """
         width: 24px;
         height: 24px;
         border-radius: 999px;
-        border: 2px solid rgba(0, 122, 255, 0.98);
-        background: rgba(0, 122, 255, 0.52);
-        box-shadow: 0 0 0 1px rgba(0, 88, 194, 0.45), 0 6px 18px rgba(0, 56, 128, 0.32);
+        border: 2px solid rgba(255, 255, 255, 0.96);
+        background: rgba(0, 122, 255, 0.74);
+        box-shadow: 0 0 0 1.5px rgba(0, 122, 255, 0.98), 0 6px 18px rgba(0, 56, 128, 0.34);
         transform: translate(-50%, -50%) scale(0.9);
         opacity: 0;
         transition: none;

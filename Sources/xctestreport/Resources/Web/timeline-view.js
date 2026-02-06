@@ -16,6 +16,7 @@
 
   var controls = document.querySelector('[data-timeline-controls]');
   var scrubber = controls.querySelector('[data-scrubber]');
+  var scrubberMarkerLane = controls.querySelector('[data-scrubber-markers]');
   var timeLabel = controls.querySelector('[data-playback-time]');
   var totalTimeLabel = controls.querySelector('[data-total-time]');
   var runSelector = root.querySelector('[data-run-selector]');
@@ -66,6 +67,7 @@
   var activeIndex = 0;
   var activeEventId = null;
   var activeEventIndex = -1;
+  var scrubberMarkers = [];
   var pendingSeekTime = null;
   var virtualCurrentTime = 0;
   var virtualDuration = 0;
@@ -180,6 +182,7 @@
       refreshRunScopedBindings();
       refreshHierarchyPanelVisibility();
       updateDownloadVideoButton();
+      renderScrubberMarkers();
       return;
     }
 
@@ -214,6 +217,7 @@
       eventLabel.textContent = runState.firstEventLabel || 'No event selected';
     }
     recalculateVirtualDuration();
+    renderScrubberMarkers();
 
     if (preserveAbsoluteTime && absoluteTimeBefore != null) {
       setAbsoluteTime(absoluteTimeBefore);
@@ -348,6 +352,84 @@
     var video = getActiveVideo();
     if (video) return activeMediaStartTime() + (video.currentTime || 0);
     return (timelineBase || 0) + (virtualCurrentTime || 0);
+  }
+
+  function normalizeTimelineEventKind(event) {
+    if (!event || typeof event !== 'object') return 'event';
+    var rawKind = String(event.kind || '').toLowerCase();
+    if (event.failureAssociated === true || rawKind === 'error') return 'error';
+    if (rawKind === 'tap' || rawKind === 'hierarchy' || rawKind === 'event') return rawKind;
+
+    var title = String(event.title || '').toLowerCase();
+    if (title.indexOf('tap ') === 0 || title.indexOf('swipe ') === 0
+      || title.indexOf('synthesize event') >= 0 || title.indexOf('synthesized event') >= 0) {
+      return 'tap';
+    }
+    if (title.indexOf('ui hierarchy') >= 0) {
+      return 'hierarchy';
+    }
+    return 'event';
+  }
+
+  function timelineOffsetForEvent(event) {
+    if (!event) return null;
+    var eventTime = Number(event.time);
+    if (!Number.isFinite(eventTime)) return null;
+    var base = getActiveVideo() ? activeMediaStartTime() : (timelineBase || 0);
+    return eventTime - base;
+  }
+
+  function updateScrubberMarkerActiveState() {
+    if (!scrubberMarkers.length) return;
+    var markerIndex = (activeEventIndex >= 0 && activeEventIndex < events.length)
+      ? activeEventIndex
+      : eventIndexForAbsoluteTime(currentAbsoluteTime());
+    scrubberMarkers.forEach(function(marker, index) {
+      marker.classList.toggle('is-active', index === markerIndex);
+    });
+  }
+
+  function renderScrubberMarkers() {
+    if (!scrubberMarkerLane) return;
+    scrubberMarkerLane.innerHTML = '';
+    scrubberMarkers = [];
+    if (!events.length) return;
+
+    var duration = Number(scrubber.max || 0);
+    if (!Number.isFinite(duration) || duration < 0) duration = 0;
+    if (duration <= 0) {
+      duration = events.reduce(function(maxValue, event) {
+        var offset = timelineOffsetForEvent(event);
+        if (offset == null) return maxValue;
+        return Math.max(maxValue, Math.max(0, offset));
+      }, 0);
+    }
+    var durationForRatio = duration > 0.0001 ? duration : 1;
+
+    events.forEach(function(event, index) {
+      var offset = timelineOffsetForEvent(event);
+      if (offset == null) return;
+      var clampedOffset = Math.max(0, Math.min(durationForRatio, offset));
+      var ratio = duration > 0 ? (clampedOffset / durationForRatio) : 0;
+
+      var marker = document.createElement('button');
+      marker.type = 'button';
+      marker.className = 'timeline-scrubber-marker is-' + normalizeTimelineEventKind(event);
+      marker.style.left = (ratio * 100).toFixed(4) + '%';
+      marker.setAttribute('data-event-index', String(index));
+      marker.setAttribute('data-event-id', event.id || '');
+      marker.setAttribute('aria-label', (event.title || 'Timeline event') + ' at ' + formatSeconds(clampedOffset));
+      marker.title = event.title || 'Timeline event';
+      marker.addEventListener('click', function(clickEvent) {
+        clickEvent.preventDefault();
+        jumpToEventByIndex(index, true);
+      });
+
+      scrubberMarkerLane.appendChild(marker);
+      scrubberMarkers[index] = marker;
+    });
+
+    updateScrubberMarkerActiveState();
   }
 
   function getDisplayedMediaRect(mediaElement) {
@@ -1250,6 +1332,7 @@
       if (scrollTarget && scrollBehavior) {
         scrollTarget.scrollIntoView({ block: 'nearest', behavior: scrollBehavior });
       }
+      updateScrubberMarkerActiveState();
       return;
     }
     var oldActive = panel.querySelector('.timeline-event.timeline-active');
@@ -1265,6 +1348,7 @@
       scrollTarget.scrollIntoView({ block: 'nearest', behavior: scrollBehavior || 'smooth' });
     }
     activeEventId = eventId;
+    updateScrubberMarkerActiveState();
   }
 
   function jumpToEventByIndex(index, shouldReveal) {
@@ -1377,6 +1461,7 @@
     if (totalTimeLabel) totalTimeLabel.textContent = formatSeconds(duration);
     setPlayButtonIcon(video ? !video.paused : virtualPlaying);
     updateDownloadVideoButton();
+    updateScrubberMarkerActiveState();
     updateTouchOverlay();
     updateHierarchyOverlay();
   }
@@ -1384,6 +1469,7 @@
   function clampScrubber(video) {
     if (!video) {
       scrubber.max = virtualDuration;
+      renderScrubberMarkers();
       updateFromVideoTime();
       return;
     }
@@ -1394,6 +1480,7 @@
       video.currentTime = Math.min(duration, Math.max(0, pendingSeekTime));
       pendingSeekTime = null;
     }
+    renderScrubberMarkers();
     updateFromVideoTime();
   }
 

@@ -895,6 +895,38 @@ extension XCTestReport {
         return "\(baseTitle) (\(sourceLocationLabel))"
     }
 
+    func timelineNodeHasInteraction(_ node: TimelineNode) -> Bool {
+        let loweredTitle = node.title.lowercased()
+        let hasInteractionAttachment = node.attachments.contains {
+            $0.name.lowercased().contains("synthesized event")
+        }
+        return loweredTitle.hasPrefix("tap ")
+            || loweredTitle.hasPrefix("swipe ")
+            || loweredTitle.contains("synthesize event")
+            || hasInteractionAttachment
+    }
+
+    func timelineNodeHasHierarchy(_ node: TimelineNode) -> Bool {
+        let loweredTitle = node.title.lowercased()
+        let hasHierarchyAttachment = node.attachments.contains {
+            $0.name.lowercased().contains("app ui hierarchy")
+        }
+        return loweredTitle.contains("ui hierarchy") || hasHierarchyAttachment
+    }
+
+    func timelineEventKind(for node: TimelineNode) -> TimelineEventKind {
+        if node.failureAssociated {
+            return .error
+        }
+        if timelineNodeHasInteraction(node) {
+            return .tap
+        }
+        if timelineNodeHasHierarchy(node) {
+            return .hierarchy
+        }
+        return .event
+    }
+
     func renderTimelineNodesHTML(_ nodes: [TimelineNode], baseTime: Double?, depth: Int) -> String {
         let renderedNodes = nodes.map { node -> String in
             let timeLabel: String
@@ -910,21 +942,10 @@ extension XCTestReport {
             if node.failureAssociated {
                 eventClassList.append("timeline-failure")
             }
-            let loweredTitle = node.title.lowercased()
-            let hasInteractionAttachment = node.attachments.contains {
-                $0.name.lowercased().contains("synthesized event")
-            }
-            let hasHierarchyAttachment = node.attachments.contains {
-                $0.name.lowercased().contains("app ui hierarchy")
-            }
-            if loweredTitle.hasPrefix("tap ")
-                || loweredTitle.hasPrefix("swipe ")
-                || loweredTitle.contains("synthesize event")
-                || hasInteractionAttachment
-            {
+            if timelineNodeHasInteraction(node) {
                 eventClassList.append("timeline-interaction")
             }
-            if hasHierarchyAttachment {
+            if timelineNodeHasHierarchy(node) {
                 eventClassList.append("timeline-hierarchy")
             }
             if hasChildren {

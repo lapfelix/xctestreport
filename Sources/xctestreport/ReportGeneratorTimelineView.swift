@@ -67,11 +67,13 @@ extension XCTestReport {
             let events = timestampedNodes.map { node in
                 let startTime = node.timestamp ?? timelineBaseTime
                 let endTime = max(startTime, node.endTimestamp ?? startTime)
+                let kind = timelineEventKind(for: node)
                 return TimelineEventEntry(
                     id: node.id,
                     title: timelineDisplayTitle(node, baseTime: timelineBaseTime),
                     time: startTime,
-                    endTime: endTime
+                    endTime: endTime,
+                    kind: kind
                 )
             }
             let initialFailureEventIndex = timestampedNodes.firstIndex { $0.failureAssociated } ?? -1

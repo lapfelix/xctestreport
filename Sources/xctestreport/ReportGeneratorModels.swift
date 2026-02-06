@@ -296,11 +296,19 @@ extension XCTestReport {
         let elements: [UIHierarchyElement]
     }
 
+    enum TimelineEventKind: String, Codable {
+        case event
+        case tap
+        case hierarchy
+        case error
+    }
+
     struct TimelineEventEntry: Codable {
         let id: String
         let title: String
         let time: Double
         let endTime: Double
+        let kind: TimelineEventKind
     }
 
     struct TimelineRunState: Codable {

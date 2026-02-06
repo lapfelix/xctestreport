@@ -7,7 +7,16 @@
         {{video_panel_html}}
     </div>
     <div class="timeline-controls" data-timeline-controls>
-        <input type="range" class="timeline-scrubber" min="0" max="0" step="0.05" value="0" data-scrubber>
+        <div class="timeline-scrubber-wrap">
+            <input type="range" class="timeline-scrubber" min="0" max="0" step="0.05" value="0" data-scrubber>
+            <div class="timeline-scrubber-markers" data-scrubber-markers></div>
+        </div>
+        <div class="timeline-marker-legend" aria-hidden="true">
+            <span class="timeline-marker-legend-item"><span class="timeline-marker-swatch timeline-marker-swatch-event"></span>Events</span>
+            <span class="timeline-marker-legend-item"><span class="timeline-marker-swatch timeline-marker-swatch-tap"></span>Taps</span>
+            <span class="timeline-marker-legend-item"><span class="timeline-marker-swatch timeline-marker-swatch-hierarchy"></span>UI Hierarchy</span>
+            <span class="timeline-marker-legend-item"><span class="timeline-marker-swatch timeline-marker-swatch-error"></span>Errors</span>
+        </div>
         <div class="timeline-timebar">
             <span data-playback-time>00:00</span>
             <span data-total-time>00:00</span>

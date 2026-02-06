@@ -95,19 +95,98 @@ extension XCTestReport {
         }
 
         let lowered = name.lowercased()
-        if lowered.contains("ui snapshot") || lowered.contains("screenshot")
-            || lowered.contains("kxctattachmentlegacysnapshot")
-        {
-            return "image"
-        }
         if lowered.contains("screen recording") {
             return "video"
         }
-        if lowered.contains("app ui hierarchy") {
+        if lowered.contains("screenshot") {
+            return "image"
+        }
+        if lowered.contains("ui snapshot")
+            || lowered.contains("kxctattachmentlegacysnapshot")
+            || lowered.contains("synthesized event")
+            || lowered.contains("kxctattachmentlegacysynthesizedevent")
+            || lowered.contains("app ui hierarchy")
+        {
             return "text"
         }
 
         return "file"
+    }
+
+    func preferredAttachmentPreviewPath(name: String, relativePath: String?) -> String? {
+        guard let relativePath else { return nil }
+
+        let ext = attachmentFileExtension(from: relativePath)
+        if !ext.isEmpty {
+            return relativePath
+        }
+
+        let lowered = name.lowercased()
+        let shouldAttemptPlistConversion =
+            lowered.contains("ui snapshot")
+            || lowered.contains("kxctattachmentlegacysnapshot")
+            || lowered.contains("synthesized event")
+            || lowered.contains("kxctattachmentlegacysynthesizedevent")
+            || lowered.contains("app ui hierarchy")
+        guard shouldAttemptPlistConversion else { return relativePath }
+
+        let decodedName = relativePath
+            .replacingOccurrences(of: "attachments/", with: "")
+            .removingPercentEncoding ?? relativePath
+        let sourceFileName = decodedName.replacingOccurrences(of: "/", with: "_")
+        let attachmentsDir = (outputDir as NSString).appendingPathComponent("attachments")
+        let sourcePath = (attachmentsDir as NSString).appendingPathComponent(sourceFileName)
+        guard FileManager.default.fileExists(atPath: sourcePath) else { return relativePath }
+
+        let previewFileName = "\(sourceFileName).preview.txt"
+        let previewPath = (attachmentsDir as NSString).appendingPathComponent(previewFileName)
+        let previewRelativePath = "attachments/\(urlEncodePath(previewFileName))"
+
+        if !FileManager.default.fileExists(atPath: previewPath) {
+            var readableText: String?
+            let (plutilOutput, plutilExit) = shell(["plutil", "-p", sourcePath])
+            if plutilExit == 0, let plutilOutput,
+                !plutilOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
+                readableText = plutilOutput
+            } else if let data = try? Data(contentsOf: URL(fileURLWithPath: sourcePath)),
+                let utf8 = String(data: data, encoding: .utf8),
+                !utf8.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
+                readableText = utf8
+            }
+
+            guard let readableText else { return relativePath }
+            try? readableText.write(toFile: previewPath, atomically: true, encoding: .utf8)
+        }
+
+        return previewRelativePath
+    }
+
+    func inlineAttachmentPreviewHTML(name: String, previewRelativePath: String?) -> String {
+        let lowered = name.lowercased()
+        let shouldRenderInline =
+            lowered.contains("synthesized event")
+            || lowered.contains("kxctattachmentlegacysynthesizedevent")
+        guard shouldRenderInline, let previewRelativePath else { return "" }
+
+        let previewPath = (outputDir as NSString).appendingPathComponent(previewRelativePath)
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: previewPath)),
+            let text = String(data: data, encoding: .utf8),
+            !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return "" }
+
+        let lines = text.components(separatedBy: .newlines)
+        let maxLines = 18
+        var snippet = lines.prefix(maxLines).joined(separator: "\n")
+        if lines.count > maxLines {
+            snippet += "\n…"
+        }
+        if snippet.count > 2600 {
+            snippet = String(snippet.prefix(2600)) + "\n…"
+        }
+
+        return "<div class=\"timeline-attachment-inline\"><pre>\(htmlEscape(snippet))</pre></div>"
     }
 
     func cleanedAttachmentLabel(_ rawName: String) -> String {
@@ -916,11 +995,13 @@ extension XCTestReport {
                 let renderedAttachments = node.attachments.map { attachment -> String in
                     let cleanedLabel = cleanedAttachmentLabel(attachment.name)
                     let attachmentName = htmlEscape(cleanedLabel)
-                    let previewKind = attachmentPreviewKind(
+                    let previewRelativePath = preferredAttachmentPreviewPath(
                         name: attachment.name, relativePath: attachment.relativePath)
+                    let previewKind = attachmentPreviewKind(
+                        name: attachment.name, relativePath: previewRelativePath)
                     let iconLabel = attachmentIconLabel(for: previewKind)
                     let linkOrText: String
-                    if let relativePath = attachment.relativePath {
+                    if let relativePath = previewRelativePath {
                         linkOrText = """
                             <a class="timeline-attachment-link" href="\(relativePath)" target="_blank" rel="noopener" data-preview-kind="\(previewKind)" data-preview-title="\(attachmentName)">
                                 <span class="timeline-attachment-icon">\(iconLabel)</span>
@@ -932,7 +1013,9 @@ extension XCTestReport {
                             "<span class=\"timeline-attachment-link\"><span class=\"timeline-attachment-icon\">\(iconLabel)</span><span class=\"timeline-attachment-label\">\(attachmentName)</span></span>"
                     }
 
-                    return "<li class=\"timeline-attachment\">\(linkOrText)</li>"
+                    let inlinePreview = inlineAttachmentPreviewHTML(
+                        name: attachment.name, previewRelativePath: previewRelativePath)
+                    return "<li class=\"timeline-attachment\">\(linkOrText)\(inlinePreview)</li>"
                 }.joined(separator: "")
                 attachmentList = "<ul class=\"timeline-attachments\">\(renderedAttachments)</ul>"
             }

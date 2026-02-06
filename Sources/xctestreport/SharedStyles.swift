@@ -591,7 +591,7 @@ let sharedStyles = """
 
     .timeline-event {
         border-radius: 7px;
-        padding: 6px 10px;
+        padding: 6px 10px 6px calc(10px + (var(--timeline-depth, 0) * 14px));
         cursor: pointer;
         border: 1px solid transparent;
         display: grid;
@@ -657,6 +657,13 @@ let sharedStyles = """
     .timeline-event.timeline-active {
         background: #EAF0FF;
         border-color: #8EB1FF;
+        box-shadow: inset 0 0 0 1px rgba(88, 130, 222, 0.3);
+    }
+
+    .timeline-event.timeline-active .timeline-title,
+    .timeline-event.timeline-active .timeline-time,
+    .timeline-event.timeline-active .timeline-disclosure {
+        color: #1B3D75;
     }
 
     .timeline-event.timeline-context-active:not(.timeline-active) {
@@ -742,7 +749,6 @@ let sharedStyles = """
         min-width: 0;
         word-break: break-word;
         line-height: 1.35;
-        padding-left: calc(var(--timeline-depth, 0) * 14px);
         white-space: pre-line;
     }
 
@@ -799,6 +805,26 @@ let sharedStyles = """
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+    }
+
+    .timeline-attachment-inline {
+        margin-top: 6px;
+        border: 1px solid #D7E0EE;
+        border-radius: 7px;
+        background: #F3F7FE;
+        max-height: 190px;
+        overflow: auto;
+    }
+
+    .timeline-attachment-inline pre {
+        margin: 0;
+        padding: 8px 9px;
+        white-space: pre-wrap;
+        word-break: break-word;
+        line-height: 1.35;
+        font-size: 0.74rem;
+        color: #2E3F5A;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
     }
 
     .attachment-preview-modal[hidden] {
@@ -1704,6 +1730,7 @@ let sharedStyles = """
         .timeline-event.timeline-active {
             background: #2D5DAF;
             border-color: #90B3FF;
+            box-shadow: inset 0 0 0 1px rgba(188, 214, 255, 0.35), 0 0 0 1px rgba(104, 154, 235, 0.35);
         }
 
         .timeline-event.timeline-context-active:not(.timeline-active) {
@@ -1733,6 +1760,7 @@ let sharedStyles = """
         .timeline-tree ul > li.timeline-node > details > summary > .timeline-event.timeline-failure.timeline-active {
             background: #5A2C38;
             border-color: #A66A79;
+            box-shadow: inset 0 0 0 1px rgba(255, 202, 211, 0.34), 0 0 0 1px rgba(180, 114, 128, 0.32);
         }
 
         .timeline-tree ul > li.timeline-node > .timeline-event.timeline-failure.timeline-active-proxy:not(.timeline-active),
@@ -1744,6 +1772,12 @@ let sharedStyles = """
 
         .timeline-event.timeline-failure .timeline-title {
             color: #ffbcc6;
+        }
+
+        .timeline-event.timeline-active .timeline-title,
+        .timeline-event.timeline-active .timeline-time,
+        .timeline-event.timeline-active .timeline-disclosure {
+            color: #FFFFFF;
         }
 
         .timeline-event.timeline-interaction .timeline-time::before {
@@ -1825,6 +1859,15 @@ let sharedStyles = """
             color: #CAE0FF;
         }
 
+        .timeline-attachment-inline {
+            background: #1C2431;
+            border-color: #3A475B;
+        }
+
+        .timeline-attachment-inline pre {
+            color: #DDE6F7;
+        }
+
         .attachment-preview-dialog {
             background: #171717;
             border-color: #424242;
@@ -1860,9 +1903,9 @@ let sharedStyles = """
         }
 
         .hierarchy-highlight-box {
-            border-color: rgba(196, 133, 233, 0.98);
-            background: rgba(162, 88, 208, 0.18);
-            box-shadow: 0 0 0 1px rgba(126, 70, 162, 0.42), 0 8px 22px rgba(44, 21, 58, 0.4);
+            border-color: rgba(105, 193, 255, 0.98);
+            background: rgba(80, 153, 255, 0.2);
+            box-shadow: 0 0 0 1px rgba(78, 150, 255, 0.44), 0 10px 24px rgba(20, 64, 132, 0.42);
         }
 
         .hierarchy-hint-box {

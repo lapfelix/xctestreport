@@ -336,10 +336,12 @@ extension XCTestReport {
         var failedCount = 0
         var skippedCount = 0
         let fileManager = FileManager.default
+        let ffmpegTimeoutSeconds: TimeInterval = 180
         let scaleFilter =
             "scale='if(gte(iw,ih),trunc(min(iw,\(maxDimension))/2)*2,-2)':'if(gte(iw,ih),-2,trunc(min(ih,\(maxDimension))/2)*2)'"
 
-        for exportedFileName in videoFileNames.sorted() {
+        for (index, exportedFileName) in videoFileNames.sorted().enumerated() {
+            print("Compressing video \(index + 1)/\(videoFileNames.count): \(exportedFileName)")
             let inputPath = (attachmentsDir as NSString).appendingPathComponent(exportedFileName)
             guard fileManager.fileExists(atPath: inputPath) else {
                 skippedCount += 1
@@ -358,6 +360,10 @@ extension XCTestReport {
 
             let compressCmd = [
                 "ffmpeg",
+                "-nostdin",
+                "-hide_banner",
+                "-loglevel",
+                "error",
                 "-y",
                 "-i",
                 inputPath,
@@ -392,11 +398,24 @@ extension XCTestReport {
                 tempOutputPath,
             ]
 
-            let (_, compressExit) = shell(compressCmd)
+            let startTime = Date()
+            let compressResult = runFFmpegCommand(
+                compressCmd, timeoutSeconds: ffmpegTimeoutSeconds)
+            let elapsed = Date().timeIntervalSince(startTime)
+            if compressResult.timedOut {
+                failedCount += 1
+                try? fileManager.removeItem(atPath: tempOutputPath)
+                print(
+                    "Video compression timed out after \(Int(elapsed))s: \(exportedFileName)")
+                continue
+            }
+            let compressExit = compressResult.exitCode
             guard compressExit == 0, fileManager.fileExists(atPath: tempOutputPath) else {
                 failedCount += 1
                 try? fileManager.removeItem(atPath: tempOutputPath)
-                print("Video compression failed: \(exportedFileName)")
+                print(
+                    "Video compression failed (\(String(format: "%.1f", elapsed))s): \(exportedFileName)"
+                )
                 continue
             }
 
@@ -404,6 +423,9 @@ extension XCTestReport {
                 try fileManager.removeItem(atPath: inputPath)
                 try fileManager.moveItem(atPath: tempOutputPath, toPath: inputPath)
                 compressedCount += 1
+                print(
+                    "Video compression complete (\(String(format: "%.1f", elapsed))s): \(exportedFileName)"
+                )
             } catch {
                 failedCount += 1
                 print("Video compression replace failed for \(exportedFileName): \(error)")
@@ -419,5 +441,43 @@ extension XCTestReport {
     private func isFFmpegInstalled() -> Bool {
         let (_, exitCode) = shell(["ffmpeg", "-version"])
         return exitCode == 0
+    }
+
+    private func runFFmpegCommand(
+        _ args: [String], timeoutSeconds: TimeInterval
+    ) -> (exitCode: Int32, timedOut: Bool) {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        task.arguments = args
+
+        guard let nullHandle = FileHandle(forWritingAtPath: "/dev/null") else {
+            return (1, false)
+        }
+        defer { nullHandle.closeFile() }
+        task.standardOutput = nullHandle
+        task.standardError = nullHandle
+
+        do {
+            try task.run()
+        } catch {
+            return (1, false)
+        }
+
+        let deadline = Date().addingTimeInterval(timeoutSeconds)
+        while task.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.25)
+        }
+
+        guard task.isRunning else {
+            task.waitUntilExit()
+            return (task.terminationStatus, false)
+        }
+
+        task.terminate()
+        Thread.sleep(forTimeInterval: 0.2)
+        if task.isRunning {
+            task.interrupt()
+        }
+        return (124, true)
     }
 }

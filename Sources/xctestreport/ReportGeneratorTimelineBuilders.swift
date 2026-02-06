@@ -1,0 +1,959 @@
+import Dispatch
+import Foundation
+
+extension XCTestReport {
+    func videoMimeType(for fileName: String) -> String {
+        let ext = URL(fileURLWithPath: fileName).pathExtension.lowercased()
+        switch ext {
+        case "mov":
+            return "video/quicktime"
+        case "m4v":
+            return "video/x-m4v"
+        default:
+            return "video/mp4"
+        }
+    }
+
+    func isVideoAttachment(_ attachment: AttachmentManifestItem) -> Bool {
+        let ext = URL(fileURLWithPath: attachment.exportedFileName).pathExtension.lowercased()
+        if ["mp4", "mov", "m4v"].contains(ext) {
+            return true
+        }
+
+        if let humanReadableName = attachment.suggestedHumanReadableName?.lowercased(),
+            humanReadableName.contains("screen recording")
+        {
+            return true
+        }
+
+        return false
+    }
+
+    func parseSnapshotTimestamp(from label: String) -> Double? {
+        let patterns = [
+            ("'UI Snapshot 'yyyy-MM-dd 'at' h.mm.ss a", "UI Snapshot "),
+            ("'Screenshot 'yyyy-MM-dd 'at' h.mm.ss a", "Screenshot "),
+        ]
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+
+        for (format, prefix) in patterns where label.hasPrefix(prefix) {
+            formatter.dateFormat = format
+            if let date = formatter.date(from: label) {
+                return date.timeIntervalSince1970
+            }
+        }
+
+        return nil
+    }
+
+    func isScreenshotAttachment(_ attachment: AttachmentManifestItem) -> Bool {
+        let ext = URL(fileURLWithPath: attachment.exportedFileName).pathExtension.lowercased()
+        if ["png", "jpg", "jpeg", "heic", "gif", "webp", "tiff", "bmp"].contains(ext) {
+            return true
+        }
+
+        if let humanReadableName = attachment.suggestedHumanReadableName?.lowercased(),
+            humanReadableName.contains("snapshot")
+                || humanReadableName.contains("screenshot")
+        {
+            return true
+        }
+
+        return false
+    }
+
+    func attachmentFileExtension(from relativePath: String?) -> String {
+        guard let relativePath else { return "" }
+        let fileName = relativePath
+            .replacingOccurrences(of: "attachments/", with: "")
+            .removingPercentEncoding ?? relativePath
+        return URL(fileURLWithPath: fileName).pathExtension.lowercased()
+    }
+
+    func attachmentPreviewKind(name: String, relativePath: String?) -> String {
+        let ext = attachmentFileExtension(from: relativePath)
+        if ["png", "jpg", "jpeg", "heic", "gif", "webp", "tiff", "bmp"].contains(ext) {
+            return "image"
+        }
+        if ["mp4", "mov", "m4v"].contains(ext) {
+            return "video"
+        }
+        if ext == "pdf" {
+            return "pdf"
+        }
+        if ["json"].contains(ext) {
+            return "json"
+        }
+        if ["txt", "log", "crash", "ips", "plist"].contains(ext) {
+            return "text"
+        }
+        if ["html", "htm"].contains(ext) {
+            return "html"
+        }
+
+        let lowered = name.lowercased()
+        if lowered.contains("ui snapshot") || lowered.contains("screenshot")
+            || lowered.contains("kxctattachmentlegacysnapshot")
+        {
+            return "image"
+        }
+        if lowered.contains("screen recording") {
+            return "video"
+        }
+        if lowered.contains("app ui hierarchy") {
+            return "text"
+        }
+
+        return "file"
+    }
+
+    func cleanedAttachmentLabel(_ rawName: String) -> String {
+        let lowered = rawName.lowercased()
+
+        if lowered.contains("kxctattachmentlegacysnapshot") || lowered.contains("ui snapshot")
+            || lowered.contains("screenshot")
+        {
+            return "UI Snapshot"
+        }
+        if lowered.contains("kxctattachmentlegacysynthesizedevent")
+            || lowered.contains("synthesized event")
+        {
+            return "Synthesized Event"
+        }
+        if lowered.contains("app ui hierarchy") {
+            return "UI Hierarchy"
+        }
+        if lowered.contains("debug description") {
+            return "Debug Description"
+        }
+        if lowered.contains("screen recording") {
+            return "Screen Recording"
+        }
+
+        let withoutDate = rawName.replacingOccurrences(
+            of: #" \d{4}-\d{2}-\d{2} at \d{1,2}\.\d{2}\.\d{2} [AP]M"#,
+            with: "",
+            options: .regularExpression
+        )
+        let trimmed = withoutDate.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? rawName : trimmed
+    }
+
+    func attachmentIconLabel(for previewKind: String) -> String {
+        switch previewKind {
+        case "image":
+            return "IMG"
+        case "video":
+            return "VID"
+        case "pdf":
+            return "PDF"
+        case "json":
+            return "JSON"
+        case "text":
+            return "TXT"
+        case "html":
+            return "WEB"
+        default:
+            return "FILE"
+        }
+    }
+
+    func hierarchySnapshotDisplayLabel(from attachmentName: String) -> String {
+        let prefix = "app ui hierarchy for "
+        let lowered = attachmentName.lowercased()
+        guard let range = lowered.range(of: prefix) else { return "UI Hierarchy" }
+
+        let startIndex = range.upperBound
+        let originalSuffix = attachmentName[startIndex...].trimmingCharacters(
+            in: .whitespacesAndNewlines)
+        guard !originalSuffix.isEmpty else { return "UI Hierarchy" }
+
+        let components = originalSuffix.split(separator: ".").map { String($0) }
+        if let last = components.last, !last.isEmpty {
+            return "UI Hierarchy (\(last))"
+        }
+        return "UI Hierarchy (\(originalSuffix))"
+    }
+
+    func parseHierarchyInlineProperties(_ metadata: String) -> [String: String] {
+        let pattern =
+            #"(identifier|label|value|title|placeholderValue|hint|traits):\s*(?:'([^']*)'|([^,]+))"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [:] }
+        let nsRange = NSRange(metadata.startIndex..<metadata.endIndex, in: metadata)
+        let matches = regex.matches(in: metadata, range: nsRange)
+        guard !matches.isEmpty else { return [:] }
+
+        var properties = [String: String]()
+        for match in matches {
+            guard let keyRange = Range(match.range(at: 1), in: metadata) else { continue }
+            let key = String(metadata[keyRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+            var value = ""
+            if let quotedRange = Range(match.range(at: 2), in: metadata) {
+                value = String(metadata[quotedRange])
+            } else if let plainRange = Range(match.range(at: 3), in: metadata) {
+                if plainRange.lowerBound != plainRange.upperBound {
+                    value = String(metadata[plainRange])
+                }
+            }
+
+            let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !key.isEmpty, !trimmedValue.isEmpty {
+                properties[key] = trimmedValue
+            }
+        }
+
+        return properties
+    }
+
+    func splitHierarchyRoleAndName(_ value: String) -> (role: String, name: String?) {
+        guard let openParen = value.lastIndex(of: "("), value.hasSuffix(")"),
+            openParen > value.startIndex
+        else { return (value, nil) }
+
+        let rolePart = value[..<openParen].trimmingCharacters(in: .whitespacesAndNewlines)
+        let namePart = value[value.index(after: openParen)..<value.index(before: value.endIndex)]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rolePart.isEmpty else { return (value, nil) }
+        return (rolePart, namePart.isEmpty ? nil : namePart)
+    }
+
+    func parseHierarchyElementIdentifier(from line: String) -> String? {
+        let pattern = #"elementOrHash\.elementID:\s*([0-9.]+)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let nsRange = NSRange(line.startIndex..<line.endIndex, in: line)
+        guard let match = regex.firstMatch(in: line, range: nsRange),
+            let valueRange = Range(match.range(at: 1), in: line)
+        else { return nil }
+        return String(line[valueRange])
+    }
+
+    func parseUIHierarchySnapshot(
+        at filePath: String, snapshotId: String, label: String, timestamp: Double,
+        failureAssociated: Bool
+    ) -> UIHierarchySnapshot? {
+        guard let content = try? String(contentsOfFile: filePath, encoding: .utf8) else { return nil }
+
+        let linePattern =
+            #"^(\s*)(.+?),\s*0x[0-9A-Fa-f]+,\s*\{\{(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)\},\s*\{(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)\}\}(?:,\s*(.*?))?\s*<.*$"#
+        guard let lineRegex = try? NSRegularExpression(pattern: linePattern) else { return nil }
+
+        var elements = [UIHierarchyElement]()
+        elements.reserveCapacity(128)
+        var snapshotWidth: Double = 0
+        var snapshotHeight: Double = 0
+        var maxRight: Double = 0
+        var maxBottom: Double = 0
+
+        let lines = content.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        for (index, line) in lines.enumerated() {
+            let nsRange = NSRange(line.startIndex..<line.endIndex, in: line)
+            guard let match = lineRegex.firstMatch(in: line, range: nsRange) else { continue }
+
+            func capture(_ group: Int) -> String? {
+                guard let range = Range(match.range(at: group), in: line) else { return nil }
+                return String(line[range])
+            }
+
+            let indent = capture(1) ?? ""
+            let rawRole = (capture(2) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !rawRole.isEmpty else { continue }
+            guard let x = Double(capture(3) ?? ""), let y = Double(capture(4) ?? ""),
+                let width = Double(capture(5) ?? ""), let height = Double(capture(6) ?? "")
+            else { continue }
+
+            let metadata = (capture(7) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let depth = max(0, indent.count / 2)
+            let (role, name) = splitHierarchyRoleAndName(rawRole)
+            var properties = parseHierarchyInlineProperties(metadata)
+            let labelValue = properties["label"]
+            let identifierValue = properties["identifier"]
+            let valueValue = properties["value"]
+            let elementIdentifier =
+                parseHierarchyElementIdentifier(from: line)
+                ?? "\(snapshotId)-\(index + 1)"
+
+            if !metadata.isEmpty {
+                properties["metadata"] = metadata
+            }
+            properties["frame"] = "{{\(x), \(y)}, {\(width), \(height)}}"
+            properties["depth"] = String(depth)
+
+            if snapshotWidth <= 0, snapshotHeight <= 0, role.lowercased().hasPrefix("window"),
+                width > 1, height > 1
+            {
+                snapshotWidth = width
+                snapshotHeight = height
+            }
+            maxRight = max(maxRight, x + width)
+            maxBottom = max(maxBottom, y + height)
+
+            elements.append(
+                UIHierarchyElement(
+                    id: elementIdentifier,
+                    depth: depth,
+                    role: role,
+                    name: name,
+                    label: labelValue,
+                    identifier: identifierValue,
+                    value: valueValue,
+                    x: x,
+                    y: y,
+                    width: width,
+                    height: height,
+                    properties: properties
+                ))
+        }
+
+        guard !elements.isEmpty else { return nil }
+
+        let normalizedWidth = snapshotWidth > 1 ? snapshotWidth : maxRight
+        let normalizedHeight = snapshotHeight > 1 ? snapshotHeight : maxBottom
+        guard normalizedWidth > 1, normalizedHeight > 1 else { return nil }
+
+        return UIHierarchySnapshot(
+            id: snapshotId,
+            label: label,
+            time: timestamp,
+            width: normalizedWidth,
+            height: normalizedHeight,
+            failureAssociated: failureAssociated,
+            elements: elements
+        )
+    }
+
+    func jsStringEscape(_ input: String) -> String {
+        return input
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "")
+    }
+
+    func formatTimelineOffset(_ offset: Double) -> String {
+        let safeSeconds = max(0, Int(offset.rounded()))
+        let hours = safeSeconds / 3600
+        let minutes = (safeSeconds % 3600) / 60
+        let seconds = safeSeconds % 60
+
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        }
+        return String(format: "%02d:%02d", minutes, seconds)
+    }
+
+    func collectActivityAttachmentTimestamps(
+        from activities: [TestActivity], into storage: inout [String: [Double]]
+    ) {
+        for activity in activities {
+            for attachment in activity.attachments ?? [] {
+                guard let timestamp = attachment.timestamp else { continue }
+                storage[attachment.name, default: []].append(timestamp)
+            }
+            if let children = activity.childActivities {
+                collectActivityAttachmentTimestamps(from: children, into: &storage)
+            }
+        }
+    }
+
+    func collectEarliestActivityTimestamp(from activities: [TestActivity]) -> Double? {
+        var earliest: Double?
+
+        func traverse(_ nodes: [TestActivity]) {
+            for node in nodes {
+                if let start = node.startTime {
+                    if earliest == nil || start < earliest! {
+                        earliest = start
+                    }
+                }
+
+                for attachment in node.attachments ?? [] {
+                    if let timestamp = attachment.timestamp {
+                        if earliest == nil || timestamp < earliest! {
+                            earliest = timestamp
+                        }
+                    }
+                }
+
+                if let children = node.childActivities {
+                    traverse(children)
+                }
+            }
+        }
+
+        traverse(activities)
+        return earliest
+    }
+
+    func keyedArchiveUIDIndex(_ value: Any?) -> Int? {
+        guard let value else { return nil }
+        if let directInt = value as? Int { return directInt }
+
+        let description = String(describing: value)
+        guard let markerRange = description.range(of: "value = ") else { return nil }
+        let suffix = description[markerRange.upperBound...]
+        let digits = suffix.prefix { $0.isWholeNumber }
+        return digits.isEmpty ? nil : Int(digits)
+    }
+
+    func keyedArchiveObject(_ reference: Any?, objects: [Any]) -> Any? {
+        guard let reference else { return nil }
+        if let index = keyedArchiveUIDIndex(reference), index >= 0, index < objects.count {
+            return objects[index]
+        }
+        return reference
+    }
+
+    func keyedArchiveArray(_ reference: Any?, objects: [Any]) -> [Any] {
+        guard
+            let archiveObject = keyedArchiveObject(reference, objects: objects) as? [String: Any],
+            let itemRefs = archiveObject["NS.objects"] as? [Any]
+        else { return [] }
+
+        return itemRefs.compactMap { keyedArchiveObject($0, objects: objects) }
+    }
+
+    func keyedArchiveDictionary(_ reference: Any?, objects: [Any]) -> [String: Any] {
+        guard
+            let archiveObject = keyedArchiveObject(reference, objects: objects) as? [String: Any],
+            let keyRefs = archiveObject["NS.keys"] as? [Any],
+            let valueRefs = archiveObject["NS.objects"] as? [Any]
+        else { return [:] }
+
+        var dictionary = [String: Any](minimumCapacity: min(keyRefs.count, valueRefs.count))
+        for index in 0..<min(keyRefs.count, valueRefs.count) {
+            guard
+                let keyObject = keyedArchiveObject(keyRefs[index], objects: objects),
+                let key = keyObject as? String
+            else { continue }
+
+            dictionary[key] = keyedArchiveObject(valueRefs[index], objects: objects)
+        }
+        return dictionary
+    }
+
+    func keyedArchiveDouble(_ reference: Any?, objects: [Any]) -> Double? {
+        guard let value = keyedArchiveObject(reference, objects: objects) else { return nil }
+        if let number = value as? NSNumber {
+            return number.doubleValue
+        }
+        if let string = value as? String {
+            return Double(string)
+        }
+        return nil
+    }
+
+    func parseSynthesizedEventGesture(
+        at filePath: String, baseTimestamp: Double
+    ) -> TouchGestureOverlay? {
+        guard let data = FileManager.default.contents(atPath: filePath) else { return nil }
+        let plistObject = (try? PropertyListSerialization.propertyList(
+            from: data, options: [], format: nil))
+        guard let plistObject else { return nil }
+
+        guard
+            let root = plistObject as? [String: Any],
+            let objects = root["$objects"] as? [Any],
+            let top = root["$top"] as? [String: Any],
+            let rootArchiveObject = keyedArchiveObject(top["root"], objects: objects) as? [String: Any]
+        else { return nil }
+
+        let parentWindow = keyedArchiveDictionary(
+            rootArchiveObject["parentWindowSize"], objects: objects)
+        let width = (parentWindow["Width"] as? NSNumber)?.doubleValue ?? 0
+        let height = (parentWindow["Height"] as? NSNumber)?.doubleValue ?? 0
+
+        let eventPaths = keyedArchiveArray(rootArchiveObject["eventPaths"], objects: objects)
+        guard !eventPaths.isEmpty else { return nil }
+
+        var points = [TouchGesturePoint]()
+        points.reserveCapacity(16)
+
+        for eventPathObject in eventPaths {
+            guard let eventPath = eventPathObject as? [String: Any] else { continue }
+            let pointerEvents = keyedArchiveArray(eventPath["pointerEvents"], objects: objects)
+
+            for pointerEventObject in pointerEvents {
+                guard let pointerEvent = pointerEventObject as? [String: Any] else { continue }
+                guard
+                    let x = keyedArchiveDouble(pointerEvent["coordinate.x"], objects: objects),
+                    let y = keyedArchiveDouble(pointerEvent["coordinate.y"], objects: objects)
+                else { continue }
+
+                let offset = keyedArchiveDouble(pointerEvent["offset"], objects: objects) ?? 0
+                let clampedX = min(max(0, x), width)
+                let clampedY = min(max(0, y), height)
+                let absoluteTime = baseTimestamp + max(0, offset)
+                points.append(TouchGesturePoint(time: absoluteTime, x: clampedX, y: clampedY))
+            }
+        }
+
+        guard !points.isEmpty else { return nil }
+        points.sort { $0.time < $1.time }
+
+        guard let first = points.first, let last = points.last else { return nil }
+        return TouchGestureOverlay(
+            startTime: first.time,
+            endTime: last.time,
+            width: width,
+            height: height,
+            points: points
+        )
+    }
+
+    func parseSynthesizedEventTimestamp(from label: String) -> Double? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "'Synthesized Event 'yyyy-MM-dd 'at' h.mm.ss a"
+        return formatter.date(from: label)?.timeIntervalSince1970
+    }
+
+    func buildTouchGestures(
+        from nodes: [TimelineNode],
+        testIdentifier: String,
+        attachmentsByTestIdentifier: [String: [AttachmentManifestItem]],
+        includeManifestFallback: Bool = true
+    ) -> [TouchGestureOverlay] {
+        var flatNodes = [TimelineNode]()
+        flattenTimelineNodes(nodes, into: &flatNodes)
+
+        let attachmentRoot = (outputDir as NSString).appendingPathComponent("attachments")
+        var parsedCache = [String: TouchGestureOverlay?]()
+        var gestures = [TouchGestureOverlay]()
+        var seenGestureKeys = Set<String>()
+        var seenExportedFiles = Set<String>()
+
+        for node in flatNodes {
+            for attachment in node.attachments {
+                guard
+                    attachment.name.localizedCaseInsensitiveContains("synthesized event"),
+                    let relativePath = attachment.relativePath
+                else { continue }
+
+                let fileName = relativePath
+                    .replacingOccurrences(of: "attachments/", with: "")
+                    .removingPercentEncoding ?? relativePath.replacingOccurrences(
+                    of: "attachments/", with: "")
+                let filePath = (attachmentRoot as NSString).appendingPathComponent(fileName)
+                seenExportedFiles.insert(fileName)
+
+                let baseTimestamp = attachment.timestamp ?? node.timestamp
+                guard let baseTimestamp else { continue }
+
+                let cacheKey = "\(filePath)|\(String(format: "%.6f", baseTimestamp))"
+                let overlay: TouchGestureOverlay?
+                if let cached = parsedCache[cacheKey] {
+                    overlay = cached
+                } else {
+                    let parsed = parseSynthesizedEventGesture(
+                        at: filePath, baseTimestamp: baseTimestamp)
+                    parsedCache[cacheKey] = parsed
+                    overlay = parsed
+                }
+
+                guard let overlay else { continue }
+                let dedupeKey = cacheKey
+                guard !seenGestureKeys.contains(dedupeKey) else { continue }
+                seenGestureKeys.insert(dedupeKey)
+                gestures.append(overlay)
+            }
+        }
+
+        if includeManifestFallback {
+            for attachment in attachmentsByTestIdentifier[testIdentifier] ?? [] {
+                let label = attachment.suggestedHumanReadableName ?? attachment.exportedFileName
+                guard label.localizedCaseInsensitiveContains("synthesized event") else { continue }
+                guard !seenExportedFiles.contains(attachment.exportedFileName) else { continue }
+                guard let baseTimestamp = parseSynthesizedEventTimestamp(from: label) else { continue }
+
+                let filePath = (attachmentRoot as NSString).appendingPathComponent(
+                    attachment.exportedFileName)
+                let cacheKey = "\(filePath)|\(String(format: "%.6f", baseTimestamp))"
+                let overlay: TouchGestureOverlay?
+                if let cached = parsedCache[cacheKey] {
+                    overlay = cached
+                } else {
+                    let parsed = parseSynthesizedEventGesture(
+                        at: filePath, baseTimestamp: baseTimestamp)
+                    parsedCache[cacheKey] = parsed
+                    overlay = parsed
+                }
+
+                guard let overlay else { continue }
+                guard !seenGestureKeys.contains(cacheKey) else { continue }
+                seenGestureKeys.insert(cacheKey)
+                gestures.append(overlay)
+                seenExportedFiles.insert(attachment.exportedFileName)
+            }
+        }
+
+        let fallbackSizeGesture = gestures.first { $0.width > 1 && $0.height > 1 }
+        let fallbackWidth = fallbackSizeGesture?.width ?? 402
+        let fallbackHeight = fallbackSizeGesture?.height ?? 874
+
+        let normalizedGestures = gestures.map { gesture -> TouchGestureOverlay in
+            guard gesture.width <= 1 || gesture.height <= 1 else { return gesture }
+
+            let maxX = gesture.points.map(\.x).max() ?? 0
+            let maxY = gesture.points.map(\.y).max() ?? 0
+            let inferredWidth = max(fallbackWidth, maxX + 1)
+            let inferredHeight = max(fallbackHeight, maxY + 1)
+
+            return TouchGestureOverlay(
+                startTime: gesture.startTime,
+                endTime: gesture.endTime,
+                width: inferredWidth,
+                height: inferredHeight,
+                points: gesture.points
+            )
+        }
+
+        let sortedGestures = normalizedGestures.sorted { $0.startTime < $1.startTime }
+        return sortedGestures
+    }
+
+    func buildUIHierarchySnapshots(from nodes: [TimelineNode]) -> [UIHierarchySnapshot] {
+        var flatNodes = [TimelineNode]()
+        flattenTimelineNodes(nodes, into: &flatNodes)
+
+        let attachmentRoot = (outputDir as NSString).appendingPathComponent("attachments")
+        var snapshots = [UIHierarchySnapshot]()
+        var seenSnapshotKeys = Set<String>()
+
+        for node in flatNodes {
+            for attachment in node.attachments {
+                guard attachment.name.localizedCaseInsensitiveContains("app ui hierarchy"),
+                    let relativePath = attachment.relativePath
+                else { continue }
+
+                let fileName = relativePath
+                    .replacingOccurrences(of: "attachments/", with: "")
+                    .removingPercentEncoding ?? relativePath.replacingOccurrences(
+                    of: "attachments/", with: "")
+                let filePath = (attachmentRoot as NSString).appendingPathComponent(fileName)
+                guard let timestamp = attachment.timestamp ?? node.timestamp else { continue }
+
+                let snapshotKey = "\(fileName)|\(String(format: "%.6f", timestamp))"
+                guard !seenSnapshotKeys.contains(snapshotKey) else { continue }
+                seenSnapshotKeys.insert(snapshotKey)
+
+                let label = hierarchySnapshotDisplayLabel(from: attachment.name)
+                guard
+                    let snapshot = parseUIHierarchySnapshot(
+                        at: filePath,
+                        snapshotId: snapshotKey.replacingOccurrences(of: "|", with: "_"),
+                        label: label,
+                        timestamp: timestamp,
+                        failureAssociated: attachment.failureAssociated)
+                else { continue }
+                snapshots.append(snapshot)
+            }
+        }
+
+        return snapshots.sorted { lhs, rhs in
+            if lhs.time == rhs.time { return lhs.label < rhs.label }
+            return lhs.time < rhs.time
+        }
+    }
+
+    func buildAttachmentLookup(
+        for testIdentifier: String, attachmentsByTestIdentifier: [String: [AttachmentManifestItem]]
+    ) -> [String: [AttachmentManifestItem]] {
+        var lookup = [String: [AttachmentManifestItem]]()
+        for attachment in attachmentsByTestIdentifier[testIdentifier] ?? [] {
+            if let name = attachment.suggestedHumanReadableName {
+                lookup[name, default: []].append(attachment)
+            }
+        }
+        return lookup
+    }
+
+    func buildVideoSources(
+        for testIdentifier: String, activities: TestActivities?,
+        attachmentsByTestIdentifier: [String: [AttachmentManifestItem]]
+    ) -> [VideoSource] {
+        let allAttachments = attachmentsByTestIdentifier[testIdentifier] ?? []
+        let videoAttachments = allAttachments.filter { isVideoAttachment($0) }
+        guard !videoAttachments.isEmpty else { return [] }
+
+        let rootActivities = activities?.testRuns.flatMap { $0.activities } ?? []
+        var attachmentTimestamps = [String: [Double]]()
+        collectActivityAttachmentTimestamps(from: rootActivities, into: &attachmentTimestamps)
+        let fallbackStartTime = collectEarliestActivityTimestamp(from: rootActivities)
+
+        return videoAttachments.map { attachment in
+            let label = attachment.suggestedHumanReadableName ?? attachment.exportedFileName
+            let startTime = attachmentTimestamps[label]?.min() ?? fallbackStartTime
+
+            return VideoSource(
+                label: label,
+                fileName: attachment.exportedFileName,
+                mimeType: videoMimeType(for: attachment.exportedFileName),
+                startTime: startTime,
+                failureAssociated: attachment.isAssociatedWithFailure ?? false
+            )
+        }
+    }
+
+    func buildScreenshotSources(
+        for testIdentifier: String, activities: TestActivities?,
+        attachmentsByTestIdentifier: [String: [AttachmentManifestItem]]
+    ) -> [ScreenshotSource] {
+        let allAttachments = attachmentsByTestIdentifier[testIdentifier] ?? []
+        let screenshotAttachments = allAttachments.filter { isScreenshotAttachment($0) }
+        guard !screenshotAttachments.isEmpty else { return [] }
+
+        let rootActivities = activities?.testRuns.flatMap { $0.activities } ?? []
+        var attachmentTimestamps = [String: [Double]]()
+        collectActivityAttachmentTimestamps(from: rootActivities, into: &attachmentTimestamps)
+        let fallbackStartTime = collectEarliestActivityTimestamp(from: rootActivities)
+
+        var seenSources = Set<String>()
+        let mapped = screenshotAttachments.compactMap { attachment -> ScreenshotSource? in
+            let label = attachment.suggestedHumanReadableName ?? attachment.exportedFileName
+            let timestamp =
+                attachmentTimestamps[label]?.min() ?? parseSnapshotTimestamp(from: label)
+                ?? fallbackStartTime
+            guard let timestamp else { return nil }
+
+            let src = "attachments/\(urlEncodePath(attachment.exportedFileName))"
+            guard !seenSources.contains(src) else { return nil }
+            seenSources.insert(src)
+
+            return ScreenshotSource(
+                label: label,
+                src: src,
+                time: timestamp,
+                failureAssociated: attachment.isAssociatedWithFailure ?? false
+            )
+        }
+
+        return mapped.sorted { lhs, rhs in
+            if lhs.time == rhs.time { return lhs.label < rhs.label }
+            return lhs.time < rhs.time
+        }
+    }
+
+    func buildTimelineNodes(
+        from activities: [TestActivity], attachmentLookup: [String: [AttachmentManifestItem]],
+        nextId: inout Int
+    ) -> [TimelineNode] {
+        return activities.map { activity in
+            let nodeId = "timeline_event_\(nextId)"
+            nextId += 1
+
+            var seenAttachments = Set<String>()
+            let attachments: [TimelineAttachment] = (activity.attachments ?? []).compactMap {
+                attachment -> TimelineAttachment? in
+                let key = "\(attachment.name)|\(attachment.timestamp ?? -1)"
+                guard !seenAttachments.contains(key) else { return nil }
+                seenAttachments.insert(key)
+
+                let matching = attachmentLookup[attachment.name]?.first
+                let relativePath =
+                    matching != nil ? "attachments/\(urlEncodePath(matching!.exportedFileName))" : nil
+                return TimelineAttachment(
+                    name: attachment.name,
+                    timestamp: attachment.timestamp,
+                    relativePath: relativePath,
+                    failureAssociated: matching?.isAssociatedWithFailure ?? false
+                )
+            }
+
+            let timestamp = activity.startTime ?? attachments.compactMap { $0.timestamp }.min()
+            let children = buildTimelineNodes(
+                from: activity.childActivities ?? [], attachmentLookup: attachmentLookup,
+                nextId: &nextId)
+            let childEndTimestamp = children.compactMap { $0.endTimestamp ?? $0.timestamp }.max()
+            let attachmentEndTimestamp = attachments.compactMap { $0.timestamp }.max()
+            let endTimestamp = [timestamp, childEndTimestamp, attachmentEndTimestamp].compactMap { $0 }
+                .max()
+            let failureAssociated =
+                activity.isAssociatedWithFailure ?? attachments.contains { $0.failureAssociated }
+
+            return TimelineNode(
+                id: nodeId,
+                title: activity.title,
+                timestamp: timestamp,
+                endTimestamp: endTimestamp,
+                failureAssociated: failureAssociated,
+                attachments: attachments,
+                children: children,
+                repeatCount: 1
+            )
+        }
+    }
+
+    func canMergeTimelineNodes(_ lhs: TimelineNode, _ rhs: TimelineNode) -> Bool {
+        return lhs.title == rhs.title
+            && lhs.attachments.isEmpty
+            && rhs.attachments.isEmpty
+            && lhs.children.isEmpty
+            && rhs.children.isEmpty
+            && lhs.failureAssociated == rhs.failureAssociated
+    }
+
+    func collapseRepeatedTimelineNodes(_ nodes: [TimelineNode]) -> [TimelineNode] {
+        let normalizedNodes = nodes.map { node in
+            let collapsedChildren = collapseRepeatedTimelineNodes(node.children)
+            return TimelineNode(
+                id: node.id,
+                title: node.title,
+                timestamp: node.timestamp,
+                endTimestamp: node.endTimestamp ?? node.timestamp,
+                failureAssociated: node.failureAssociated,
+                attachments: node.attachments,
+                children: collapsedChildren,
+                repeatCount: max(node.repeatCount, 1)
+            )
+        }
+
+        var collapsed = [TimelineNode]()
+        var index = 0
+
+        while index < normalizedNodes.count {
+            var current = normalizedNodes[index]
+            var lookahead = index + 1
+
+            while lookahead < normalizedNodes.count,
+                canMergeTimelineNodes(current, normalizedNodes[lookahead])
+            {
+                let next = normalizedNodes[lookahead]
+                current = TimelineNode(
+                    id: current.id,
+                    title: current.title,
+                    timestamp: current.timestamp ?? next.timestamp,
+                    endTimestamp: next.endTimestamp ?? next.timestamp ?? current.endTimestamp,
+                    failureAssociated: current.failureAssociated || next.failureAssociated,
+                    attachments: current.attachments,
+                    children: current.children,
+                    repeatCount: current.repeatCount + next.repeatCount
+                )
+                lookahead += 1
+            }
+
+            collapsed.append(current)
+            index = lookahead
+        }
+
+        return collapsed
+    }
+
+    func flattenTimelineNodes(_ nodes: [TimelineNode], into flat: inout [TimelineNode]) {
+        for node in nodes {
+            flat.append(node)
+            flattenTimelineNodes(node.children, into: &flat)
+        }
+    }
+
+    func timelineDisplayTitle(_ node: TimelineNode, baseTime: Double?) -> String {
+        guard node.repeatCount > 1 else { return node.title }
+
+        if let start = node.timestamp, let end = node.endTimestamp, let baseTime {
+            let startText = formatTimelineOffset(start - baseTime)
+            let endText = formatTimelineOffset(end - baseTime)
+            return "\(node.title) ×\(node.repeatCount) (\(startText)-\(endText))"
+        }
+
+        return "\(node.title) ×\(node.repeatCount)"
+    }
+
+    func renderTimelineNodesHTML(_ nodes: [TimelineNode], baseTime: Double?, depth: Int) -> String {
+        let renderedNodes = nodes.map { node -> String in
+            let timeLabel: String
+            if let timestamp = node.timestamp, let baseTime {
+                timeLabel = formatTimelineOffset(timestamp - baseTime)
+            } else {
+                timeLabel = "--:--"
+            }
+
+            let timeAttribute = node.timestamp.map { String(format: "%.6f", $0) } ?? ""
+            let hasChildren = !node.children.isEmpty
+            var eventClassList = ["timeline-event"]
+            if node.failureAssociated {
+                eventClassList.append("timeline-failure")
+            }
+            let loweredTitle = node.title.lowercased()
+            let hasInteractionAttachment = node.attachments.contains {
+                $0.name.lowercased().contains("synthesized event")
+            }
+            let hasHierarchyAttachment = node.attachments.contains {
+                $0.name.lowercased().contains("app ui hierarchy")
+            }
+            if loweredTitle.hasPrefix("tap ")
+                || loweredTitle.hasPrefix("swipe ")
+                || loweredTitle.contains("synthesize event")
+                || hasInteractionAttachment
+            {
+                eventClassList.append("timeline-interaction")
+            }
+            if hasHierarchyAttachment {
+                eventClassList.append("timeline-hierarchy")
+            }
+            if hasChildren {
+                eventClassList.append("timeline-has-children")
+            }
+            let eventClasses = eventClassList.joined(separator: " ")
+            let displayTitle = htmlEscape(timelineDisplayTitle(node, baseTime: baseTime))
+            let disclosure = hasChildren
+                ? "<span class=\"timeline-disclosure\" aria-hidden=\"true\"></span>"
+                : "<span class=\"timeline-disclosure timeline-disclosure-placeholder\" aria-hidden=\"true\"></span>"
+            let row = """
+                <div class="\(eventClasses)" data-event-id="\(node.id)" data-event-time="\(timeAttribute)">
+                    \(disclosure)
+                    <span class="timeline-title">\(displayTitle)</span>
+                    <span class="timeline-time">\(timeLabel)</span>
+                </div>
+                """
+
+            let attachmentList: String
+            if node.attachments.isEmpty {
+                attachmentList = ""
+            } else {
+                let renderedAttachments = node.attachments.map { attachment -> String in
+                    let cleanedLabel = cleanedAttachmentLabel(attachment.name)
+                    let attachmentName = htmlEscape(cleanedLabel)
+                    let previewKind = attachmentPreviewKind(
+                        name: attachment.name, relativePath: attachment.relativePath)
+                    let iconLabel = attachmentIconLabel(for: previewKind)
+                    let linkOrText: String
+                    if let relativePath = attachment.relativePath {
+                        linkOrText = """
+                            <a class="timeline-attachment-link" href="\(relativePath)" target="_blank" rel="noopener" data-preview-kind="\(previewKind)" data-preview-title="\(attachmentName)">
+                                <span class="timeline-attachment-icon">\(iconLabel)</span>
+                                <span class="timeline-attachment-label">\(attachmentName)</span>
+                            </a>
+                            """
+                    } else {
+                        linkOrText =
+                            "<span class=\"timeline-attachment-link\"><span class=\"timeline-attachment-icon\">\(iconLabel)</span><span class=\"timeline-attachment-label\">\(attachmentName)</span></span>"
+                    }
+
+                    return "<li class=\"timeline-attachment\">\(linkOrText)</li>"
+                }.joined(separator: "")
+                attachmentList = "<ul class=\"timeline-attachments\">\(renderedAttachments)</ul>"
+            }
+
+            if node.children.isEmpty {
+                return "<li class=\"timeline-node\" style=\"--timeline-depth: \(depth);\">\(row)\(attachmentList)</li>"
+            }
+
+            let childHTML = renderTimelineNodesHTML(node.children, baseTime: baseTime, depth: depth + 1)
+            return """
+                <li class="timeline-node" style="--timeline-depth: \(depth);">
+                    <details>
+                        <summary>\(row)</summary>
+                        \(attachmentList)
+                        <ul>\(childHTML)</ul>
+                    </details>
+                </li>
+                """
+        }.joined(separator: "")
+
+        return renderedNodes
+    }
+
+}

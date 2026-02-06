@@ -184,6 +184,7 @@ extension XCTestReport {
                             </video>
                             <div class="touch-overlay-layer" data-touch-overlay></div>
                             <div class="hierarchy-overlay-layer" data-hierarchy-overlay>
+                                <div class="hierarchy-hints-layer" data-hierarchy-hints></div>
                                 <div class="hierarchy-highlight-box" data-hierarchy-highlight hidden></div>
                             </div>
                         </div>
@@ -202,6 +203,7 @@ extension XCTestReport {
                         <img class="timeline-still" data-still-frame src="\(firstScreenshot.src)" alt="\(firstAlt)">
                         <div class="touch-overlay-layer" data-touch-overlay></div>
                         <div class="hierarchy-overlay-layer" data-hierarchy-overlay>
+                            <div class="hierarchy-hints-layer" data-hierarchy-hints></div>
                             <div class="hierarchy-highlight-box" data-hierarchy-highlight hidden></div>
                         </div>
                     </div>
@@ -235,7 +237,7 @@ extension XCTestReport {
                                 <span class="hierarchy-toolbar-dot" aria-hidden="true"></span>
                                 <span data-hierarchy-status>No hierarchy snapshot near this moment.</span>
                             </div>
-                            <div class="hierarchy-candidate-panel" data-hierarchy-candidate-panel>
+                            <div class="hierarchy-candidate-panel" data-hierarchy-candidate-panel hidden>
                                 <div class="hierarchy-candidate-heading" data-hierarchy-candidate-heading>Elements at cursor</div>
                                 <div class="hierarchy-candidate-empty" data-hierarchy-candidate-empty>Click inside the media to list overlapping elements.</div>
                                 <div class="hierarchy-candidate-list" data-hierarchy-candidate-list></div>
@@ -332,6 +334,7 @@ extension XCTestReport {
               var hierarchyBody = hierarchyPanel ? hierarchyPanel.querySelector('[data-hierarchy-body]') : null;
               var hierarchyToolbar = hierarchyPanel ? hierarchyPanel.querySelector('[data-hierarchy-toolbar]') : null;
               var hierarchyStatus = hierarchyToolbar ? hierarchyToolbar.querySelector('[data-hierarchy-status]') : null;
+              var hierarchyCandidatePanel = hierarchyPanel ? hierarchyPanel.querySelector('[data-hierarchy-candidate-panel]') : null;
               var hierarchyCandidateHeading = hierarchyPanel ? hierarchyPanel.querySelector('[data-hierarchy-candidate-heading]') : null;
               var hierarchyCandidateEmpty = hierarchyPanel ? hierarchyPanel.querySelector('[data-hierarchy-candidate-empty]') : null;
               var hierarchyCandidateList = hierarchyPanel ? hierarchyPanel.querySelector('[data-hierarchy-candidate-list]') : null;
@@ -369,6 +372,7 @@ extension XCTestReport {
               var currentHierarchySnapshotId = null;
               var selectedHierarchyElementId = null;
               var hoveredHierarchyElementId = null;
+              var currentHierarchyCandidateIds = [];
               var PLAY_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 6V18L18 12Z"></path></svg>';
               var PAUSE_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="6" width="4" height="12" rx="1"></rect><rect x="13" y="6" width="4" height="12" rx="1"></rect></svg>';
 
@@ -615,6 +619,11 @@ extension XCTestReport {
                 return layer ? layer.querySelector('[data-hierarchy-highlight]') : null;
               }
 
+              function getActiveHierarchyHintsLayer() {
+                var layer = getActiveHierarchyLayer();
+                return layer ? layer.querySelector('[data-hierarchy-hints]') : null;
+              }
+
               function setHierarchyPanelExpanded(expanded) {
                 if (!hierarchyPanel || !hierarchyBody || !hierarchyToggle) return;
                 var shouldExpand = !!expanded;
@@ -641,9 +650,48 @@ extension XCTestReport {
                 });
               }
 
+              function updateHierarchyHintOverlays(snapshot) {
+                var hintsLayer = getActiveHierarchyHintsLayer();
+                var media = getActiveMediaElement();
+                if (!hintsLayer || !media || !snapshot || !currentHierarchyCandidateIds.length || snapshot.width <= 0 || snapshot.height <= 0) {
+                  if (hintsLayer) hintsLayer.innerHTML = '';
+                  return;
+                }
+
+                var rect = getDisplayedMediaRect(media);
+                if (rect.width <= 0 || rect.height <= 0) {
+                  hintsLayer.innerHTML = '';
+                  return;
+                }
+
+                var scaleX = rect.width / snapshot.width;
+                var scaleY = rect.height / snapshot.height;
+                var hintsHtml = [];
+                for (var i = 0; i < currentHierarchyCandidateIds.length; i += 1) {
+                  var hintElement = hierarchyElementById(snapshot, currentHierarchyCandidateIds[i]);
+                  if (!hintElement || hintElement.width <= 0 || hintElement.height <= 0) continue;
+                  var left = rect.x + (hintElement.x * scaleX);
+                  var top = rect.y + (hintElement.y * scaleY);
+                  var width = Math.max(2, hintElement.width * scaleX);
+                  var height = Math.max(2, hintElement.height * scaleY);
+                  var hintClasses = 'hierarchy-hint-box';
+                  if (selectedHierarchyElementId && hintElement.id === selectedHierarchyElementId) {
+                    hintClasses += ' is-selected';
+                  } else if (hoveredHierarchyElementId && hintElement.id === hoveredHierarchyElementId) {
+                    hintClasses += ' is-hovered';
+                  }
+                  hintsHtml.push('<div class="' + hintClasses + '" style="left:' + left + 'px;top:' + top + 'px;width:' + width + 'px;height:' + height + 'px;"></div>');
+                }
+                hintsLayer.innerHTML = hintsHtml.join('');
+              }
+
               function closeHierarchyMenu() {
+                currentHierarchyCandidateIds = [];
                 if (hierarchyCandidateList) {
                   hierarchyCandidateList.innerHTML = '';
+                }
+                if (hierarchyCandidatePanel) {
+                  hierarchyCandidatePanel.hidden = true;
                 }
                 if (hierarchyCandidateEmpty) {
                   hierarchyCandidateEmpty.hidden = false;
@@ -652,6 +700,7 @@ extension XCTestReport {
                   hierarchyCandidateHeading.textContent = 'Elements at cursor';
                 }
                 hoveredHierarchyElementId = null;
+                updateHierarchyHintOverlays(null);
               }
 
               function hierarchySnapshotById(snapshotId) {
@@ -738,6 +787,7 @@ extension XCTestReport {
                   hierarchySelectedTitle.textContent = 'UI Hierarchy';
                   hierarchySelectedSubtitle.textContent = 'Scrub near a hierarchy snapshot, then click inside the media.';
                   hierarchyProperties.innerHTML = '';
+                  if (hierarchyCandidatePanel) hierarchyCandidatePanel.hidden = true;
                   if (hierarchyCandidateHeading) hierarchyCandidateHeading.textContent = 'Elements at cursor';
                   if (hierarchyCandidateEmpty) {
                     hierarchyCandidateEmpty.textContent = 'No hierarchy snapshot near this moment.';
@@ -760,7 +810,7 @@ extension XCTestReport {
                 }
 
                 hierarchySelectedTitle.textContent = hierarchyElementTitle(element);
-                hierarchySelectedSubtitle.textContent = 'Frame {{' + Number(element.x).toFixed(1) + ', ' + Number(element.y).toFixed(1) + '}, {' + Number(element.width).toFixed(1) + ', ' + Number(element.height).toFixed(1) + '}}';
+                hierarchySelectedSubtitle.textContent = 'x ' + Number(element.x).toFixed(1) + ' · y ' + Number(element.y).toFixed(1) + ' · ' + Number(element.width).toFixed(1) + ' × ' + Number(element.height).toFixed(1);
 
                 var rows = [];
                 function pushRow(key, value) {
@@ -768,6 +818,7 @@ extension XCTestReport {
                   rows.push('<div class="hierarchy-prop-row"><span class="hierarchy-prop-key">' + escapeHTML(key) + '</span><span class="hierarchy-prop-value">' + escapeHTML(value) + '</span></div>');
                 }
 
+                pushRow('Frame', '{{' + Number(element.x).toFixed(1) + ', ' + Number(element.y).toFixed(1) + '}, {' + Number(element.width).toFixed(1) + ', ' + Number(element.height).toFixed(1) + '}}');
                 pushRow('Role', element.role || '');
                 pushRow('Name', element.name || '');
                 pushRow('Label', element.label || '');
@@ -817,12 +868,19 @@ extension XCTestReport {
 
                 setHierarchyPanelExpanded(true);
                 var options = candidates.slice(0, 20);
+                currentHierarchyCandidateIds = options.map(function(element) { return element.id; });
+                if (selectedHierarchyElementId && currentHierarchyCandidateIds.indexOf(selectedHierarchyElementId) === -1) {
+                  selectedHierarchyElementId = null;
+                }
                 hierarchyCandidateList.innerHTML = options.map(function(element) {
                   return '<button type="button" class="hierarchy-candidate-item" data-hierarchy-element-id="' + escapeHTML(element.id) + '">'
                     + '<span class="hierarchy-candidate-title">' + escapeHTML(hierarchyElementTitle(element)) + '</span>'
                     + '<span class="hierarchy-candidate-frame">{{' + Number(element.x).toFixed(0) + ', ' + Number(element.y).toFixed(0) + '}, {' + Number(element.width).toFixed(0) + ', ' + Number(element.height).toFixed(0) + '}}</span>'
                     + '</button>';
                 }).join('');
+                if (hierarchyCandidatePanel) {
+                  hierarchyCandidatePanel.hidden = false;
+                }
                 if (hierarchyCandidateHeading) {
                   var offset = Math.max(0, (snapshot.time || 0) - (timelineBase || 0));
                   hierarchyCandidateHeading.textContent = 'Elements at ' + formatSeconds(offset);
@@ -853,6 +911,7 @@ extension XCTestReport {
                     updateHierarchyOverlay();
                   });
                 });
+                updateHierarchyHintOverlays(snapshot);
                 updateHierarchyCandidateSelectionState();
               }
 
@@ -933,6 +992,7 @@ extension XCTestReport {
                 if (hoveredHierarchyElementId && !hierarchyElementById(snapshot, hoveredHierarchyElementId)) {
                   hoveredHierarchyElementId = null;
                 }
+                updateHierarchyHintOverlays(snapshot);
                 setHierarchyHighlight(snapshot, highlightedElement);
                 updateHierarchyInspector(snapshot, hierarchyElementById(snapshot, selectedHierarchyElementId));
                 updateHierarchyCandidateSelectionState();
@@ -1408,7 +1468,8 @@ extension XCTestReport {
                 if (hierarchyToggleButton) {
                   event.preventDefault();
                   event.stopPropagation();
-                  setHierarchyPanelExpanded(hierarchyPanel ? hierarchyPanel.classList.contains('is-collapsed') : false);
+                  var currentlyExpanded = hierarchyToggle && hierarchyToggle.getAttribute('aria-expanded') === 'true';
+                  setHierarchyPanelExpanded(!currentlyExpanded);
                   return;
                 }
 

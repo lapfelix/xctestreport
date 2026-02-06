@@ -421,7 +421,7 @@ let sharedStyles = """
 
     .timeline-video-layout {
         display: grid;
-        grid-template-columns: minmax(420px, 56%) minmax(0, 1fr);
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
         gap: 12px;
         align-items: start;
     }
@@ -504,6 +504,7 @@ let sharedStyles = """
         display: flex;
         flex-direction: column;
         align-items: center;
+        justify-content: center;
         gap: 8px;
     }
 
@@ -1013,12 +1014,12 @@ let sharedStyles = """
     }
 
     .timeline-video-card {
-        width: min(100%, 360px);
-        margin: 0;
+        width: min(100%, 460px, calc((100dvh - 260px) * var(--media-aspect, 9 / 16)));
+        margin: 0 auto;
     }
 
     .test-detail-page .timeline-video-card {
-        width: min(100%, 360px, calc((100dvh - 450px) * var(--media-aspect, 9 / 16)));
+        width: min(100%, calc((100dvh - 280px) * var(--media-aspect, 9 / 16)));
     }
 
     .timeline-video-frame {
@@ -1032,7 +1033,7 @@ let sharedStyles = """
     }
 
     .test-detail-page .timeline-video-frame {
-        max-height: calc(100dvh - 390px);
+        max-height: calc(100dvh - 280px);
         margin: 0 auto;
     }
 
@@ -1067,6 +1068,32 @@ let sharedStyles = """
         z-index: 3;
     }
 
+    .hierarchy-hints-layer {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: 1;
+    }
+
+    .hierarchy-hint-box {
+        position: absolute;
+        border: 1px solid rgba(175, 82, 222, 0.45);
+        background: rgba(175, 82, 222, 0.09);
+        border-radius: 4px;
+        box-shadow: inset 0 0 0 1px rgba(175, 82, 222, 0.18);
+    }
+
+    .hierarchy-hint-box.is-hovered {
+        border-color: rgba(175, 82, 222, 0.82);
+        background: rgba(175, 82, 222, 0.2);
+    }
+
+    .hierarchy-hint-box.is-selected {
+        border-color: rgba(175, 82, 222, 0.96);
+        background: rgba(175, 82, 222, 0.28);
+        box-shadow: inset 0 0 0 1px rgba(120, 46, 157, 0.35);
+    }
+
     .touch-indicator {
         position: absolute;
         width: 24px;
@@ -1091,11 +1118,16 @@ let sharedStyles = """
     }
 
     .hierarchy-side-panel {
-        width: min(330px, 33vw);
+        width: min(300px, 30vw);
         min-width: 260px;
         display: flex;
         align-items: stretch;
         gap: 8px;
+    }
+
+    .hierarchy-side-panel.is-collapsed {
+        width: 40px;
+        min-width: 40px;
     }
 
     .hierarchy-side-panel[hidden] {
@@ -1112,11 +1144,12 @@ let sharedStyles = """
         align-items: center;
         justify-content: center;
         gap: 6px;
-        padding: 8px 10px;
-        width: 100%;
+        padding: 8px;
+        width: 40px;
         font-size: 0.76rem;
         font-weight: 600;
         letter-spacing: 0.02em;
+        flex: 0 0 auto;
     }
 
     .hierarchy-side-toggle:hover {
@@ -1144,6 +1177,15 @@ let sharedStyles = """
         display: none;
     }
 
+    .hierarchy-side-panel:not(.is-collapsed) .hierarchy-side-toggle {
+        width: auto;
+        padding: 8px 10px;
+    }
+
+    .hierarchy-side-panel:not(.is-collapsed) .hierarchy-side-toggle-label {
+        display: inline;
+    }
+
     .hierarchy-side-body {
         flex: 1;
         min-width: 0;
@@ -1154,6 +1196,7 @@ let sharedStyles = """
         display: grid;
         grid-template-rows: auto auto minmax(0, 1fr);
         gap: 8px;
+        overflow: hidden;
     }
 
     .hierarchy-candidate-item {
@@ -1209,6 +1252,10 @@ let sharedStyles = """
         grid-template-rows: auto auto minmax(0, 1fr);
         gap: 6px;
         min-height: 120px;
+    }
+
+    .hierarchy-candidate-panel[hidden] {
+        display: none;
     }
 
     .hierarchy-candidate-heading {
@@ -1279,7 +1326,7 @@ let sharedStyles = """
     }
 
     .hierarchy-inspector-properties {
-        max-height: min(220px, 26vh);
+        max-height: min(280px, 34vh);
         overflow: auto;
         border-top: 1px solid #ECE3F5;
         padding-top: 6px;
@@ -1297,6 +1344,7 @@ let sharedStyles = """
     .hierarchy-prop-key {
         color: #6E5D85;
         font-weight: 600;
+        text-align: right;
     }
 
     .hierarchy-prop-value {
@@ -1815,6 +1863,23 @@ let sharedStyles = """
             border-color: rgba(196, 133, 233, 0.98);
             background: rgba(162, 88, 208, 0.18);
             box-shadow: 0 0 0 1px rgba(126, 70, 162, 0.42), 0 8px 22px rgba(44, 21, 58, 0.4);
+        }
+
+        .hierarchy-hint-box {
+            border-color: rgba(196, 133, 233, 0.42);
+            background: rgba(162, 88, 208, 0.1);
+            box-shadow: inset 0 0 0 1px rgba(126, 70, 162, 0.22);
+        }
+
+        .hierarchy-hint-box.is-hovered {
+            border-color: rgba(205, 152, 239, 0.75);
+            background: rgba(182, 109, 224, 0.2);
+        }
+
+        .hierarchy-hint-box.is-selected {
+            border-color: rgba(213, 166, 242, 0.9);
+            background: rgba(188, 123, 228, 0.28);
+            box-shadow: inset 0 0 0 1px rgba(213, 166, 242, 0.32);
         }
 
         .hierarchy-side-toggle {

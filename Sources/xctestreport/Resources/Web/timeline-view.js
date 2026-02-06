@@ -447,21 +447,34 @@
       }, 0);
     }
     var durationForRatio = duration > 0.0001 ? duration : 1;
+    var laneWidth = scrubberMarkerLane.clientWidth || 0;
 
     events.forEach(function(event, index) {
       var offset = timelineOffsetForEvent(event);
       if (offset == null) return;
       var clampedOffset = Math.max(0, Math.min(durationForRatio, offset));
       var ratio = duration > 0 ? (clampedOffset / durationForRatio) : 0;
+      var markerKind = normalizeTimelineEventKind(event);
 
       var marker = document.createElement('button');
       marker.type = 'button';
-      marker.className = 'timeline-scrubber-marker is-' + normalizeTimelineEventKind(event);
+      marker.className = 'timeline-scrubber-marker is-' + markerKind;
       marker.style.left = (ratio * 100).toFixed(4) + '%';
       marker.setAttribute('data-event-index', String(index));
       marker.setAttribute('data-event-id', event.id || '');
       marker.setAttribute('aria-label', (event.title || 'Timeline event') + ' at ' + formatSeconds(clampedOffset));
       marker.title = event.title || 'Timeline event';
+
+      if (laneWidth > 0) {
+        var markerHalfWidth = markerKind === 'error' ? 5 : (markerKind === 'tap' || markerKind === 'hierarchy' ? 3 : 2.5);
+        var edgeRatio = Math.min(0.08, markerHalfWidth / laneWidth);
+        if (ratio <= edgeRatio) {
+          marker.classList.add('is-edge-left');
+        } else if (ratio >= (1 - edgeRatio)) {
+          marker.classList.add('is-edge-right');
+        }
+      }
+
       marker.addEventListener('click', function(clickEvent) {
         clickEvent.preventDefault();
         jumpToEventByIndex(index, true);

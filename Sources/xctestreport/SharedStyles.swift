@@ -1103,21 +1103,22 @@ let sharedStyles = """
 
     .hierarchy-hint-box {
         position: absolute;
-        border: 1px solid rgba(175, 82, 222, 0.45);
-        background: rgba(175, 82, 222, 0.09);
+        border: 1px solid rgba(175, 82, 222, 0.56);
+        background: transparent;
         border-radius: 4px;
-        box-shadow: inset 0 0 0 1px rgba(175, 82, 222, 0.18);
+        box-shadow: none;
+        opacity: 0.5;
     }
 
     .hierarchy-hint-box.is-hovered {
         border-color: rgba(175, 82, 222, 0.82);
-        background: rgba(175, 82, 222, 0.2);
+        opacity: 0.72;
     }
 
     .hierarchy-hint-box.is-selected {
         border-color: rgba(175, 82, 222, 0.96);
-        background: rgba(175, 82, 222, 0.28);
-        box-shadow: inset 0 0 0 1px rgba(120, 46, 157, 0.35);
+        border-width: 2px;
+        opacity: 0.92;
     }
 
     .touch-indicator {
@@ -1137,8 +1138,8 @@ let sharedStyles = """
     .hierarchy-highlight-box {
         position: absolute;
         border: 2px solid rgba(175, 82, 222, 0.96);
-        background: rgba(175, 82, 222, 0.15);
-        box-shadow: 0 0 0 1px rgba(96, 34, 126, 0.38), 0 8px 22px rgba(96, 34, 126, 0.25);
+        background: transparent;
+        box-shadow: 0 0 0 1px rgba(96, 34, 126, 0.34);
         border-radius: 5px;
         pointer-events: none;
     }
@@ -1152,8 +1153,8 @@ let sharedStyles = """
     }
 
     .hierarchy-side-panel.is-collapsed {
-        width: 40px;
-        min-width: 40px;
+        width: 32px;
+        min-width: 32px;
     }
 
     .hierarchy-side-panel[hidden] {
@@ -1163,18 +1164,15 @@ let sharedStyles = """
     .hierarchy-side-toggle {
         border: 1px solid #CAD6E8;
         background: #F6F9FF;
-        border-radius: 9px;
+        border-radius: 8px;
         color: #2D4365;
         cursor: pointer;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        gap: 6px;
-        padding: 8px;
-        width: 40px;
-        font-size: 0.76rem;
-        font-weight: 600;
-        letter-spacing: 0.02em;
+        padding: 0;
+        width: 32px;
+        height: 32px;
         flex: 0 0 auto;
     }
 
@@ -1195,21 +1193,7 @@ let sharedStyles = """
     }
 
     .hierarchy-side-panel.is-collapsed .hierarchy-side-toggle {
-        width: auto;
-        padding: 8px;
-    }
-
-    .hierarchy-side-panel.is-collapsed .hierarchy-side-toggle-label {
-        display: none;
-    }
-
-    .hierarchy-side-panel:not(.is-collapsed) .hierarchy-side-toggle {
-        width: auto;
-        padding: 8px 10px;
-    }
-
-    .hierarchy-side-panel:not(.is-collapsed) .hierarchy-side-toggle-label {
-        display: inline;
+        width: 32px;
     }
 
     .hierarchy-side-body {
@@ -1220,9 +1204,17 @@ let sharedStyles = """
         border-radius: 9px;
         padding: 8px;
         display: grid;
-        grid-template-rows: auto auto minmax(0, 1fr);
+        grid-template-rows: auto auto auto minmax(0, 1fr);
         gap: 8px;
         overflow: hidden;
+    }
+
+    .hierarchy-side-title {
+        font-size: 0.73rem;
+        font-weight: 700;
+        color: #5A4572;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
     }
 
     .hierarchy-candidate-item {
@@ -1379,6 +1371,11 @@ let sharedStyles = """
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
     }
 
+    .hierarchy-prop-value.path {
+        line-height: 1.4;
+        white-space: pre-wrap;
+    }
+
     .new-failure {
         color: #856404;
         background-color: #fff3cd;
@@ -1529,16 +1526,6 @@ let sharedStyles = """
         .hierarchy-side-panel {
             width: 100%;
             min-width: 0;
-        }
-
-        .hierarchy-side-panel.is-collapsed .hierarchy-side-toggle {
-            width: 100%;
-            justify-content: flex-start;
-            padding: 8px 10px;
-        }
-
-        .hierarchy-side-panel.is-collapsed .hierarchy-side-toggle-label {
-            display: inline;
         }
 
         .test-detail-page .test-detail-shell {
@@ -1904,25 +1891,28 @@ let sharedStyles = """
 
         .hierarchy-highlight-box {
             border-color: rgba(105, 193, 255, 0.98);
-            background: rgba(80, 153, 255, 0.2);
-            box-shadow: 0 0 0 1px rgba(78, 150, 255, 0.44), 0 10px 24px rgba(20, 64, 132, 0.42);
+            background: transparent;
+            box-shadow: 0 0 0 1px rgba(78, 150, 255, 0.5);
         }
 
         .hierarchy-hint-box {
             border-color: rgba(196, 133, 233, 0.42);
-            background: rgba(162, 88, 208, 0.1);
-            box-shadow: inset 0 0 0 1px rgba(126, 70, 162, 0.22);
+            background: transparent;
+            box-shadow: none;
+            opacity: 0.56;
         }
 
         .hierarchy-hint-box.is-hovered {
             border-color: rgba(205, 152, 239, 0.75);
-            background: rgba(182, 109, 224, 0.2);
+            opacity: 0.74;
         }
 
         .hierarchy-hint-box.is-selected {
             border-color: rgba(213, 166, 242, 0.9);
-            background: rgba(188, 123, 228, 0.28);
-            box-shadow: inset 0 0 0 1px rgba(213, 166, 242, 0.32);
+            background: transparent;
+            box-shadow: none;
+            border-width: 2px;
+            opacity: 0.92;
         }
 
         .hierarchy-side-toggle {
@@ -1947,6 +1937,10 @@ let sharedStyles = """
 
         .hierarchy-candidate-heading {
             color: #D7C7E9;
+        }
+
+        .hierarchy-side-title {
+            color: #CDB9DF;
         }
 
         .hierarchy-candidate-empty {

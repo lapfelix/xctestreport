@@ -66,6 +66,7 @@
   var selectedHierarchyElementId = null;
   var hoveredHierarchyElementId = null;
   var currentHierarchyCandidateIds = [];
+  var hierarchyParentMapCache = Object.create(null);
   var PLAY_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 6V18L18 12Z"></path></svg>';
   var PAUSE_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="6" width="4" height="12" rx="1"></rect><rect x="13" y="6" width="4" height="12" rx="1"></rect></svg>';
 
@@ -144,6 +145,7 @@
     events = runState.events || [];
     touchGestures = runState.touchGestures || [];
     hierarchySnapshots = runState.hierarchySnapshots || [];
+    hierarchyParentMapCache = Object.create(null);
     timelineBase = Number.isFinite(runState.timelineBase) ? runState.timelineBase : (fallbackVideoBase || 0);
     initialFailureEventIndex = Number.isFinite(runState.initialFailureEventIndex) ? runState.initialFailureEventIndex : -1;
 
@@ -430,6 +432,40 @@
     return null;
   }
 
+  function hierarchyParentMap(snapshot) {
+    if (!snapshot || !snapshot.id || !snapshot.elements) return Object.create(null);
+    if (hierarchyParentMapCache[snapshot.id]) return hierarchyParentMapCache[snapshot.id];
+
+    var mapping = Object.create(null);
+    var ancestorStack = [];
+    for (var i = 0; i < snapshot.elements.length; i += 1) {
+      var node = snapshot.elements[i];
+      if (!node || !node.id) continue;
+      var depth = Number.isFinite(node.depth) ? Math.max(0, Math.floor(node.depth)) : 0;
+      while (ancestorStack.length > depth) ancestorStack.pop();
+      mapping[node.id] = ancestorStack.length ? ancestorStack[ancestorStack.length - 1] : null;
+      ancestorStack.push(node.id);
+    }
+    hierarchyParentMapCache[snapshot.id] = mapping;
+    return mapping;
+  }
+
+  function hierarchyAncestorChain(snapshot, element) {
+    if (!snapshot || !element || !element.id) return [];
+    var parentMap = hierarchyParentMap(snapshot);
+    var chain = [];
+    var seen = Object.create(null);
+    var currentId = parentMap[element.id];
+    while (currentId && !seen[currentId]) {
+      seen[currentId] = true;
+      var parentElement = hierarchyElementById(snapshot, currentId);
+      if (!parentElement) break;
+      chain.unshift(parentElement);
+      currentId = parentMap[currentId];
+    }
+    return chain;
+  }
+
   function hierarchyElementTitle(element) {
     if (!element) return 'UI Element';
     var descriptor = element.role || 'Element';
@@ -506,9 +542,13 @@
     hierarchySelectedSubtitle.textContent = 'x ' + Number(element.x).toFixed(1) + ' · y ' + Number(element.y).toFixed(1) + ' · ' + Number(element.width).toFixed(1) + ' × ' + Number(element.height).toFixed(1);
 
     var rows = [];
-    function pushRow(key, value) {
+    function pushRow(key, value, valueClassName) {
       if (value == null || value === '') return;
-      rows.push('<div class="hierarchy-prop-row"><span class="hierarchy-prop-key">' + escapeHTML(key) + '</span><span class="hierarchy-prop-value">' + escapeHTML(value) + '</span></div>');
+      var valueClass = 'hierarchy-prop-value';
+      if (valueClassName) {
+        valueClass += ' ' + valueClassName;
+      }
+      rows.push('<div class="hierarchy-prop-row"><span class="hierarchy-prop-key">' + escapeHTML(key) + '</span><span class="' + valueClass + '">' + escapeHTML(value) + '</span></div>');
     }
 
     pushRow('Frame', '{{' + Number(element.x).toFixed(1) + ', ' + Number(element.y).toFixed(1) + '}, {' + Number(element.width).toFixed(1) + ', ' + Number(element.height).toFixed(1) + '}}');
@@ -519,6 +559,15 @@
     pushRow('Value', element.value || '');
     pushRow('Element ID', element.id || '');
     pushRow('Depth', String(element.depth == null ? '' : element.depth));
+    var ancestors = hierarchyAncestorChain(snapshot, element);
+    if (ancestors.length) {
+      var containerPath = ancestors.map(function(ancestor, index) {
+        return String(index + 1) + '. ' + hierarchyElementTitle(ancestor);
+      }).join('\n');
+      pushRow('Containers', containerPath, 'path');
+    } else {
+      pushRow('Containers', 'None (top-level)', 'path');
+    }
 
     var properties = element.properties || {};
     var propertyKeys = Object.keys(properties).sort();

@@ -245,9 +245,9 @@ extension XCTestReport {
                             <svg class="hierarchy-side-toggle-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
                                 <path d="M12.6 4.6L7.2 10L12.6 15.4L11.2 16.8L4.4 10L11.2 3.2Z"></path>
                             </svg>
-                            <span class="hierarchy-side-toggle-label">Inspector</span>
                         </button>
                         <div class="hierarchy-side-body" data-hierarchy-body hidden>
+                            <div class="hierarchy-side-title">Inspector</div>
                             <div class="hierarchy-toolbar" data-hierarchy-toolbar>
                                 <span class="hierarchy-toolbar-dot" aria-hidden="true"></span>
                                 <span data-hierarchy-status>No hierarchy snapshot near this moment.</span>

@@ -33,8 +33,9 @@ Web UI assets are now file-based (not embedded as large Swift strings):
 
 - HTML templates: `Sources/xctestreport/Resources/Web/templates/`
 - Stylesheet: `Sources/xctestreport/Resources/Web/report.css`
-- Page behavior scripts: `Sources/xctestreport/Resources/Web/index-page.js` and `Sources/xctestreport/Resources/Web/timeline-view.js`
+- Page behavior scripts: `Sources/xctestreport/Resources/Web/index-page.js`, `Sources/xctestreport/Resources/Web/timeline-view.js`, and `Sources/xctestreport/Resources/Web/plist-preview.js`
 - Mobile-first rendering: test tables collapse into labeled cards on narrow screens; detail timeline reflows to avoid clipping.
+- Binary plist attachments are parsed in-browser on demand when previewing (no pre-expanded `.preview.txt` files generated during export).
 
 Rendering flow:
 

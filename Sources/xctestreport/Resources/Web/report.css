@@ -925,6 +925,7 @@ tr.failed {
 
 .attachment-preview-image,
 .attachment-preview-video,
+.attachment-preview-text,
 .attachment-preview-frame,
 .attachment-preview-empty {
     display: none;
@@ -940,6 +941,20 @@ tr.failed {
 
 .attachment-preview-video {
     background: #000;
+}
+
+.attachment-preview-text {
+    margin: 0;
+    padding: 12px;
+    border: 0;
+    background: #F7FAFF;
+    color: #2B3951;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: 0.74rem;
+    line-height: 1.38;
 }
 
 .attachment-preview-frame {
@@ -2227,6 +2242,11 @@ button#toggle-all {
 
     .attachment-preview-frame {
         background: #111827;
+    }
+
+    .attachment-preview-text {
+        background: #0E1624;
+        color: #E5EEFF;
     }
 
     .attachment-preview-empty {

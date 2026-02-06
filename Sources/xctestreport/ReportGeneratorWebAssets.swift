@@ -28,6 +28,8 @@ extension XCTestReport {
         try copyWebAsset(
             named: "index-page", withExtension: "js", subdirectory: "Web", to: directory)
         try copyWebAsset(
+            named: "plist-preview", withExtension: "js", subdirectory: "Web", to: directory)
+        try copyWebAsset(
             named: "timeline-view", withExtension: "js", subdirectory: "Web", to: directory)
     }
 

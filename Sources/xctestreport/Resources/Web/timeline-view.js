@@ -33,8 +33,10 @@
   var previewOpen = previewModal ? previewModal.querySelector('[data-attachment-open]') : null;
   var previewImage = previewModal ? previewModal.querySelector('[data-attachment-image]') : null;
   var previewVideo = previewModal ? previewModal.querySelector('[data-attachment-video]') : null;
+  var previewText = previewModal ? previewModal.querySelector('[data-attachment-text]') : null;
   var previewFrame = previewModal ? previewModal.querySelector('[data-attachment-frame]') : null;
   var previewEmpty = previewModal ? previewModal.querySelector('[data-attachment-empty]') : null;
+  var plistPreviewRequestToken = 0;
   var hierarchyOpenToggle = root.querySelector('[data-hierarchy-open]');
   var hierarchyPanel = root.querySelector('[data-hierarchy-panel]');
   var hierarchyToggle = hierarchyPanel ? hierarchyPanel.querySelector('[data-hierarchy-toggle]') : null;
@@ -220,6 +222,7 @@
   }
 
   function resetAttachmentPreviewContent() {
+    plistPreviewRequestToken += 1;
     if (previewImage) {
       previewImage.style.display = 'none';
       previewImage.removeAttribute('src');
@@ -228,6 +231,10 @@
       previewVideo.pause();
       previewVideo.style.display = 'none';
       previewVideo.removeAttribute('src');
+    }
+    if (previewText) {
+      previewText.style.display = 'none';
+      previewText.textContent = '';
     }
     if (previewFrame) {
       previewFrame.style.display = 'none';
@@ -242,6 +249,35 @@
     if (!previewModal || previewModal.hidden) return;
     previewModal.hidden = true;
     resetAttachmentPreviewContent();
+  }
+
+  function setAttachmentTextPreview(message) {
+    if (!previewText) return;
+    previewText.textContent = message;
+    previewText.style.display = 'block';
+  }
+
+  function loadBinaryPlistPreview(href, requestToken) {
+    fetch(href)
+      .then(function(response) {
+        if (!response.ok) {
+          throw new Error('HTTP ' + response.status);
+        }
+        return response.arrayBuffer();
+      })
+      .then(function(buffer) {
+        if (!previewModal || previewModal.hidden || requestToken !== plistPreviewRequestToken) return;
+        if (!globalThis.PlistPreview || typeof globalThis.PlistPreview.parseBinaryPlistToText !== 'function') {
+          throw new Error('Plist parser is unavailable.');
+        }
+        var parsedText = globalThis.PlistPreview.parseBinaryPlistToText(buffer);
+        setAttachmentTextPreview(parsedText);
+      })
+      .catch(function(error) {
+        if (!previewModal || previewModal.hidden || requestToken !== plistPreviewRequestToken) return;
+        var message = (error && error.message) ? error.message : String(error);
+        setAttachmentTextPreview('Unable to parse this binary plist preview.\n\n' + message);
+      });
   }
 
   function openAttachmentPreview(link) {
@@ -263,6 +299,11 @@
     } else if (kind === 'video' && previewVideo) {
       previewVideo.src = href;
       previewVideo.style.display = 'block';
+    } else if (kind === 'plist' && previewText) {
+      var requestToken = plistPreviewRequestToken + 1;
+      plistPreviewRequestToken = requestToken;
+      setAttachmentTextPreview('Loading plist preview...');
+      loadBinaryPlistPreview(href, requestToken);
     } else if (previewFrame && (kind === 'text' || kind === 'json' || kind === 'pdf' || kind === 'html')) {
       previewFrame.src = href;
       previewFrame.style.display = 'block';

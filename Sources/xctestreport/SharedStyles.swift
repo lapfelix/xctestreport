@@ -1111,22 +1111,26 @@ let sharedStyles = """
 
     .hierarchy-hint-box {
         position: absolute;
-        border: 1px solid rgba(175, 82, 222, 0.56);
-        background: transparent;
+        border: 1.5px solid rgba(175, 82, 222, 0.74);
+        background: rgba(175, 82, 222, 0.08);
         border-radius: 4px;
-        box-shadow: none;
-        opacity: 0.5;
-    }
-
-    .hierarchy-hint-box.is-hovered {
-        border-color: rgba(175, 82, 222, 0.82);
+        box-shadow: inset 0 0 0 1px rgba(175, 82, 222, 0.14);
         opacity: 0.72;
     }
 
+    .hierarchy-hint-box.is-hovered {
+        border-color: rgba(175, 82, 222, 0.94);
+        background: rgba(175, 82, 222, 0.14);
+        box-shadow: inset 0 0 0 1px rgba(175, 82, 222, 0.24);
+        opacity: 0.9;
+    }
+
     .hierarchy-hint-box.is-selected {
-        border-color: rgba(175, 82, 222, 0.96);
-        border-width: 2px;
-        opacity: 0.92;
+        border-color: rgba(192, 95, 236, 0.99);
+        border-width: 3px;
+        background: rgba(187, 95, 232, 0.2);
+        box-shadow: 0 0 0 2px rgba(192, 95, 236, 0.36), inset 0 0 0 1px rgba(255, 240, 255, 0.24);
+        opacity: 1;
     }
 
     .touch-indicator {
@@ -1145,9 +1149,9 @@ let sharedStyles = """
 
     .hierarchy-highlight-box {
         position: absolute;
-        border: 2px solid rgba(175, 82, 222, 0.96);
-        background: transparent;
-        box-shadow: 0 0 0 1px rgba(96, 34, 126, 0.34);
+        border: 3px solid rgba(194, 99, 239, 0.99);
+        background: rgba(194, 99, 239, 0.14);
+        box-shadow: 0 0 0 2px rgba(194, 99, 239, 0.35), 0 0 22px rgba(194, 99, 239, 0.32);
         border-radius: 5px;
         pointer-events: none;
     }
@@ -1246,9 +1250,9 @@ let sharedStyles = """
     }
 
     .hierarchy-candidate-item.is-selected {
-        background: #F1E3FD;
-        border-color: #B07DD8;
-        box-shadow: 0 0 0 1px rgba(168, 102, 219, 0.22);
+        background: #EEDAFD;
+        border-color: #A56FD2;
+        box-shadow: 0 0 0 2px rgba(168, 102, 219, 0.34), inset 0 0 0 1px rgba(255, 255, 255, 0.5);
     }
 
     .hierarchy-candidate-item.is-hovered {
@@ -1281,6 +1285,25 @@ let sharedStyles = """
         grid-template-rows: auto auto minmax(0, 1fr);
         gap: 7px;
         min-height: 132px;
+    }
+
+    .hierarchy-candidate-panel.is-flashing {
+        animation: hierarchyCandidateFlash 220ms ease-out;
+    }
+
+    @keyframes hierarchyCandidateFlash {
+        0% {
+            box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.0), 0 0 0 0 rgba(194, 99, 239, 0.0);
+            background: linear-gradient(180deg, #FEFCFF 0%, #FBF8FF 100%);
+        }
+        35% {
+            box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.38), 0 0 0 2px rgba(194, 99, 239, 0.38);
+            background: linear-gradient(180deg, #FFFFFF 0%, #F6ECFF 100%);
+        }
+        100% {
+            box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.0), 0 0 0 0 rgba(194, 99, 239, 0.0);
+            background: linear-gradient(180deg, #FEFCFF 0%, #FBF8FF 100%);
+        }
     }
 
     .hierarchy-candidate-panel[hidden] {
@@ -1976,29 +1999,31 @@ let sharedStyles = """
         }
 
         .hierarchy-highlight-box {
-            border-color: rgba(105, 193, 255, 0.98);
-            background: transparent;
-            box-shadow: 0 0 0 1px rgba(78, 150, 255, 0.5);
+            border-color: rgba(196, 113, 242, 0.99);
+            background: rgba(196, 113, 242, 0.2);
+            box-shadow: 0 0 0 2px rgba(196, 113, 242, 0.38), 0 0 26px rgba(196, 113, 242, 0.35);
         }
 
         .hierarchy-hint-box {
-            border-color: rgba(196, 133, 233, 0.42);
-            background: transparent;
-            box-shadow: none;
-            opacity: 0.56;
+            border-color: rgba(201, 144, 235, 0.74);
+            background: rgba(177, 108, 220, 0.11);
+            box-shadow: inset 0 0 0 1px rgba(184, 123, 224, 0.18);
+            opacity: 0.78;
         }
 
         .hierarchy-hint-box.is-hovered {
-            border-color: rgba(205, 152, 239, 0.75);
-            opacity: 0.74;
+            border-color: rgba(216, 171, 244, 0.94);
+            background: rgba(181, 120, 225, 0.2);
+            box-shadow: inset 0 0 0 1px rgba(205, 152, 239, 0.34);
+            opacity: 0.95;
         }
 
         .hierarchy-hint-box.is-selected {
-            border-color: rgba(213, 166, 242, 0.9);
-            background: transparent;
-            box-shadow: none;
-            border-width: 2px;
-            opacity: 0.92;
+            border-color: rgba(225, 184, 247, 0.99);
+            background: rgba(194, 129, 234, 0.3);
+            box-shadow: 0 0 0 2px rgba(215, 166, 242, 0.44), inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+            border-width: 3px;
+            opacity: 1;
         }
 
         .hierarchy-side-toggle {
@@ -2046,9 +2071,9 @@ let sharedStyles = """
         }
 
         .hierarchy-candidate-item.is-selected {
-            background: #4A3760;
-            border-color: #B28CD4;
-            box-shadow: 0 0 0 1px rgba(183, 140, 218, 0.34);
+            background: #563B72;
+            border-color: #C39CE2;
+            box-shadow: 0 0 0 2px rgba(196, 151, 231, 0.45), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
         }
 
         .hierarchy-candidate-item.is-hovered {
@@ -2108,6 +2133,25 @@ let sharedStyles = """
             border-color: #607899;
             background: #253246;
             color: #CAE0FF;
+        }
+
+        .hierarchy-candidate-panel.is-flashing {
+            animation: hierarchyCandidateFlashDark 220ms ease-out;
+        }
+
+        @keyframes hierarchyCandidateFlashDark {
+            0% {
+                box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.0), 0 0 0 0 rgba(196, 113, 242, 0.0);
+                background: linear-gradient(180deg, #251D32 0%, #211A2B 100%);
+            }
+            35% {
+                box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14), 0 0 0 2px rgba(196, 113, 242, 0.44);
+                background: linear-gradient(180deg, #342246 0%, #261D32 100%);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.0), 0 0 0 0 rgba(196, 113, 242, 0.0);
+                background: linear-gradient(180deg, #251D32 0%, #211A2B 100%);
+            }
         }
         
         th {

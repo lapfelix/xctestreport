@@ -253,7 +253,7 @@ extension XCTestReport {
                                 <span data-hierarchy-status>No hierarchy snapshot near this moment.</span>
                             </div>
                             <div class="hierarchy-candidate-panel" data-hierarchy-candidate-panel hidden>
-                                <div class="hierarchy-candidate-heading" data-hierarchy-candidate-heading>Elements at cursor</div>
+                                <div class="hierarchy-candidate-heading" data-hierarchy-candidate-heading>Elements at point</div>
                                 <div class="hierarchy-candidate-empty" data-hierarchy-candidate-empty>Click inside the media to list overlapping elements.</div>
                                 <div class="hierarchy-candidate-list" data-hierarchy-candidate-list></div>
                             </div>

@@ -458,10 +458,32 @@
       hierarchyCandidateEmpty.hidden = false;
     }
     if (hierarchyCandidateHeading) {
-      hierarchyCandidateHeading.textContent = 'Elements at cursor';
+      hierarchyCandidateHeading.textContent = 'Elements at point';
     }
     hoveredHierarchyElementId = null;
     updateHierarchyHintOverlays(null);
+  }
+
+  function flashHierarchyCandidatePanel() {
+    if (!hierarchyCandidatePanel) return;
+    hierarchyCandidatePanel.classList.remove('is-flashing');
+    void hierarchyCandidatePanel.offsetWidth;
+    hierarchyCandidatePanel.classList.add('is-flashing');
+    window.setTimeout(function() {
+      if (hierarchyCandidatePanel) hierarchyCandidatePanel.classList.remove('is-flashing');
+    }, 260);
+  }
+
+  function showHierarchyCandidateEmpty(snapshot, message) {
+    if (!hierarchyCandidatePanel || !hierarchyCandidateEmpty || !hierarchyCandidateHeading || !hierarchyCandidateList) return;
+    hierarchyCandidatePanel.hidden = false;
+    hierarchyCandidateHeading.textContent = 'Elements at point';
+    hierarchyCandidateList.innerHTML = '';
+    hierarchyCandidateEmpty.textContent = message || 'No elements at this point.';
+    hierarchyCandidateEmpty.hidden = false;
+    currentHierarchyCandidateIds = [];
+    updateHierarchyHintOverlays(snapshot || null);
+    flashHierarchyCandidatePanel();
   }
 
   function hierarchySnapshotById(snapshotId) {
@@ -600,7 +622,7 @@
       hierarchySelectedSubtitle.textContent = 'Scrub near a hierarchy snapshot, then click inside the media.';
       hierarchyProperties.innerHTML = '';
       if (hierarchyCandidatePanel) hierarchyCandidatePanel.hidden = true;
-      if (hierarchyCandidateHeading) hierarchyCandidateHeading.textContent = 'Elements at cursor';
+      if (hierarchyCandidateHeading) hierarchyCandidateHeading.textContent = 'Elements at point';
       if (hierarchyCandidateEmpty) {
         hierarchyCandidateEmpty.textContent = 'No hierarchy snapshot near this moment.';
         hierarchyCandidateEmpty.hidden = false;
@@ -723,11 +745,10 @@
       hierarchyCandidatePanel.hidden = false;
     }
     if (hierarchyCandidateHeading) {
-      var offset = Math.max(0, (snapshot.time || 0) - (timelineBase || 0));
-      hierarchyCandidateHeading.textContent = 'Elements at ' + formatSeconds(offset);
+      hierarchyCandidateHeading.textContent = 'Elements at point';
     }
     if (hierarchyCandidateEmpty) {
-      hierarchyCandidateEmpty.textContent = 'Click inside the media to list overlapping elements.';
+      hierarchyCandidateEmpty.textContent = 'Tap any item below to inspect it.';
       hierarchyCandidateEmpty.hidden = true;
     }
 
@@ -754,6 +775,7 @@
     });
     updateHierarchyHintOverlays(snapshot);
     updateHierarchyCandidateSelectionState();
+    flashHierarchyCandidatePanel();
   }
 
   function handleHierarchyOverlayClick(event, layer) {
@@ -768,8 +790,7 @@
     var mediaRect = getDisplayedMediaRect(media);
 
     if (localX < mediaRect.x || localY < mediaRect.y || localX > (mediaRect.x + mediaRect.width) || localY > (mediaRect.y + mediaRect.height)) {
-      closeHierarchyMenu();
-      updateHierarchyInspector(snapshot, hierarchyElementById(snapshot, selectedHierarchyElementId));
+      updateHierarchyOverlay();
       return;
     }
 
@@ -782,8 +803,10 @@
     if (!candidates.length) {
       selectedHierarchyElementId = null;
       hoveredHierarchyElementId = null;
-      closeHierarchyMenu();
+      showHierarchyCandidateEmpty(snapshot, 'No elements at this point.');
       updateHierarchyOverlay();
+      event.preventDefault();
+      event.stopPropagation();
       return;
     }
 

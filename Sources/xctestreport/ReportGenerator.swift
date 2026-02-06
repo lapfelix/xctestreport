@@ -257,28 +257,21 @@ extension XCTestReport {
                         compactFailureBoxHtml = ""
                     }
 
-                    let sourceReferenceHtmlForTimeline: String
+                    let timelineSourceLocationMap: [String: SourceLocation]
                     if result != "Passed", let testRuns = testDetails?.testRuns {
-                        let sourceReferenceHtml = renderSourceReferenceSection(
+                        timelineSourceLocationMap = sourceReferenceLocationMap(
                             from: testRuns,
                             testIdentifierURL: testDetails?.testIdentifierURL
                         )
-                        if sourceReferenceHtml.trimmingCharacters(in: .whitespacesAndNewlines)
-                            .isEmpty
-                        {
-                            sourceReferenceHtmlForTimeline = ""
-                        } else {
-                            sourceReferenceHtmlForTimeline = sourceReferenceHtml
-                        }
                     } else {
-                        sourceReferenceHtmlForTimeline = ""
+                        timelineSourceLocationMap = [:]
                     }
 
                     let timelineAndVideoSection = renderTimelineVideoSection(
                         for: test.nodeIdentifier,
                         activities: testActivities,
                         attachmentsByTestIdentifier: attachmentsByTestIdentifier,
-                        sourceReferenceHTML: sourceReferenceHtmlForTimeline
+                        sourceLocationBySymbol: timelineSourceLocationMap
                     )
 
                     let detailsPanelHtml: String

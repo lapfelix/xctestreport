@@ -235,6 +235,7 @@ extension XCTestReport {
     struct TimelineNode {
         let id: String
         let title: String
+        let sourceLocationLabel: String?
         let timestamp: Double?
         let endTimestamp: Double?
         let failureAssociated: Bool

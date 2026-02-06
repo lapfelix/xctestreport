@@ -817,7 +817,9 @@ extension XCTestReport {
     }
 
     func buildTimelineNodes(
-        from activities: [TestActivity], attachmentLookup: [String: [AttachmentManifestItem]],
+        from activities: [TestActivity],
+        attachmentLookup: [String: [AttachmentManifestItem]],
+        sourceLocationBySymbol: [String: SourceLocation],
         nextId: inout Int
     ) -> [TimelineNode] {
         return activities.map { activity in
@@ -844,7 +846,9 @@ extension XCTestReport {
 
             let timestamp = activity.startTime ?? attachments.compactMap { $0.timestamp }.min()
             let children = buildTimelineNodes(
-                from: activity.childActivities ?? [], attachmentLookup: attachmentLookup,
+                from: activity.childActivities ?? [],
+                attachmentLookup: attachmentLookup,
+                sourceLocationBySymbol: sourceLocationBySymbol,
                 nextId: &nextId)
             let childEndTimestamp = children.compactMap { $0.endTimestamp ?? $0.timestamp }.max()
             let attachmentEndTimestamp = attachments.compactMap { $0.timestamp }.max()
@@ -852,10 +856,13 @@ extension XCTestReport {
                 .max()
             let failureAssociated =
                 activity.isAssociatedWithFailure ?? attachments.contains { $0.failureAssociated }
+            let sourceLocationLabel = sourceLocationLabelForTimelineTitle(
+                activity.title, sourceLocationBySymbol: sourceLocationBySymbol)
 
             return TimelineNode(
                 id: nodeId,
                 title: activity.title,
+                sourceLocationLabel: sourceLocationLabel,
                 timestamp: timestamp,
                 endTimestamp: endTimestamp,
                 failureAssociated: failureAssociated,
@@ -868,6 +875,7 @@ extension XCTestReport {
 
     func canMergeTimelineNodes(_ lhs: TimelineNode, _ rhs: TimelineNode) -> Bool {
         return lhs.title == rhs.title
+            && lhs.sourceLocationLabel == rhs.sourceLocationLabel
             && lhs.attachments.isEmpty
             && rhs.attachments.isEmpty
             && lhs.children.isEmpty
@@ -881,6 +889,7 @@ extension XCTestReport {
             return TimelineNode(
                 id: node.id,
                 title: node.title,
+                sourceLocationLabel: node.sourceLocationLabel,
                 timestamp: node.timestamp,
                 endTimestamp: node.endTimestamp ?? node.timestamp,
                 failureAssociated: node.failureAssociated,
@@ -904,6 +913,7 @@ extension XCTestReport {
                 current = TimelineNode(
                     id: current.id,
                     title: current.title,
+                    sourceLocationLabel: current.sourceLocationLabel,
                     timestamp: current.timestamp ?? next.timestamp,
                     endTimestamp: next.endTimestamp ?? next.timestamp ?? current.endTimestamp,
                     failureAssociated: current.failureAssociated || next.failureAssociated,
@@ -929,15 +939,23 @@ extension XCTestReport {
     }
 
     func timelineDisplayTitle(_ node: TimelineNode, baseTime: Double?) -> String {
-        guard node.repeatCount > 1 else { return node.title }
-
-        if let start = node.timestamp, let end = node.endTimestamp, let baseTime {
-            let startText = formatTimelineOffset(start - baseTime)
-            let endText = formatTimelineOffset(end - baseTime)
-            return "\(node.title) ×\(node.repeatCount) (\(startText)-\(endText))"
+        let baseTitle: String
+        if node.repeatCount > 1 {
+            if let start = node.timestamp, let end = node.endTimestamp, let baseTime {
+                let startText = formatTimelineOffset(start - baseTime)
+                let endText = formatTimelineOffset(end - baseTime)
+                baseTitle = "\(node.title) ×\(node.repeatCount) (\(startText)-\(endText))"
+            } else {
+                baseTitle = "\(node.title) ×\(node.repeatCount)"
+            }
+        } else {
+            baseTitle = node.title
         }
 
-        return "\(node.title) ×\(node.repeatCount)"
+        guard let sourceLocationLabel = node.sourceLocationLabel, !sourceLocationLabel.isEmpty else {
+            return baseTitle
+        }
+        return "\(baseTitle) (\(sourceLocationLabel))"
     }
 
     func renderTimelineNodesHTML(_ nodes: [TimelineNode], baseTime: Double?, depth: Int) -> String {

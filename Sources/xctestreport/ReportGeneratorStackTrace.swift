@@ -99,36 +99,62 @@ extension XCTestReport {
         return texts
     }
 
-    func renderSourceReferenceSection(from testRuns: [TestRunDetail], testIdentifierURL: String?) -> String {
+    func sourceReferenceLocationMap(
+        from testRuns: [TestRunDetail],
+        testIdentifierURL: String?
+    ) -> [String: SourceLocation] {
         let references = sourceReferences(from: testRuns)
-        guard !references.isEmpty else { return "" }
+        guard !references.isEmpty else { return [:] }
 
         let projectHint = projectNameHint(from: testIdentifierURL)
-        let items = references.prefix(20).map { reference in
-            let sourceName = htmlEscape(reference.name)
-            let location = resolveSourceReferenceLocation(
-                referenceName: reference.name,
-                referenceURL: reference.url,
-                projectHint: projectHint
-            )
+        var locationsBySymbol = [String: SourceLocation]()
 
-            var suffix = ""
-            if let location {
-                let lineBadge = "<span class=\"source-ref-line\">Line \(location.line)</span>"
-                let fileName = (location.filePath as NSString).lastPathComponent
-                let fileLabel = "<span class=\"source-ref-file\">\(htmlEscape("\(fileName):\(location.line)"))</span>"
-                suffix = " \(lineBadge) \(fileLabel)"
-            } else {
-                suffix = " <span class=\"source-ref-line source-ref-line-missing\">Line ?</span>"
+        for reference in references {
+            guard let symbol = parseSourceReferenceSymbol(reference.name) else { continue }
+            guard
+                let location = resolveSourceReferenceLocation(
+                    referenceName: reference.name,
+                    referenceURL: reference.url,
+                    projectHint: projectHint
+                )
+            else {
+                continue
             }
 
-            return "<li><code class=\"source-ref-code\">\(sourceName)</code>\(suffix)</li>"
-        }.joined(separator: "")
+            let exactKey = sourceReferenceSymbolKey(
+                typeName: symbol.typeName, functionName: symbol.functionName)
+            if locationsBySymbol[exactKey] == nil {
+                locationsBySymbol[exactKey] = location
+            }
 
-        return """
-            <h3>Source References</h3>
-            <ol class="source-ref-list">\(items)</ol>
-            """
+            // Fallback for timeline rows that only show function names.
+            let functionOnlyKey = sourceReferenceFunctionOnlyKey(symbol.functionName)
+            if locationsBySymbol[functionOnlyKey] == nil {
+                locationsBySymbol[functionOnlyKey] = location
+            }
+        }
+
+        return locationsBySymbol
+    }
+
+    func sourceLocationLabelForTimelineTitle(
+        _ title: String,
+        sourceLocationBySymbol: [String: SourceLocation]
+    ) -> String? {
+        if let explicitLocation = extractSourceLocations(from: title).first {
+            return shortSourceLocationLabel(explicitLocation)
+        }
+
+        guard let symbol = parseSourceReferenceSymbol(title) else { return nil }
+        let exactKey = sourceReferenceSymbolKey(
+            typeName: symbol.typeName, functionName: symbol.functionName)
+        if let location = sourceLocationBySymbol[exactKey] {
+            return shortSourceLocationLabel(location)
+        }
+
+        let functionOnlyKey = sourceReferenceFunctionOnlyKey(symbol.functionName)
+        guard let location = sourceLocationBySymbol[functionOnlyKey] else { return nil }
+        return shortSourceLocationLabel(location)
     }
 
     private func sourceReferences(from testRuns: [TestRunDetail]) -> [(name: String, url: String?)] {
@@ -287,6 +313,20 @@ extension XCTestReport {
         let fallbackFunction = symbol.split(separator: " ").last.map(String.init) ?? symbol
         guard !fallbackFunction.isEmpty else { return nil }
         return (nil, fallbackFunction)
+    }
+
+    private func sourceReferenceSymbolKey(typeName: String?, functionName: String) -> String {
+        let normalizedType = typeName?.lowercased() ?? "_"
+        return "\(normalizedType)|\(functionName.lowercased())"
+    }
+
+    private func sourceReferenceFunctionOnlyKey(_ functionName: String) -> String {
+        return "_|\(functionName.lowercased())"
+    }
+
+    private func shortSourceLocationLabel(_ location: SourceLocation) -> String {
+        let fileName = (location.filePath as NSString).lastPathComponent
+        return "\(fileName):\(location.line)"
     }
 
     private func parseRipgrepLocation(from line: String) -> SourceLocation? {

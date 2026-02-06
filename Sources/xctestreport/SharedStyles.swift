@@ -213,6 +213,18 @@ let sharedStyles = """
         font-size: 0.9rem;
     }
 
+    .test-source-ref-panel {
+        border: 1px solid #D7E0EE;
+        border-radius: 8px;
+        background: #F8FAFE;
+        padding: 8px 10px;
+    }
+
+    .test-source-ref-panel h3 {
+        margin: 0 0 6px;
+        font-size: 0.88rem;
+    }
+
     .source-ref-list {
         margin: 0 0 10px 18px;
         padding: 0;
@@ -1865,6 +1877,15 @@ let sharedStyles = """
         .test-meta-details {
             background: #171717;
             border-color: #424242;
+        }
+
+        .test-source-ref-panel {
+            background: #171717;
+            border-color: #424242;
+        }
+
+        .test-source-ref-panel h3 {
+            color: #FFFFFF;
         }
 
         .test-meta-details[open] > summary {

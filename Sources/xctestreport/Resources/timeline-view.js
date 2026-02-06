@@ -504,6 +504,26 @@
     hintsLayer.innerHTML = hintsHtml.join('');
   }
 
+  function computeHierarchyHintIds(snapshot, options) {
+    if (!snapshot || !options || !options.length) return [];
+    var snapshotArea = Math.max(1, snapshot.width * snapshot.height);
+    var maxHintCount = 8;
+    var maxAreaRatio = 0.5;
+    var ids = [];
+    for (var i = 0; i < options.length; i += 1) {
+      var option = options[i];
+      if (!option || !option.id || option.width <= 0 || option.height <= 0) continue;
+      var areaRatio = Math.max(0, option.width * option.height) / snapshotArea;
+      if (areaRatio > maxAreaRatio) continue;
+      ids.push(option.id);
+      if (ids.length >= maxHintCount) break;
+    }
+    if (!ids.length && options[0] && options[0].id) {
+      ids.push(options[0].id);
+    }
+    return ids;
+  }
+
   function closeHierarchyMenu() {
     currentHierarchyCandidateIds = [];
     currentHierarchyHintIds = [];
@@ -794,7 +814,7 @@
     setHierarchyPanelExpanded(true);
     var options = candidates.slice(0, 20);
     currentHierarchyCandidateIds = options.map(function(element) { return element.id; });
-    currentHierarchyHintIds = currentHierarchyCandidateIds.slice();
+    currentHierarchyHintIds = computeHierarchyHintIds(snapshot, options);
     selectedHierarchyElementId = options[0] ? options[0].id : null;
     hoveredHierarchyElementId = null;
     hierarchyCandidateList.innerHTML = options.map(function(element) {
@@ -830,6 +850,7 @@
         event.preventDefault();
         event.stopPropagation();
         selectedHierarchyElementId = elementId;
+        currentHierarchyHintIds = elementId ? [elementId] : [];
         hoveredHierarchyElementId = null;
         updateHierarchyCandidateSelectionState();
         updateHierarchyOverlay();

@@ -231,16 +231,6 @@ extension XCTestReport {
                     }
 
                     if result != "Passed" {
-                        if let testRuns = testDetails?.testRuns {
-                            let sourceReferenceHtml = renderSourceReferenceSection(
-                                from: testRuns,
-                                testIdentifierURL: testDetails?.testIdentifierURL
-                            )
-                            if !sourceReferenceHtml.isEmpty {
-                                failureInfo += sourceReferenceHtml
-                            }
-                        }
-
                         let sourceLocationsHtml = renderSourceLocationSection(
                             candidateTexts: sourceLocationCandidateTexts)
                         if !sourceLocationsHtml.isEmpty {
@@ -271,6 +261,27 @@ extension XCTestReport {
                             """
                     } else {
                         compactFailureBoxHtml = ""
+                    }
+
+                    let sourceReferencePanelHtml: String
+                    if result != "Passed", let testRuns = testDetails?.testRuns {
+                        let sourceReferenceHtml = renderSourceReferenceSection(
+                            from: testRuns,
+                            testIdentifierURL: testDetails?.testIdentifierURL
+                        )
+                        if sourceReferenceHtml.trimmingCharacters(in: .whitespacesAndNewlines)
+                            .isEmpty
+                        {
+                            sourceReferencePanelHtml = ""
+                        } else {
+                            sourceReferencePanelHtml = """
+                                <section class="test-source-ref-panel">
+                                    \(sourceReferenceHtml)
+                                </section>
+                                """
+                        }
+                    } else {
+                        sourceReferencePanelHtml = ""
                     }
 
                     let detailsPanelHtml: String
@@ -318,6 +329,7 @@ extension XCTestReport {
                                 <div class="test-header-spacer" aria-hidden="true"></div>
                             </header>
                             \(compactFailureBoxHtml)
+                            \(sourceReferencePanelHtml)
                             \(detailsPanelHtml)
                             <main class="test-main-content">
                                 \(timelineAndVideoSection)

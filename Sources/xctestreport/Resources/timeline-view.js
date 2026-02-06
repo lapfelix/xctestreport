@@ -532,6 +532,23 @@
     return chain;
   }
 
+  function compactHierarchyChain(ancestors) {
+    var compact = [];
+    var runningIndex = 1;
+    for (var i = 0; i < ancestors.length; i += 1) {
+      var title = hierarchyElementTitle(ancestors[i]);
+      var last = compact.length ? compact[compact.length - 1] : null;
+      if (last && last.title === title) {
+        last.count += 1;
+        last.end = runningIndex;
+      } else {
+        compact.push({ title: title, start: runningIndex, end: runningIndex, count: 1 });
+      }
+      runningIndex += 1;
+    }
+    return compact;
+  }
+
   function hierarchyElementTitle(element) {
     if (!element) return 'UI Element';
     var descriptor = element.role || 'Element';
@@ -616,21 +633,32 @@
       }
       rows.push('<div class="hierarchy-prop-row"><span class="hierarchy-prop-key">' + escapeHTML(key) + '</span><span class="' + valueClass + '">' + escapeHTML(value) + '</span></div>');
     }
+    function pushRowHTML(key, htmlValue, valueClassName) {
+      if (!htmlValue) return;
+      var valueClass = 'hierarchy-prop-value';
+      if (valueClassName) {
+        valueClass += ' ' + valueClassName;
+      }
+      rows.push('<div class="hierarchy-prop-row"><span class="hierarchy-prop-key">' + escapeHTML(key) + '</span><span class="' + valueClass + '">' + htmlValue + '</span></div>');
+    }
 
-    pushRow('Frame', '{{' + Number(element.x).toFixed(1) + ', ' + Number(element.y).toFixed(1) + '}, {' + Number(element.width).toFixed(1) + ', ' + Number(element.height).toFixed(1) + '}}');
+    pushRow('Frame', '{{' + Number(element.x).toFixed(1) + ', ' + Number(element.y).toFixed(1) + '}, {' + Number(element.width).toFixed(1) + ', ' + Number(element.height).toFixed(1) + '}}', 'mono');
     pushRow('Role', element.role || '');
     pushRow('Name', element.name || '');
     pushRow('Label', element.label || '');
     pushRow('Identifier', element.identifier || '');
     pushRow('Value', element.value || '');
-    pushRow('Element ID', element.id || '');
-    pushRow('Depth', String(element.depth == null ? '' : element.depth));
+    pushRow('Element ID', element.id || '', 'mono');
+    pushRow('Depth', String(element.depth == null ? '' : element.depth), 'mono');
     var ancestors = hierarchyAncestorChain(snapshot, element);
     if (ancestors.length) {
-      var containerPath = ancestors.map(function(ancestor, index) {
-        return String(index + 1) + '. ' + hierarchyElementTitle(ancestor);
-      }).join('\n');
-      pushRow('Containers', containerPath, 'path');
+      var compactPath = compactHierarchyChain(ancestors);
+      var containerPath = '<div class="hierarchy-container-path">' + compactPath.map(function(entry) {
+        var indexLabel = entry.count > 1 ? (String(entry.start) + '-' + String(entry.end)) : String(entry.start);
+        var repeatBadge = entry.count > 1 ? ('<span class="hierarchy-container-repeat">×' + String(entry.count) + '</span>') : '';
+        return '<span class="hierarchy-container-item"><span class="hierarchy-container-index">' + escapeHTML(indexLabel) + '.</span><span class="hierarchy-container-name">' + escapeHTML(entry.title) + '</span>' + repeatBadge + '</span>';
+      }).join('') + '</div>';
+      pushRowHTML('Containers', containerPath, 'path');
     } else {
       pushRow('Containers', 'None (top-level)', 'path');
     }
@@ -641,7 +669,12 @@
       if (key === 'depth') return;
       var normalized = key.toLowerCase();
       if (normalized === 'label' || normalized === 'identifier' || normalized === 'value') return;
-      pushRow(key, properties[key]);
+      if (normalized === 'frame' || normalized === 'metadata' || normalized === 'name' || normalized === 'role') return;
+      var valueClass = '';
+      if (normalized.indexOf('id') >= 0 || normalized.indexOf('frame') >= 0 || normalized.indexOf('rect') >= 0 || normalized.indexOf('hash') >= 0) {
+        valueClass = 'mono';
+      }
+      pushRow(key, properties[key], valueClass);
     });
 
     hierarchyProperties.innerHTML = rows.join('');
@@ -683,7 +716,7 @@
     hierarchyCandidateList.innerHTML = options.map(function(element) {
       return '<button type="button" class="hierarchy-candidate-item" data-hierarchy-element-id="' + escapeHTML(element.id) + '">'
         + '<span class="hierarchy-candidate-title">' + escapeHTML(hierarchyElementTitle(element)) + '</span>'
-        + '<span class="hierarchy-candidate-frame">{{' + Number(element.x).toFixed(0) + ', ' + Number(element.y).toFixed(0) + '}, {' + Number(element.width).toFixed(0) + ', ' + Number(element.height).toFixed(0) + '}}</span>'
+        + '<span class="hierarchy-candidate-frame">x ' + Number(element.x).toFixed(0) + ' · y ' + Number(element.y).toFixed(0) + ' · ' + Number(element.width).toFixed(0) + ' × ' + Number(element.height).toFixed(0) + '</span>'
         + '</button>';
     }).join('');
     if (hierarchyCandidatePanel) {

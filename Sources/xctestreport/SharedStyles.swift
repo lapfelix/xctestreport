@@ -1207,21 +1207,21 @@ let sharedStyles = """
     .hierarchy-side-body {
         flex: 1;
         min-width: 0;
-        border: 1px solid #D9E4F4;
-        background: #F9FBFF;
-        border-radius: 9px;
-        padding: 8px;
+        border: 1px solid #D6E0F2;
+        background: linear-gradient(180deg, #FBFDFF 0%, #F6F9FF 100%);
+        border-radius: 12px;
+        padding: 10px;
         display: grid;
         grid-template-rows: auto auto auto minmax(0, 1fr);
-        gap: 8px;
+        gap: 10px;
         overflow: hidden;
     }
 
     .hierarchy-side-title {
-        font-size: 0.73rem;
+        font-size: 0.69rem;
         font-weight: 700;
-        color: #5A4572;
-        letter-spacing: 0.05em;
+        color: #5A4F74;
+        letter-spacing: 0.08em;
         text-transform: uppercase;
     }
 
@@ -1229,55 +1229,58 @@ let sharedStyles = """
         width: 100%;
         display: block;
         text-align: left;
-        border: 1px solid transparent;
-        border-radius: 7px;
-        background: transparent;
-        padding: 7px 8px;
+        border: 1px solid #E3D7EE;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.45);
+        padding: 8px 9px;
         cursor: pointer;
+        transition: border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
     }
 
     .hierarchy-candidate-item:hover,
     .hierarchy-candidate-item:focus {
-        background: #F4EBFC;
-        border-color: #D6BEE9;
+        background: #F7EFFD;
+        border-color: #C9A9E2;
+        box-shadow: 0 0 0 1px rgba(175, 82, 222, 0.14);
         outline: none;
     }
 
     .hierarchy-candidate-item.is-selected {
-        background: #EADBFA;
-        border-color: #B98CDB;
+        background: #F1E3FD;
+        border-color: #B07DD8;
+        box-shadow: 0 0 0 1px rgba(168, 102, 219, 0.22);
     }
 
     .hierarchy-candidate-item.is-hovered {
-        background: #F2E6FC;
-        border-color: #CCABEA;
+        background: #F8F1FF;
+        border-color: #C4A3E0;
     }
 
     .hierarchy-candidate-title {
         display: block;
         color: #2F2440;
-        font-size: 0.78rem;
-        font-weight: 600;
+        font-size: 0.8rem;
+        font-weight: 650;
         line-height: 1.25;
     }
 
     .hierarchy-candidate-frame {
         display: block;
-        color: #6C5A84;
-        font-size: 0.71rem;
-        margin-top: 2px;
+        color: #6B5D82;
+        font-size: 0.68rem;
+        margin-top: 3px;
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
     }
 
     .hierarchy-candidate-panel {
-        border: 1px solid #E2D7EE;
-        background: #FEFCFF;
-        border-radius: 8px;
-        padding: 8px;
+        border: 1px solid #DECEE9;
+        background: linear-gradient(180deg, #FEFCFF 0%, #FBF8FF 100%);
+        border-radius: 10px;
+        padding: 9px;
         display: grid;
         grid-template-rows: auto auto minmax(0, 1fr);
-        gap: 6px;
-        min-height: 120px;
+        gap: 7px;
+        min-height: 132px;
     }
 
     .hierarchy-candidate-panel[hidden] {
@@ -1285,17 +1288,17 @@ let sharedStyles = """
     }
 
     .hierarchy-candidate-heading {
-        font-size: 0.74rem;
+        font-size: 0.69rem;
         font-weight: 700;
-        color: #5A4572;
+        color: #57436E;
         text-transform: uppercase;
-        letter-spacing: 0.05em;
+        letter-spacing: 0.08em;
     }
 
     .hierarchy-candidate-empty {
-        font-size: 0.73rem;
-        color: #736088;
-        line-height: 1.35;
+        font-size: 0.72rem;
+        color: #78678E;
+        line-height: 1.42;
     }
 
     .hierarchy-candidate-empty[hidden] {
@@ -1304,22 +1307,23 @@ let sharedStyles = """
 
     .hierarchy-candidate-list {
         min-height: 0;
-        max-height: 180px;
+        max-height: 196px;
         overflow: auto;
         display: grid;
-        gap: 4px;
+        gap: 6px;
     }
 
     .hierarchy-toolbar {
-        border: 1px solid #E5D9F0;
-        background: #F9F4FD;
-        border-radius: 8px;
-        padding: 6px 9px;
+        border: 1px solid #DECEE9;
+        background: linear-gradient(180deg, #FDF7FF 0%, #F7EFFD 100%);
+        border-radius: 10px;
+        padding: 7px 10px;
         display: flex;
         align-items: center;
-        gap: 8px;
-        color: #452C5B;
-        font-size: 0.78rem;
+        gap: 9px;
+        color: #4B325F;
+        font-size: 0.76rem;
+        line-height: 1.35;
     }
 
     .hierarchy-toolbar-dot {
@@ -1332,56 +1336,112 @@ let sharedStyles = """
     }
 
     .hierarchy-inspector {
-        border: 1px solid #E6DEEF;
-        background: #FDFBFF;
-        border-radius: 8px;
-        padding: 10px 11px;
+        border: 1px solid #DECEE9;
+        background: linear-gradient(180deg, #FFFFFF 0%, #FBF8FF 100%);
+        border-radius: 10px;
+        padding: 10px 10px 11px;
         display: grid;
-        gap: 6px;
+        gap: 8px;
     }
 
     .hierarchy-inspector-title {
-        font-size: 0.84rem;
+        font-size: 0.95rem;
         font-weight: 700;
-        color: #2B1E39;
+        color: #2D2240;
+        line-height: 1.2;
     }
 
     .hierarchy-inspector-subtitle {
-        font-size: 0.74rem;
-        color: #66557D;
+        font-size: 0.82rem;
+        color: #6D5E83;
+        font-variant-numeric: tabular-nums;
+        line-height: 1.3;
     }
 
     .hierarchy-inspector-properties {
-        max-height: min(280px, 34vh);
+        max-height: min(260px, 30vh);
         overflow: auto;
-        border-top: 1px solid #ECE3F5;
-        padding-top: 6px;
+        border-top: 1px solid #E8DFF2;
+        padding-top: 8px;
     }
 
     .hierarchy-prop-row {
         display: grid;
-        grid-template-columns: minmax(92px, auto) minmax(0, 1fr);
+        grid-template-columns: 94px minmax(0, 1fr);
         align-items: start;
-        gap: 8px;
-        font-size: 0.73rem;
-        padding: 2px 0;
+        gap: 10px;
+        font-size: 0.78rem;
+        padding: 3px 0;
     }
 
     .hierarchy-prop-key {
-        color: #6E5D85;
-        font-weight: 600;
-        text-align: right;
+        color: #7D6B95;
+        font-weight: 650;
+        text-align: left;
+        font-size: 0.67rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        line-height: 1.45;
+        padding-top: 1px;
     }
 
     .hierarchy-prop-value {
-        color: #2E2642;
+        color: #2F2841;
         word-break: break-word;
+        line-height: 1.36;
+    }
+
+    .hierarchy-prop-value.mono {
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+        font-size: 0.83em;
     }
 
     .hierarchy-prop-value.path {
-        line-height: 1.4;
-        white-space: pre-wrap;
+        line-height: 1.35;
+        font-family: inherit;
+        white-space: normal;
+    }
+
+    .hierarchy-container-path {
+        display: grid;
+        gap: 4px;
+    }
+
+    .hierarchy-container-item {
+        display: flex;
+        align-items: baseline;
+        gap: 7px;
+        min-width: 0;
+    }
+
+    .hierarchy-container-index {
+        font-size: 0.66rem;
+        font-weight: 650;
+        color: #8A769F;
+        min-width: 2.25em;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+
+    .hierarchy-container-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .hierarchy-container-repeat {
+        margin-left: auto;
+        border: 1px solid #D7C4E8;
+        background: #F4ECFB;
+        color: #6D4F8A;
+        border-radius: 999px;
+        padding: 0 6px;
+        font-size: 0.64rem;
+        font-weight: 700;
+        line-height: 1.45;
+        font-variant-numeric: tabular-nums;
     }
 
     .new-failure {
@@ -1952,36 +2012,43 @@ let sharedStyles = """
         }
 
         .hierarchy-side-body {
-            background: #181D27;
-            border-color: #3B4556;
+            background: linear-gradient(180deg, #1A2230 0%, #171D28 100%);
+            border-color: #3A455A;
         }
 
         .hierarchy-candidate-panel {
-            background: #211A2B;
-            border-color: #5A4D6C;
+            background: linear-gradient(180deg, #251D32 0%, #211A2B 100%);
+            border-color: #605272;
         }
 
         .hierarchy-candidate-heading {
-            color: #D7C7E9;
+            color: #DCCDEE;
         }
 
         .hierarchy-side-title {
-            color: #CDB9DF;
+            color: #B9C7DD;
         }
 
         .hierarchy-candidate-empty {
             color: #BAA9CC;
         }
 
+        .hierarchy-candidate-item {
+            border-color: #5D4E71;
+            background: rgba(48, 39, 62, 0.44);
+        }
+
         .hierarchy-candidate-item:hover,
         .hierarchy-candidate-item:focus {
-            background: #352A44;
-            border-color: #8068A0;
+            background: #3A2E4A;
+            border-color: #8A6BA9;
+            box-shadow: 0 0 0 1px rgba(172, 131, 204, 0.24);
         }
 
         .hierarchy-candidate-item.is-selected {
-            background: #4B3362;
-            border-color: #A683C9;
+            background: #4A3760;
+            border-color: #B28CD4;
+            box-shadow: 0 0 0 1px rgba(183, 140, 218, 0.34);
         }
 
         .hierarchy-candidate-item.is-hovered {
@@ -1998,9 +2065,9 @@ let sharedStyles = """
         }
 
         .hierarchy-toolbar {
-            background: #272132;
-            border-color: #5A4D6C;
-            color: #E2D5EE;
+            background: linear-gradient(180deg, #2B2237 0%, #251D31 100%);
+            border-color: #665676;
+            color: #E6D8F2;
         }
 
         .hierarchy-toolbar-dot {
@@ -2009,8 +2076,8 @@ let sharedStyles = """
         }
 
         .hierarchy-inspector {
-            background: #1E2029;
-            border-color: #4C495A;
+            background: linear-gradient(180deg, #1F2735 0%, #1A212E 100%);
+            border-color: #4B586F;
         }
 
         .hierarchy-inspector-title {
@@ -2018,19 +2085,29 @@ let sharedStyles = """
         }
 
         .hierarchy-inspector-subtitle {
-            color: #BFB0D0;
+            color: #C9BBD8;
         }
 
         .hierarchy-inspector-properties {
-            border-top-color: #454057;
+            border-top-color: #47556F;
         }
 
         .hierarchy-prop-key {
-            color: #B9A8CC;
+            color: #AEBED6;
         }
 
         .hierarchy-prop-value {
-            color: #ECE1F6;
+            color: #E6EDF9;
+        }
+
+        .hierarchy-container-index {
+            color: #90A7C8;
+        }
+
+        .hierarchy-container-repeat {
+            border-color: #607899;
+            background: #253246;
+            color: #CAE0FF;
         }
         
         th {

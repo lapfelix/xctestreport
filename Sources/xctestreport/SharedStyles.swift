@@ -1121,25 +1121,25 @@ let sharedStyles = """
 
     .hierarchy-hint-box {
         position: absolute;
-        border: 1.5px solid rgba(175, 82, 222, 0.74);
-        background: rgba(175, 82, 222, 0.08);
+        border: 1.5px solid rgba(175, 82, 222, 0.58);
+        background: transparent;
         border-radius: 4px;
-        box-shadow: inset 0 0 0 1px rgba(175, 82, 222, 0.14);
-        opacity: 0.72;
+        box-shadow: none;
+        opacity: 0.64;
     }
 
     .hierarchy-hint-box.is-hovered {
-        border-color: rgba(175, 82, 222, 0.94);
-        background: rgba(175, 82, 222, 0.14);
-        box-shadow: inset 0 0 0 1px rgba(175, 82, 222, 0.24);
-        opacity: 0.9;
+        border-color: rgba(182, 93, 227, 0.96);
+        background: rgba(175, 82, 222, 0.05);
+        box-shadow: 0 0 0 1px rgba(175, 82, 222, 0.2);
+        opacity: 0.88;
     }
 
     .hierarchy-hint-box.is-selected {
         border-color: rgba(192, 95, 236, 0.99);
-        border-width: 3px;
-        background: rgba(187, 95, 232, 0.2);
-        box-shadow: 0 0 0 2px rgba(192, 95, 236, 0.36), inset 0 0 0 1px rgba(255, 240, 255, 0.24);
+        border-width: 2.5px;
+        background: rgba(187, 95, 232, 0.08);
+        box-shadow: 0 0 0 2px rgba(192, 95, 236, 0.28), inset 0 0 0 1px rgba(255, 240, 255, 0.12);
         opacity: 1;
     }
 
@@ -1160,8 +1160,8 @@ let sharedStyles = """
     .hierarchy-highlight-box {
         position: absolute;
         border: 3px solid rgba(194, 99, 239, 0.99);
-        background: rgba(194, 99, 239, 0.14);
-        box-shadow: 0 0 0 2px rgba(194, 99, 239, 0.35), 0 0 22px rgba(194, 99, 239, 0.32);
+        background: rgba(194, 99, 239, 0.07);
+        box-shadow: 0 0 0 2px rgba(194, 99, 239, 0.34), 0 0 16px rgba(194, 99, 239, 0.24);
         border-radius: 5px;
         pointer-events: none;
     }
@@ -2059,29 +2059,29 @@ let sharedStyles = """
 
         .hierarchy-highlight-box {
             border-color: rgba(196, 113, 242, 0.99);
-            background: rgba(196, 113, 242, 0.2);
-            box-shadow: 0 0 0 2px rgba(196, 113, 242, 0.38), 0 0 26px rgba(196, 113, 242, 0.35);
+            background: rgba(196, 113, 242, 0.1);
+            box-shadow: 0 0 0 2px rgba(196, 113, 242, 0.34), 0 0 18px rgba(196, 113, 242, 0.25);
         }
 
         .hierarchy-hint-box {
-            border-color: rgba(201, 144, 235, 0.74);
-            background: rgba(177, 108, 220, 0.11);
-            box-shadow: inset 0 0 0 1px rgba(184, 123, 224, 0.18);
-            opacity: 0.78;
+            border-color: rgba(201, 144, 235, 0.64);
+            background: transparent;
+            box-shadow: none;
+            opacity: 0.66;
         }
 
         .hierarchy-hint-box.is-hovered {
-            border-color: rgba(216, 171, 244, 0.94);
-            background: rgba(181, 120, 225, 0.2);
-            box-shadow: inset 0 0 0 1px rgba(205, 152, 239, 0.34);
-            opacity: 0.95;
+            border-color: rgba(216, 171, 244, 0.98);
+            background: rgba(181, 120, 225, 0.08);
+            box-shadow: 0 0 0 1px rgba(205, 152, 239, 0.24);
+            opacity: 0.9;
         }
 
         .hierarchy-hint-box.is-selected {
             border-color: rgba(225, 184, 247, 0.99);
-            background: rgba(194, 129, 234, 0.3);
-            box-shadow: 0 0 0 2px rgba(215, 166, 242, 0.44), inset 0 0 0 1px rgba(255, 255, 255, 0.18);
-            border-width: 3px;
+            background: rgba(194, 129, 234, 0.12);
+            box-shadow: 0 0 0 2px rgba(215, 166, 242, 0.34), inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+            border-width: 2.5px;
             opacity: 1;
         }
 

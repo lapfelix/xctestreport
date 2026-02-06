@@ -68,6 +68,7 @@
   var selectedHierarchyElementId = null;
   var hoveredHierarchyElementId = null;
   var currentHierarchyCandidateIds = [];
+  var currentHierarchyHintIds = [];
   var hierarchyParentMapCache = Object.create(null);
   var PLAY_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 6V18L18 12Z"></path></svg>';
   var PAUSE_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="6" width="4" height="12" rx="1"></rect><rect x="13" y="6" width="4" height="12" rx="1"></rect></svg>';
@@ -458,7 +459,7 @@
   function updateHierarchyHintOverlays(snapshot) {
     var hintsLayer = getActiveHierarchyHintsLayer();
     var media = getActiveMediaElement();
-    if (!hintsLayer || !media || !snapshot || !currentHierarchyCandidateIds.length || snapshot.width <= 0 || snapshot.height <= 0) {
+    if (!hintsLayer || !media || !snapshot || snapshot.width <= 0 || snapshot.height <= 0) {
       if (hintsLayer) hintsLayer.innerHTML = '';
       return;
     }
@@ -471,9 +472,28 @@
 
     var scaleX = rect.width / snapshot.width;
     var scaleY = rect.height / snapshot.height;
+    var hintIds = [];
+    var seenHintIds = Object.create(null);
+    function appendHintId(elementId) {
+      if (!elementId || seenHintIds[elementId]) return;
+      seenHintIds[elementId] = true;
+      hintIds.push(elementId);
+    }
+
+    for (var idIndex = 0; idIndex < currentHierarchyHintIds.length; idIndex += 1) {
+      appendHintId(currentHierarchyHintIds[idIndex]);
+    }
+    appendHintId(selectedHierarchyElementId);
+    appendHintId(hoveredHierarchyElementId);
+
+    if (!hintIds.length) {
+      hintsLayer.innerHTML = '';
+      return;
+    }
+
     var hintsHtml = [];
-    for (var i = 0; i < currentHierarchyCandidateIds.length; i += 1) {
-      var hintElement = hierarchyElementById(snapshot, currentHierarchyCandidateIds[i]);
+    for (var i = 0; i < hintIds.length; i += 1) {
+      var hintElement = hierarchyElementById(snapshot, hintIds[i]);
       if (!hintElement || hintElement.width <= 0 || hintElement.height <= 0) continue;
       var left = rect.x + (hintElement.x * scaleX);
       var top = rect.y + (hintElement.y * scaleY);
@@ -490,8 +510,29 @@
     hintsLayer.innerHTML = hintsHtml.join('');
   }
 
+  function computeHierarchyHintIds(snapshot, options) {
+    if (!snapshot || !options || !options.length) return [];
+    var snapshotArea = Math.max(1, snapshot.width * snapshot.height);
+    var maxAreaRatio = 0.42;
+    var maxHintCount = 6;
+    var hintIds = [];
+    for (var i = 0; i < options.length; i += 1) {
+      var option = options[i];
+      if (!option || !option.id || option.width <= 0 || option.height <= 0) continue;
+      var optionArea = Math.max(0, option.width * option.height);
+      if ((optionArea / snapshotArea) > maxAreaRatio) continue;
+      hintIds.push(option.id);
+      if (hintIds.length >= maxHintCount) break;
+    }
+    if (!hintIds.length && options[0] && options[0].id) {
+      hintIds.push(options[0].id);
+    }
+    return hintIds;
+  }
+
   function closeHierarchyMenu() {
     currentHierarchyCandidateIds = [];
+    currentHierarchyHintIds = [];
     if (hierarchyCandidateList) {
       hierarchyCandidateList.innerHTML = '';
     }
@@ -526,6 +567,7 @@
     hierarchyCandidateEmpty.textContent = message || 'No elements at this point.';
     hierarchyCandidateEmpty.hidden = false;
     currentHierarchyCandidateIds = [];
+    currentHierarchyHintIds = [];
     updateHierarchyHintOverlays(snapshot || null);
     flashHierarchyCandidatePanel();
   }
@@ -775,6 +817,7 @@
     setHierarchyPanelExpanded(true);
     var options = candidates.slice(0, 20);
     currentHierarchyCandidateIds = options.map(function(element) { return element.id; });
+    currentHierarchyHintIds = computeHierarchyHintIds(snapshot, options);
     if (!selectedHierarchyElementId || currentHierarchyCandidateIds.indexOf(selectedHierarchyElementId) === -1) {
       selectedHierarchyElementId = options[0] ? options[0].id : null;
     }

@@ -376,8 +376,9 @@ extension XCTestReport {
             return
         }
 
-        // `plutil -p` output is large for UI snapshots. Keep worker count bounded.
-        let compressionWorkers = max(1, min(2, ProcessInfo.processInfo.activeProcessorCount))
+        // `plutil -p` output is large for UI snapshots. Keep worker count bounded,
+        // but allow enough parallelism to reduce end-of-run latency.
+        let compressionWorkers = max(1, min(4, ProcessInfo.processInfo.activeProcessorCount))
         let limiter = DispatchSemaphore(value: compressionWorkers)
         let statsLock = NSLock()
         let group = DispatchGroup()
@@ -507,182 +508,236 @@ extension XCTestReport {
             "Compressing \(videoFileNames.count) video attachment(s) with ffmpeg (max dimension: \(maxDimension))..."
         )
 
+        let sortedVideoFileNames = videoFileNames.sorted()
+        let compressionWorkers = max(1, min(3, ProcessInfo.processInfo.activeProcessorCount))
+        print("Video compression workers: \(compressionWorkers)")
+
         var compressedCount = 0
         var failedCount = 0
         var skippedCount = 0
-        let fileManager = FileManager.default
-        let ffmpegTimeoutSeconds: TimeInterval = 180
-        let scaleFilter =
-            "scale='if(gte(iw,ih),trunc(min(iw,\(maxDimension))/2)*2,-2)':'if(gte(iw,ih),-2,trunc(min(ih,\(maxDimension))/2)*2)'"
+        var startedCount = 0
+        let statsLock = NSLock()
+        let limiter = DispatchSemaphore(value: compressionWorkers)
+        let group = DispatchGroup()
+        let compressionQueue = DispatchQueue(label: "videoCompression", attributes: .concurrent)
 
-        for (index, exportedFileName) in videoFileNames.sorted().enumerated() {
-            print("Compressing video \(index + 1)/\(videoFileNames.count): \(exportedFileName)")
-            let inputPath = (attachmentsDir as NSString).appendingPathComponent(exportedFileName)
-            guard fileManager.fileExists(atPath: inputPath) else {
-                skippedCount += 1
-                print("Video compression skipped (missing file): \(exportedFileName)")
-                continue
-            }
-
-            let inputExtension = URL(fileURLWithPath: inputPath).pathExtension
-            let tempOutputPath: String
-            if inputExtension.isEmpty {
-                tempOutputPath = inputPath + ".compressed"
-            } else {
-                tempOutputPath = inputPath + ".compressed.\(inputExtension)"
-            }
-            try? fileManager.removeItem(atPath: tempOutputPath)
-
-            let hardwareCompressCmd = [
-                "ffmpeg",
-                "-nostdin",
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-y",
-                "-i",
-                inputPath,
-                "-map",
-                "0:0",
-                "-map_chapters",
-                "0",
-                "-threads",
-                "0",
-                "-vf",
-                scaleFilter,
-                "-c:v",
-                "hevc_videotoolbox",
-                "-pix_fmt",
-                "yuv420p",
-                "-q:v",
-                "50",
-                "-allow_sw",
-                "1",
-                "-movflags",
-                "+faststart",
-                "-profile:v",
-                "main",
-                "-vtag",
-                "hvc1",
-                "-an",
-                "-sn",
-                "-max_muxing_queue_size",
-                "40000",
-                "-map_metadata",
-                "0",
-                tempOutputPath,
-            ]
-
-            let softwareCompressCmd = [
-                "ffmpeg",
-                "-nostdin",
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-y",
-                "-i",
-                inputPath,
-                "-map",
-                "0:0",
-                "-map_chapters",
-                "0",
-                "-threads",
-                "0",
-                "-vf",
-                scaleFilter,
-                "-c:v",
-                "libx264",
-                "-preset",
-                "veryfast",
-                "-crf",
-                "32",
-                "-pix_fmt",
-                "yuv420p",
-                "-movflags",
-                "+faststart",
-                "-profile:v",
-                "high",
-                "-an",
-                "-sn",
-                "-max_muxing_queue_size",
-                "40000",
-                "-map_metadata",
-                "0",
-                tempOutputPath,
-            ]
-
-            let hardwareStartTime = Date()
-            let hardwareResult = runFFmpegCommand(
-                hardwareCompressCmd, timeoutSeconds: ffmpegTimeoutSeconds)
-            let hardwareElapsed = Date().timeIntervalSince(hardwareStartTime)
-
-            var compressionSucceeded = false
-            var successfulMode = "videotoolbox"
-            var successfulElapsed = hardwareElapsed
-
-            if hardwareResult.timedOut {
-                print(
-                    "Video compression timed out after \(Int(hardwareElapsed))s (videotoolbox): \(exportedFileName)"
-                )
-            } else if hardwareResult.exitCode != 0 || !fileManager.fileExists(atPath: tempOutputPath) {
-                print(
-                    "Video compression failed (\(String(format: "%.1f", hardwareElapsed))s, videotoolbox): \(exportedFileName)"
-                )
-            } else if !isCompressionOutputUsable(sourcePath: inputPath, outputPath: tempOutputPath) {
-                print("Video compression output failed validation (videotoolbox): \(exportedFileName)")
-            } else {
-                compressionSucceeded = true
-            }
-
-            if !compressionSucceeded {
-                try? fileManager.removeItem(atPath: tempOutputPath)
-                print("Retrying with software encoder (libx264): \(exportedFileName)")
-
-                let softwareStartTime = Date()
-                let softwareResult = runFFmpegCommand(softwareCompressCmd, timeoutSeconds: 300)
-                let softwareElapsed = Date().timeIntervalSince(softwareStartTime)
-                successfulElapsed = softwareElapsed
-                successfulMode = "libx264"
-
-                if softwareResult.timedOut {
-                    print(
-                        "Video compression timed out after \(Int(softwareElapsed))s (libx264): \(exportedFileName)"
-                    )
-                } else if softwareResult.exitCode != 0 || !fileManager.fileExists(atPath: tempOutputPath) {
-                    print(
-                        "Video compression failed (\(String(format: "%.1f", softwareElapsed))s, libx264): \(exportedFileName)"
-                    )
-                } else if !isCompressionOutputUsable(sourcePath: inputPath, outputPath: tempOutputPath) {
-                    print("Video compression output failed validation (libx264): \(exportedFileName)")
-                } else {
-                    compressionSucceeded = true
+        for exportedFileName in sortedVideoFileNames {
+            limiter.wait()
+            group.enter()
+            compressionQueue.async {
+                defer {
+                    limiter.signal()
+                    group.leave()
                 }
-            }
 
-            guard compressionSucceeded else {
-                failedCount += 1
-                try? fileManager.removeItem(atPath: tempOutputPath)
-                print("Video compression skipped after encoder failures: \(exportedFileName)")
-                continue
-            }
+                let indexLabel: Int = {
+                    statsLock.lock()
+                    defer { statsLock.unlock() }
+                    startedCount += 1
+                    return startedCount
+                }()
 
-            do {
-                try fileManager.removeItem(atPath: inputPath)
-                try fileManager.moveItem(atPath: tempOutputPath, toPath: inputPath)
-                compressedCount += 1
                 print(
-                    "Video compression complete (\(String(format: "%.1f", successfulElapsed))s, \(successfulMode)): \(exportedFileName)"
+                    "Compressing video \(indexLabel)/\(sortedVideoFileNames.count): \(exportedFileName)"
                 )
-            } catch {
-                failedCount += 1
-                print("Video compression replace failed for \(exportedFileName): \(error)")
-                try? fileManager.removeItem(atPath: tempOutputPath)
+                let result = self.compressSingleVideoAttachment(
+                    exportedFileName: exportedFileName,
+                    attachmentsDir: attachmentsDir,
+                    maxDimension: maxDimension
+                )
+
+                statsLock.lock()
+                switch result {
+                case .compressed:
+                    compressedCount += 1
+                case .failed:
+                    failedCount += 1
+                case .skipped:
+                    skippedCount += 1
+                }
+                statsLock.unlock()
             }
         }
+        group.wait()
 
         print(
             "Video compression complete: compressed \(compressedCount), failed \(failedCount), skipped \(skippedCount)."
         )
+    }
+
+    private enum VideoCompressionResult {
+        case compressed
+        case failed
+        case skipped
+    }
+
+    private func compressSingleVideoAttachment(
+        exportedFileName: String,
+        attachmentsDir: String,
+        maxDimension: Int
+    ) -> VideoCompressionResult {
+        let fileManager = FileManager.default
+        let ffmpegTimeoutSeconds: TimeInterval = 180
+        let scaleFilter =
+            "scale='if(gte(iw,ih),trunc(min(iw,\(maxDimension))/2)*2,-2)':'if(gte(iw,ih),-2,trunc(min(ih,\(maxDimension))/2)*2)'"
+        let inputPath = (attachmentsDir as NSString).appendingPathComponent(exportedFileName)
+        guard fileManager.fileExists(atPath: inputPath) else {
+            print("Video compression skipped (missing file): \(exportedFileName)")
+            return .skipped
+        }
+
+        let inputExtension = URL(fileURLWithPath: inputPath).pathExtension
+        let tempOutputPath: String
+        if inputExtension.isEmpty {
+            tempOutputPath = inputPath + ".compressed"
+        } else {
+            tempOutputPath = inputPath + ".compressed.\(inputExtension)"
+        }
+        try? fileManager.removeItem(atPath: tempOutputPath)
+
+        let hardwareCompressCmd = [
+            "ffmpeg",
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            inputPath,
+            "-map",
+            "0:0",
+            "-map_chapters",
+            "0",
+            "-threads",
+            "0",
+            "-vf",
+            scaleFilter,
+            "-c:v",
+            "hevc_videotoolbox",
+            "-pix_fmt",
+            "yuv420p",
+            "-q:v",
+            "50",
+            "-allow_sw",
+            "1",
+            "-movflags",
+            "+faststart",
+            "-profile:v",
+            "main",
+            "-vtag",
+            "hvc1",
+            "-an",
+            "-sn",
+            "-max_muxing_queue_size",
+            "40000",
+            "-map_metadata",
+            "0",
+            tempOutputPath,
+        ]
+
+        let softwareCompressCmd = [
+            "ffmpeg",
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            inputPath,
+            "-map",
+            "0:0",
+            "-map_chapters",
+            "0",
+            "-threads",
+            "0",
+            "-vf",
+            scaleFilter,
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "32",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            "-profile:v",
+            "high",
+            "-an",
+            "-sn",
+            "-max_muxing_queue_size",
+            "40000",
+            "-map_metadata",
+            "0",
+            tempOutputPath,
+        ]
+
+        let hardwareStartTime = Date()
+        let hardwareResult = runFFmpegCommand(hardwareCompressCmd, timeoutSeconds: ffmpegTimeoutSeconds)
+        let hardwareElapsed = Date().timeIntervalSince(hardwareStartTime)
+
+        var compressionSucceeded = false
+        var successfulMode = "videotoolbox"
+        var successfulElapsed = hardwareElapsed
+
+        if hardwareResult.timedOut {
+            print(
+                "Video compression timed out after \(Int(hardwareElapsed))s (videotoolbox): \(exportedFileName)"
+            )
+        } else if hardwareResult.exitCode != 0 || !fileManager.fileExists(atPath: tempOutputPath) {
+            print(
+                "Video compression failed (\(String(format: "%.1f", hardwareElapsed))s, videotoolbox): \(exportedFileName)"
+            )
+        } else if !isCompressionOutputUsable(sourcePath: inputPath, outputPath: tempOutputPath) {
+            print("Video compression output failed validation (videotoolbox): \(exportedFileName)")
+        } else {
+            compressionSucceeded = true
+        }
+
+        if !compressionSucceeded {
+            try? fileManager.removeItem(atPath: tempOutputPath)
+            print("Retrying with software encoder (libx264): \(exportedFileName)")
+
+            let softwareStartTime = Date()
+            let softwareResult = runFFmpegCommand(softwareCompressCmd, timeoutSeconds: 300)
+            let softwareElapsed = Date().timeIntervalSince(softwareStartTime)
+            successfulElapsed = softwareElapsed
+            successfulMode = "libx264"
+
+            if softwareResult.timedOut {
+                print(
+                    "Video compression timed out after \(Int(softwareElapsed))s (libx264): \(exportedFileName)"
+                )
+            } else if softwareResult.exitCode != 0 || !fileManager.fileExists(atPath: tempOutputPath) {
+                print(
+                    "Video compression failed (\(String(format: "%.1f", softwareElapsed))s, libx264): \(exportedFileName)"
+                )
+            } else if !isCompressionOutputUsable(sourcePath: inputPath, outputPath: tempOutputPath) {
+                print("Video compression output failed validation (libx264): \(exportedFileName)")
+            } else {
+                compressionSucceeded = true
+            }
+        }
+
+        guard compressionSucceeded else {
+            try? fileManager.removeItem(atPath: tempOutputPath)
+            print("Video compression skipped after encoder failures: \(exportedFileName)")
+            return .failed
+        }
+
+        do {
+            try fileManager.removeItem(atPath: inputPath)
+            try fileManager.moveItem(atPath: tempOutputPath, toPath: inputPath)
+            print(
+                "Video compression complete (\(String(format: "%.1f", successfulElapsed))s, \(successfulMode)): \(exportedFileName)"
+            )
+            return .compressed
+        } catch {
+            print("Video compression replace failed for \(exportedFileName): \(error)")
+            try? fileManager.removeItem(atPath: tempOutputPath)
+            return .failed
+        }
     }
 
     private func isFFmpegInstalled() -> Bool {

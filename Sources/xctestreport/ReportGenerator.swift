@@ -1671,6 +1671,7 @@ extension XCTestReport {
                   var touchMarker = null;
                   var touchAnimationFrame = 0;
                   var TOUCH_RELEASE_DURATION = 0.18;
+                  var TOUCH_PLAYBACK_LEAD_WINDOW = 0.06;
                   var SCRUB_PREVIEW_WINDOW = 0.22;
                   var PLAY_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 6V18L18 12Z"></path></svg>';
                   var PAUSE_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="6" width="4" height="12" rx="1"></rect><rect x="13" y="6" width="4" height="12" rx="1"></rect></svg>';
@@ -1890,7 +1891,7 @@ extension XCTestReport {
 
                   function activeGestureAtTime(absoluteTime, previewMode) {
                     if (!touchGestures.length) return null;
-                    var lead = previewMode ? SCRUB_PREVIEW_WINDOW : 0.02;
+                    var lead = previewMode ? SCRUB_PREVIEW_WINDOW : TOUCH_PLAYBACK_LEAD_WINDOW;
                     var tail = previewMode ? SCRUB_PREVIEW_WINDOW : TOUCH_RELEASE_DURATION;
                     var best = null;
                     for (var i = 0; i < touchGestures.length; i += 1) {

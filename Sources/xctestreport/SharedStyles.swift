@@ -1010,12 +1010,12 @@ let sharedStyles = """
         width: 24px;
         height: 24px;
         border-radius: 999px;
-        border: 2px solid rgba(58, 130, 246, 0.96);
-        background: rgba(59, 130, 246, 0.34);
-        box-shadow: 0 0 0 1px rgba(16, 64, 152, 0.35), 0 6px 18px rgba(16, 46, 102, 0.28);
+        border: 2px solid rgba(0, 122, 255, 0.98);
+        background: rgba(0, 122, 255, 0.52);
+        box-shadow: 0 0 0 1px rgba(0, 88, 194, 0.45), 0 6px 18px rgba(0, 56, 128, 0.32);
         transform: translate(-50%, -50%) scale(0.9);
         opacity: 0;
-        transition: opacity 60ms linear, transform 60ms linear;
+        transition: none;
         will-change: transform, opacity, left, top;
     }
 

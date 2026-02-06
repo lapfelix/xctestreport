@@ -68,7 +68,6 @@
   var selectedHierarchyElementId = null;
   var hoveredHierarchyElementId = null;
   var currentHierarchyCandidateIds = [];
-  var currentHierarchyHintIds = [];
   var hierarchyParentMapCache = Object.create(null);
   var PLAY_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 6V18L18 12Z"></path></svg>';
   var PAUSE_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="6" width="4" height="12" rx="1"></rect><rect x="13" y="6" width="4" height="12" rx="1"></rect></svg>';
@@ -388,8 +387,8 @@
     if (availableHeight <= 0) return;
 
     var ratio = aspectRatioFromFrame(frame);
-    var widthByHeight = availableHeight * ratio;
-    var widthByContainer = columnRect.width;
+    var widthByHeight = availableHeight * ratio * 0.94;
+    var widthByContainer = columnRect.width * 0.94;
     var targetWidth = Math.max(120, Math.floor(Math.min(widthByHeight, widthByContainer)));
 
     if (cardPosition < 0 || !Number.isFinite(targetWidth)) return;
@@ -473,18 +472,10 @@
     var scaleX = rect.width / snapshot.width;
     var scaleY = rect.height / snapshot.height;
     var hintIds = [];
-    var seenHintIds = Object.create(null);
-    function appendHintId(elementId) {
-      if (!elementId || seenHintIds[elementId]) return;
-      seenHintIds[elementId] = true;
-      hintIds.push(elementId);
+    if (selectedHierarchyElementId) hintIds.push(selectedHierarchyElementId);
+    if (hoveredHierarchyElementId && hoveredHierarchyElementId !== selectedHierarchyElementId) {
+      hintIds.push(hoveredHierarchyElementId);
     }
-
-    for (var idIndex = 0; idIndex < currentHierarchyHintIds.length; idIndex += 1) {
-      appendHintId(currentHierarchyHintIds[idIndex]);
-    }
-    appendHintId(selectedHierarchyElementId);
-    appendHintId(hoveredHierarchyElementId);
 
     if (!hintIds.length) {
       hintsLayer.innerHTML = '';
@@ -510,29 +501,8 @@
     hintsLayer.innerHTML = hintsHtml.join('');
   }
 
-  function computeHierarchyHintIds(snapshot, options) {
-    if (!snapshot || !options || !options.length) return [];
-    var snapshotArea = Math.max(1, snapshot.width * snapshot.height);
-    var maxAreaRatio = 0.42;
-    var maxHintCount = 6;
-    var hintIds = [];
-    for (var i = 0; i < options.length; i += 1) {
-      var option = options[i];
-      if (!option || !option.id || option.width <= 0 || option.height <= 0) continue;
-      var optionArea = Math.max(0, option.width * option.height);
-      if ((optionArea / snapshotArea) > maxAreaRatio) continue;
-      hintIds.push(option.id);
-      if (hintIds.length >= maxHintCount) break;
-    }
-    if (!hintIds.length && options[0] && options[0].id) {
-      hintIds.push(options[0].id);
-    }
-    return hintIds;
-  }
-
   function closeHierarchyMenu() {
     currentHierarchyCandidateIds = [];
-    currentHierarchyHintIds = [];
     if (hierarchyCandidateList) {
       hierarchyCandidateList.innerHTML = '';
     }
@@ -567,7 +537,6 @@
     hierarchyCandidateEmpty.textContent = message || 'No elements at this point.';
     hierarchyCandidateEmpty.hidden = false;
     currentHierarchyCandidateIds = [];
-    currentHierarchyHintIds = [];
     updateHierarchyHintOverlays(snapshot || null);
     flashHierarchyCandidatePanel();
   }
@@ -817,10 +786,7 @@
     setHierarchyPanelExpanded(true);
     var options = candidates.slice(0, 20);
     currentHierarchyCandidateIds = options.map(function(element) { return element.id; });
-    currentHierarchyHintIds = computeHierarchyHintIds(snapshot, options);
-    if (!selectedHierarchyElementId || currentHierarchyCandidateIds.indexOf(selectedHierarchyElementId) === -1) {
-      selectedHierarchyElementId = options[0] ? options[0].id : null;
-    }
+    selectedHierarchyElementId = options[0] ? options[0].id : null;
     hierarchyCandidateList.innerHTML = options.map(function(element) {
       return '<button type="button" class="hierarchy-candidate-item" data-hierarchy-element-id="' + escapeHTML(element.id) + '">'
         + '<span class="hierarchy-candidate-title">' + escapeHTML(hierarchyElementTitle(element)) + '</span>'

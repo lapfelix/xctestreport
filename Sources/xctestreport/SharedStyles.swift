@@ -1167,8 +1167,8 @@ let sharedStyles = """
     }
 
     .hierarchy-side-panel {
-        width: min(300px, 30vw);
-        min-width: 260px;
+        width: clamp(320px, 34vw, 440px);
+        min-width: 300px;
         display: flex;
         align-items: stretch;
         gap: 8px;
@@ -1325,6 +1325,8 @@ let sharedStyles = """
         font-size: 0.8rem;
         font-weight: 650;
         line-height: 1.25;
+        overflow-wrap: anywhere;
+        word-break: break-word;
     }
 
     .hierarchy-candidate-frame {
@@ -1438,11 +1440,14 @@ let sharedStyles = """
         color: #6D5E83;
         font-variant-numeric: tabular-nums;
         line-height: 1.3;
+        overflow-wrap: anywhere;
+        word-break: break-word;
     }
 
     .hierarchy-inspector-properties {
         max-height: min(260px, 30vh);
-        overflow: auto;
+        overflow-y: auto;
+        overflow-x: hidden;
         border-top: 1px solid #E8DFF2;
         padding-top: 8px;
     }
@@ -1469,13 +1474,17 @@ let sharedStyles = """
 
     .hierarchy-prop-value {
         color: #2F2841;
+        min-width: 0;
+        overflow-wrap: anywhere;
         word-break: break-word;
+        white-space: normal;
         line-height: 1.36;
     }
 
     .hierarchy-prop-value.mono {
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
         font-size: 0.83em;
+        white-space: pre-wrap;
     }
 
     .hierarchy-prop-value.path {
@@ -1491,7 +1500,8 @@ let sharedStyles = """
 
     .hierarchy-container-item {
         display: flex;
-        align-items: baseline;
+        align-items: flex-start;
+        flex-wrap: wrap;
         gap: 7px;
         min-width: 0;
     }
@@ -1508,9 +1518,9 @@ let sharedStyles = """
 
     .hierarchy-container-name {
         min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        white-space: normal;
     }
 
     .hierarchy-container-repeat {

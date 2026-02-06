@@ -292,6 +292,23 @@ extension XCTestReport {
             let elements: [UIHierarchyElement]
         }
 
+        struct TimelineEventEntry: Codable {
+            let id: String
+            let title: String
+            let time: Double
+        }
+
+        struct TimelineRunState: Codable {
+            let index: Int
+            let label: String
+            let timelineBase: Double
+            let firstEventLabel: String
+            let initialFailureEventIndex: Int
+            let events: [TimelineEventEntry]
+            let touchGestures: [TouchGestureOverlay]
+            let hierarchySnapshots: [UIHierarchySnapshot]
+        }
+
         func shell(_ args: [String], outputFile: String? = nil, captureOutput: Bool = true) -> (
             String?, Int32
         ) {
@@ -1235,7 +1252,8 @@ extension XCTestReport {
         func buildTouchGestures(
             from nodes: [TimelineNode],
             testIdentifier: String,
-            attachmentsByTestIdentifier: [String: [AttachmentManifestItem]]
+            attachmentsByTestIdentifier: [String: [AttachmentManifestItem]],
+            includeManifestFallback: Bool = true
         ) -> [TouchGestureOverlay] {
             var flatNodes = [TimelineNode]()
             flattenTimelineNodes(nodes, into: &flatNodes)
@@ -1282,30 +1300,32 @@ extension XCTestReport {
                 }
             }
 
-            for attachment in attachmentsByTestIdentifier[testIdentifier] ?? [] {
-                let label = attachment.suggestedHumanReadableName ?? attachment.exportedFileName
-                guard label.localizedCaseInsensitiveContains("synthesized event") else { continue }
-                guard !seenExportedFiles.contains(attachment.exportedFileName) else { continue }
-                guard let baseTimestamp = parseSynthesizedEventTimestamp(from: label) else { continue }
+            if includeManifestFallback {
+                for attachment in attachmentsByTestIdentifier[testIdentifier] ?? [] {
+                    let label = attachment.suggestedHumanReadableName ?? attachment.exportedFileName
+                    guard label.localizedCaseInsensitiveContains("synthesized event") else { continue }
+                    guard !seenExportedFiles.contains(attachment.exportedFileName) else { continue }
+                    guard let baseTimestamp = parseSynthesizedEventTimestamp(from: label) else { continue }
 
-                let filePath = (attachmentRoot as NSString).appendingPathComponent(
-                    attachment.exportedFileName)
-                let cacheKey = "\(filePath)|\(String(format: "%.6f", baseTimestamp))"
-                let overlay: TouchGestureOverlay?
-                if let cached = parsedCache[cacheKey] {
-                    overlay = cached
-                } else {
-                    let parsed = parseSynthesizedEventGesture(
-                        at: filePath, baseTimestamp: baseTimestamp)
-                    parsedCache[cacheKey] = parsed
-                    overlay = parsed
+                    let filePath = (attachmentRoot as NSString).appendingPathComponent(
+                        attachment.exportedFileName)
+                    let cacheKey = "\(filePath)|\(String(format: "%.6f", baseTimestamp))"
+                    let overlay: TouchGestureOverlay?
+                    if let cached = parsedCache[cacheKey] {
+                        overlay = cached
+                    } else {
+                        let parsed = parseSynthesizedEventGesture(
+                            at: filePath, baseTimestamp: baseTimestamp)
+                        parsedCache[cacheKey] = parsed
+                        overlay = parsed
+                    }
+
+                    guard let overlay else { continue }
+                    guard !seenGestureKeys.contains(cacheKey) else { continue }
+                    seenGestureKeys.insert(cacheKey)
+                    gestures.append(overlay)
+                    seenExportedFiles.insert(attachment.exportedFileName)
                 }
-
-                guard let overlay else { continue }
-                guard !seenGestureKeys.contains(cacheKey) else { continue }
-                seenGestureKeys.insert(cacheKey)
-                gestures.append(overlay)
-                seenExportedFiles.insert(attachment.exportedFileName)
             }
 
             let fallbackSizeGesture = gestures.first { $0.width > 1 && $0.height > 1 }
@@ -1680,7 +1700,13 @@ extension XCTestReport {
         ) -> String {
             guard let testIdentifier else { return "" }
 
-            let rootActivities = activities?.testRuns.flatMap { $0.activities } ?? []
+            let availableRuns = activities?.testRuns ?? []
+            let runActivityLists: [[TestActivity]]
+            if availableRuns.isEmpty {
+                runActivityLists = [[]]
+            } else {
+                runActivityLists = availableRuns.map { $0.activities }
+            }
             let videoSources = buildVideoSources(
                 for: testIdentifier, activities: activities,
                 attachmentsByTestIdentifier: attachmentsByTestIdentifier)
@@ -1691,60 +1717,135 @@ extension XCTestReport {
                 for: testIdentifier, attachmentsByTestIdentifier: attachmentsByTestIdentifier)
 
             var nextId = 1
-            let timelineNodes = buildTimelineNodes(
-                from: rootActivities, attachmentLookup: attachmentLookup, nextId: &nextId)
-            let collapsedTimelineNodes = collapseRepeatedTimelineNodes(timelineNodes)
+            let fallbackTimelineBase =
+                videoSources.first?.startTime ?? screenshotSources.first?.time ?? Date()
+                .timeIntervalSince1970
 
-            var flatNodes = [TimelineNode]()
-            flattenTimelineNodes(collapsedTimelineNodes, into: &flatNodes)
-            let timestampedNodes = flatNodes.filter { $0.timestamp != nil }.sorted {
-                ($0.timestamp ?? 0) < ($1.timestamp ?? 0)
-            }
-            let touchGestures = buildTouchGestures(
-                from: collapsedTimelineNodes,
-                testIdentifier: testIdentifier,
-                attachmentsByTestIdentifier: attachmentsByTestIdentifier
-            )
-            let hierarchySnapshots = buildUIHierarchySnapshots(from: collapsedTimelineNodes)
-            let touchGestureJSON: String = {
-                guard !touchGestures.isEmpty else { return "[]" }
-                guard let encoded = try? JSONEncoder().encode(touchGestures) else { return "[]" }
-                return String(data: encoded, encoding: .utf8) ?? "[]"
-            }()
             let screenshotJSON: String = {
                 guard !screenshotSources.isEmpty else { return "[]" }
                 guard let encoded = try? JSONEncoder().encode(screenshotSources) else { return "[]" }
                 return String(data: encoded, encoding: .utf8) ?? "[]"
             }()
-            let hierarchyJSON: String = {
-                guard !hierarchySnapshots.isEmpty else { return "[]" }
-                guard let encoded = try? JSONEncoder().encode(hierarchySnapshots) else { return "[]" }
-                return String(data: encoded, encoding: .utf8) ?? "[]"
-            }()
+            let includeManifestTouchFallback = runActivityLists.count <= 1
+            var runStates = [TimelineRunState]()
+            var runPanelsHTML = [String]()
 
-            let timelineBaseTime =
-                timestampedNodes.first?.timestamp ?? videoSources.first?.startTime
-                ?? screenshotSources.first?.time ?? Date()
-                .timeIntervalSince1970
-            let defaultVideoStart =
-                videoSources.first?.startTime ?? screenshotSources.first?.time ?? timelineBaseTime
+            for (runIndex, activitiesForRun) in runActivityLists.enumerated() {
+                let timelineNodes = buildTimelineNodes(
+                    from: activitiesForRun, attachmentLookup: attachmentLookup, nextId: &nextId)
+                let collapsedTimelineNodes = collapseRepeatedTimelineNodes(timelineNodes)
 
-            let timelineTree: String
-            if collapsedTimelineNodes.isEmpty {
-                timelineTree =
-                    "<div class=\"timeline-status\">No activity timeline was found for this test.</div>"
-            } else {
-                timelineTree =
-                    "<div class=\"timeline-tree\"><ul class=\"timeline-root\">\(renderTimelineNodesHTML(collapsedTimelineNodes, baseTime: timelineBaseTime, depth: 0))</ul></div>"
-            }
-            let timelineTreeControls = collapsedTimelineNodes.isEmpty
-                ? ""
-                : """
-                    <div class="timeline-tree-actions">
-                        <button type="button" class="timeline-tree-action-btn" data-tree-action="collapse">Collapse all</button>
-                        <button type="button" class="timeline-tree-action-btn" data-tree-action="expand">Expand all</button>
+                var flatNodes = [TimelineNode]()
+                flattenTimelineNodes(collapsedTimelineNodes, into: &flatNodes)
+                let timestampedNodes = flatNodes.filter { $0.timestamp != nil }.sorted {
+                    ($0.timestamp ?? 0) < ($1.timestamp ?? 0)
+                }
+                let timelineBaseTime =
+                    timestampedNodes.first?.timestamp ?? videoSources.first?.startTime
+                    ?? screenshotSources.first?.time ?? fallbackTimelineBase
+
+                let touchGestures = buildTouchGestures(
+                    from: collapsedTimelineNodes,
+                    testIdentifier: testIdentifier,
+                    attachmentsByTestIdentifier: attachmentsByTestIdentifier,
+                    includeManifestFallback: includeManifestTouchFallback
+                )
+                let hierarchySnapshots = buildUIHierarchySnapshots(from: collapsedTimelineNodes)
+                let events = timestampedNodes.map { node in
+                    TimelineEventEntry(
+                        id: node.id,
+                        title: timelineDisplayTitle(node, baseTime: timelineBaseTime),
+                        time: node.timestamp ?? timelineBaseTime
+                    )
+                }
+                let initialFailureEventIndex = timestampedNodes.firstIndex { $0.failureAssociated } ?? -1
+                let firstEventLabel =
+                    events.first?.title ?? "No event selected"
+
+                let timelineTree: String
+                if collapsedTimelineNodes.isEmpty {
+                    timelineTree =
+                        "<div class=\"timeline-status\">No activity timeline was found for this run.</div>"
+                } else {
+                    timelineTree =
+                        "<div class=\"timeline-tree\"><ul class=\"timeline-root\">\(renderTimelineNodesHTML(collapsedTimelineNodes, baseTime: timelineBaseTime, depth: 0))</ul></div>"
+                }
+                let timelineTreeControls = collapsedTimelineNodes.isEmpty
+                    ? ""
+                    : """
+                        <div class="timeline-tree-actions">
+                            <button type="button" class="timeline-tree-action-btn" data-tree-action="collapse">Collapse all</button>
+                            <button type="button" class="timeline-tree-action-btn" data-tree-action="expand">Expand all</button>
+                        </div>
+                        """
+
+                runStates.append(
+                    TimelineRunState(
+                        index: runIndex,
+                        label: "Run \(runIndex + 1)",
+                        timelineBase: timelineBaseTime,
+                        firstEventLabel: firstEventLabel,
+                        initialFailureEventIndex: initialFailureEventIndex,
+                        events: events,
+                        touchGestures: touchGestures,
+                        hierarchySnapshots: hierarchySnapshots
+                    ))
+
+                let hiddenStyle = runIndex == 0 ? "" : " style=\"display:none;\""
+                runPanelsHTML.append(
+                    """
+                    <div class="timeline-panel" data-run-panel data-run-index="\(runIndex)"\(hiddenStyle)>
+                        <div class="timeline-current" data-active-event>\(htmlEscape(firstEventLabel))</div>
+                        \(timelineTree)
+                        \(timelineTreeControls)
                     </div>
                     """
+                )
+            }
+
+            if runStates.isEmpty {
+                runStates = [
+                    TimelineRunState(
+                        index: 0,
+                        label: "Run 1",
+                        timelineBase: fallbackTimelineBase,
+                        firstEventLabel: "No event selected",
+                        initialFailureEventIndex: -1,
+                        events: [],
+                        touchGestures: [],
+                        hierarchySnapshots: []
+                    )
+                ]
+                runPanelsHTML = [
+                    """
+                    <div class="timeline-panel" data-run-panel data-run-index="0">
+                        <div class="timeline-current" data-active-event>No event selected</div>
+                        <div class="timeline-status">No activity timeline was found for this test.</div>
+                    </div>
+                    """
+                ]
+            }
+
+            let runStatesJSON: String = {
+                guard let encoded = try? JSONEncoder().encode(runStates) else { return "[]" }
+                return String(data: encoded, encoding: .utf8) ?? "[]"
+            }()
+            let runSelectorHTML: String = {
+                guard runStates.count > 1 else { return "" }
+                let options = runStates.map { runState in
+                    "<option value=\"\(runState.index)\">\(htmlEscape(runState.label))</option>"
+                }.joined(separator: "")
+                return """
+                    <div class="timeline-run-selector">
+                        <label for="timeline-run-select">Run:</label>
+                        <select id="timeline-run-select" class="timeline-run-select" data-run-selector>\(options)</select>
+                    </div>
+                    """
+            }()
+
+            let defaultTimelineBase = runStates.first?.timelineBase ?? fallbackTimelineBase
+            let defaultVideoStart =
+                videoSources.first?.startTime ?? screenshotSources.first?.time ?? defaultTimelineBase
 
             let videoSelector: String
             let videoElements: String
@@ -1764,7 +1865,7 @@ extension XCTestReport {
 
                 videoElements = videoSources.enumerated().map { index, source in
                     let relativePath = "attachments/\(urlEncodePath(source.fileName))"
-                    let startTime = source.startTime ?? timelineBaseTime
+                    let startTime = source.startTime ?? defaultTimelineBase
                     let hiddenStyle = index == 0 ? "" : " style=\"display:none;\""
                     return """
                         <div class="video-card timeline-video-card"\(hiddenStyle) data-video-index="\(index)">
@@ -1807,15 +1908,6 @@ extension XCTestReport {
                 videoElements = ""
             }
 
-            let firstEventLabel = timestampedNodes.first.map {
-                htmlEscape(timelineDisplayTitle($0, baseTime: timelineBaseTime))
-            } ?? "No event selected"
-            let eventData = timestampedNodes.map { node in
-                let title = jsStringEscape(timelineDisplayTitle(node, baseTime: timelineBaseTime))
-                let time = node.timestamp ?? timelineBaseTime
-                return "{id:'\(node.id)',title:'\(title)',time:\(time)}"
-            }.joined(separator: ",")
-            let initialFailureEventIndex = timestampedNodes.firstIndex { $0.failureAssociated } ?? -1
             let videoPanelHtml: String =
                 mediaMode == "none"
                 ? ""
@@ -1837,11 +1929,10 @@ extension XCTestReport {
 
             return """
                 <div class="timeline-video-section">
-                    <div class="timeline-video-layout\(layoutClass)" data-timeline-root data-media-mode="\(mediaMode)" data-timeline-base="\(timelineBaseTime)" data-video-base="\(defaultVideoStart)">
-                        <div class="timeline-panel">
-                            <div class="timeline-current" data-active-event>\(firstEventLabel)</div>
-                            \(timelineTree)
-                            \(timelineTreeControls)
+                    <div class="timeline-video-layout\(layoutClass)" data-timeline-root data-media-mode="\(mediaMode)" data-timeline-base="\(defaultTimelineBase)" data-video-base="\(defaultVideoStart)">
+                        <div class="timeline-panel-stack">
+                            \(runSelectorHTML)
+                            \(runPanelsHTML.joined(separator: ""))
                         </div>
                         \(videoPanelHtml)
                     </div>
@@ -1897,13 +1988,15 @@ extension XCTestReport {
                   var scrubber = controls.querySelector('[data-scrubber]');
                   var timeLabel = controls.querySelector('[data-playback-time]');
                   var totalTimeLabel = controls.querySelector('[data-total-time]');
-                  var eventLabel = root.querySelector('[data-active-event]');
-                  var timelineTree = root.querySelector('.timeline-tree');
+                  var runSelector = root.querySelector('[data-run-selector]');
+                  var runPanels = Array.prototype.slice.call(root.querySelectorAll('[data-run-panel]'));
+                  var eventLabel = null;
+                  var timelineTree = null;
                   var playButton = controls.querySelector('[data-nav=\"play\"]');
                   var prevButton = controls.querySelector('[data-nav=\"prev\"]');
                   var nextButton = controls.querySelector('[data-nav=\"next\"]');
-                  var collapseAllButton = root.querySelector('[data-tree-action=\"collapse\"]');
-                  var expandAllButton = root.querySelector('[data-tree-action=\"expand\"]');
+                  var collapseAllButton = null;
+                  var expandAllButton = null;
                   var previewModal = document.querySelector('[data-attachment-modal]');
                   var previewTitle = previewModal ? previewModal.querySelector('[data-attachment-title]') : null;
                   var previewOpen = previewModal ? previewModal.querySelector('[data-attachment-open]') : null;
@@ -1919,13 +2012,15 @@ extension XCTestReport {
                   var hierarchyProperties = hierarchyInspector ? hierarchyInspector.querySelector('[data-hierarchy-properties]') : null;
                   var selector = root.querySelector('[data-video-selector]');
                   var cards = Array.prototype.slice.call(root.querySelectorAll('[data-video-index]'));
-                  var events = [\(eventData)];
-                  var initialFailureEventIndex = \(initialFailureEventIndex);
+                  var runStates = \(runStatesJSON);
+                  var activeRunIndex = 0;
+                  var events = [];
+                  var initialFailureEventIndex = -1;
                   var mediaMode = root.dataset.mediaMode || 'video';
-                  var touchGestures = \(touchGestureJSON);
+                  var touchGestures = [];
                   var screenshots = \(screenshotJSON);
-                  var hierarchySnapshots = \(hierarchyJSON);
-                  var timelineBase = parseFloat(root.dataset.timelineBase || '0');
+                  var hierarchySnapshots = [];
+                  var timelineBase = 0;
                   var fallbackVideoBase = parseFloat(root.dataset.videoBase || '0');
                   var activeIndex = 0;
                   var activeEventId = null;
@@ -1960,6 +2055,87 @@ extension XCTestReport {
                   function setPlayButtonIcon(isPlaying) {
                     if (!playButton) return;
                     playButton.innerHTML = isPlaying ? PAUSE_ICON : PLAY_ICON;
+                  }
+
+                  function currentRunPanel() {
+                    return runPanels[activeRunIndex] || runPanels[0] || null;
+                  }
+
+                  function clearRunPanelState(panel) {
+                    if (!panel) return;
+                    Array.prototype.forEach.call(
+                      panel.querySelectorAll('.timeline-event.timeline-active, .timeline-event.timeline-context-active, .timeline-event.timeline-active-proxy'),
+                      function(node) {
+                        node.classList.remove('timeline-active');
+                        node.classList.remove('timeline-context-active');
+                        node.classList.remove('timeline-active-proxy');
+                      });
+                  }
+
+                  function refreshRunScopedBindings() {
+                    var panel = currentRunPanel();
+                    eventLabel = panel ? panel.querySelector('[data-active-event]') : null;
+                    timelineTree = panel ? panel.querySelector('.timeline-tree') : null;
+                    collapseAllButton = panel ? panel.querySelector('[data-tree-action=\"collapse\"]') : null;
+                    expandAllButton = panel ? panel.querySelector('[data-tree-action=\"expand\"]') : null;
+                  }
+
+                  function recalculateVirtualDuration() {
+                    var lastEventTime = events.length ? events[events.length - 1].time : (timelineBase || 0);
+                    var lastScreenshotTime = screenshots.length ? screenshots[screenshots.length - 1].time : (timelineBase || 0);
+                    virtualDuration = Math.max(0, Math.max(lastEventTime, lastScreenshotTime) - (timelineBase || 0));
+                    if (!getActiveVideo()) {
+                      scrubber.max = virtualDuration;
+                      if (virtualCurrentTime > virtualDuration) {
+                        virtualCurrentTime = virtualDuration;
+                      }
+                    }
+                  }
+
+                  function applyRunState(nextRunIndex, preserveAbsoluteTime) {
+                    if (!runStates.length) {
+                      events = [];
+                      touchGestures = [];
+                      hierarchySnapshots = [];
+                      timelineBase = fallbackVideoBase || 0;
+                      initialFailureEventIndex = -1;
+                      refreshRunScopedBindings();
+                      return;
+                    }
+
+                    var absoluteTimeBefore = preserveAbsoluteTime ? currentAbsoluteTime() : null;
+                    var clampedIndex = Math.max(0, Math.min(runStates.length - 1, Number(nextRunIndex) || 0));
+                    activeRunIndex = clampedIndex;
+
+                    runPanels.forEach(function(panel, panelIndex) {
+                      panel.style.display = panelIndex === activeRunIndex ? '' : 'none';
+                      clearRunPanelState(panel);
+                    });
+
+                    var runState = runStates[activeRunIndex] || runStates[0];
+                    events = runState.events || [];
+                    touchGestures = runState.touchGestures || [];
+                    hierarchySnapshots = runState.hierarchySnapshots || [];
+                    timelineBase = Number.isFinite(runState.timelineBase) ? runState.timelineBase : (fallbackVideoBase || 0);
+                    initialFailureEventIndex = Number.isFinite(runState.initialFailureEventIndex) ? runState.initialFailureEventIndex : -1;
+
+                    activeEventId = null;
+                    activeEventIndex = -1;
+                    currentHierarchySnapshotId = null;
+                    selectedHierarchyElementId = null;
+                    hoveredHierarchyElementId = null;
+                    closeHierarchyMenu();
+                    hideTouchMarker();
+                    refreshRunScopedBindings();
+                    if (eventLabel) {
+                      eventLabel.textContent = runState.firstEventLabel || 'No event selected';
+                    }
+                    recalculateVirtualDuration();
+
+                    if (preserveAbsoluteTime && absoluteTimeBefore != null) {
+                      setAbsoluteTime(absoluteTimeBefore);
+                    }
+                    updateFromVideoTime();
                   }
 
                   function resetAttachmentPreviewContent() {
@@ -2623,8 +2799,9 @@ extension XCTestReport {
                   }
 
                   function updateContextHighlight(node) {
+                    var panel = currentRunPanel() || root;
                     Array.prototype.forEach.call(
-                      root.querySelectorAll('.timeline-event.timeline-context-active'),
+                      panel.querySelectorAll('.timeline-event.timeline-context-active'),
                       function(el) { el.classList.remove('timeline-context-active'); }
                     );
                     var details = node ? node.closest('details') : null;
@@ -2639,8 +2816,9 @@ extension XCTestReport {
                   }
 
                   function setCollapsedProxyActive(node) {
+                    var panel = currentRunPanel() || root;
                     Array.prototype.forEach.call(
-                      root.querySelectorAll('.timeline-event.timeline-active-proxy'),
+                      panel.querySelectorAll('.timeline-event.timeline-active-proxy'),
                       function(el) { el.classList.remove('timeline-active-proxy'); }
                     );
                     if (node) {
@@ -2650,9 +2828,10 @@ extension XCTestReport {
 
                   function setActiveEvent(eventId, shouldReveal, scrollBehavior, scrollWhenCollapsed) {
                     if (!eventId) return;
+                    var panel = currentRunPanel() || root;
                     var idx = eventIndexById(eventId);
                     if (idx >= 0) activeEventIndex = idx;
-                    var next = root.querySelector('.timeline-event[data-event-id=\"' + eventId + '\"]');
+                    var next = panel.querySelector('.timeline-event[data-event-id=\"' + eventId + '\"]');
                     if (next) {
                       updateContextHighlight(next);
                     }
@@ -2671,7 +2850,7 @@ extension XCTestReport {
                       }
                       return;
                     }
-                    var oldActive = root.querySelector('.timeline-event.timeline-active');
+                    var oldActive = panel.querySelector('.timeline-event.timeline-active');
                     if (oldActive) oldActive.classList.remove('timeline-active');
                     if (next) {
                       if (shouldReveal) {
@@ -2835,23 +3014,18 @@ extension XCTestReport {
                     }
                   });
 
-                  if (collapseAllButton && timelineTree) {
-                    collapseAllButton.addEventListener('click', function() {
-                      Array.prototype.forEach.call(timelineTree.querySelectorAll('details'), function(detail) {
-                        detail.open = false;
-                      });
-                    });
-                  }
-
-                  if (expandAllButton && timelineTree) {
-                    expandAllButton.addEventListener('click', function() {
-                      Array.prototype.forEach.call(timelineTree.querySelectorAll('details'), function(detail) {
-                        detail.open = true;
-                      });
-                    });
-                  }
-
                   root.addEventListener('click', function(event) {
+                    var treeAction = event.target.closest('.timeline-tree-action-btn[data-tree-action]');
+                    if (treeAction) {
+                      var tree = timelineTree;
+                      if (!tree) return;
+                      var shouldExpand = treeAction.getAttribute('data-tree-action') === 'expand';
+                      Array.prototype.forEach.call(tree.querySelectorAll('details'), function(detail) {
+                        detail.open = shouldExpand;
+                      });
+                      return;
+                    }
+
                     var attachmentLink = event.target.closest('.timeline-attachment-link[data-preview-kind]');
                     if (attachmentLink) {
                       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -2871,6 +3045,22 @@ extension XCTestReport {
                       return;
                     }
 
+                    var disclosure = event.target.closest('.timeline-disclosure');
+                    if (disclosure) {
+                      var disclosureNode = disclosure.closest('.timeline-event[data-event-time]');
+                      if (!disclosureNode) return;
+                      var disclosureTimeRaw = disclosureNode.getAttribute('data-event-time');
+                      if (!disclosureTimeRaw) return;
+                      var disclosureTime = parseFloat(disclosureTimeRaw);
+                      if (!Number.isFinite(disclosureTime)) return;
+                      setAbsoluteTime(disclosureTime);
+                      setActiveEvent(disclosureNode.getAttribute('data-event-id'), false, 'auto', true);
+                      var disclosureMatched = events.find(function(item) { return item.id === disclosureNode.getAttribute('data-event-id'); });
+                      if (disclosureMatched && eventLabel) eventLabel.textContent = disclosureMatched.title;
+                      updateFromVideoTime();
+                      return;
+                    }
+
                     closeHierarchyMenu();
 
                     var node = event.target.closest('.timeline-event[data-event-time]');
@@ -2880,7 +3070,8 @@ extension XCTestReport {
                     var absoluteTime = parseFloat(raw);
                     if (!Number.isFinite(absoluteTime)) return;
                     setAbsoluteTime(absoluteTime);
-                    setActiveEvent(node.getAttribute('data-event-id'), true);
+                    var clickedSummary = !!event.target.closest('summary');
+                    setActiveEvent(node.getAttribute('data-event-id'), !clickedSummary, clickedSummary ? 'auto' : null, true);
                     var matched = events.find(function(item) { return item.id === node.getAttribute('data-event-id'); });
                     if (matched && eventLabel) eventLabel.textContent = matched.title;
                     updateFromVideoTime();
@@ -2957,6 +3148,15 @@ extension XCTestReport {
                     });
                   }
 
+                  if (runSelector) {
+                    runSelector.addEventListener('change', function() {
+                      stopTouchAnimation();
+                      stopVirtualPlayback();
+                      closeHierarchyMenu();
+                      applyRunState(parseInt(runSelector.value || '0', 10), true);
+                    });
+                  }
+
                   window.addEventListener('resize', function() {
                     updateTouchOverlay();
                     updateHierarchyOverlay();
@@ -2999,9 +3199,18 @@ extension XCTestReport {
                     }
                   });
 
-                  var lastEventTime = events.length ? events[events.length - 1].time : (timelineBase || 0);
-                  var lastScreenshotTime = screenshots.length ? screenshots[screenshots.length - 1].time : (timelineBase || 0);
-                  virtualDuration = Math.max(0, Math.max(lastEventTime, lastScreenshotTime) - (timelineBase || 0));
+                  var initialRunIndex = 0;
+                  for (var i = 0; i < runStates.length; i += 1) {
+                    if ((runStates[i] && Number(runStates[i].initialFailureEventIndex) >= 0)) {
+                      initialRunIndex = i;
+                      break;
+                    }
+                  }
+                  applyRunState(initialRunIndex, false);
+                  if (runSelector) {
+                    runSelector.value = String(initialRunIndex);
+                  }
+
                   setPlayButtonIcon(false);
                   var startingVideo = getActiveVideo();
                   var didFocusFailureOnLoad = false;

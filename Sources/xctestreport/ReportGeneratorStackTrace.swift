@@ -1,6 +1,10 @@
 import Dispatch
 import Foundation
 
+private let sourceReferenceCacheLock = NSLock()
+private var sourceReferenceResolvedCache = [String: XCTestReport.SourceLocation]()
+private var sourceReferenceMissingCache = Set<String>()
+
 extension XCTestReport {
     func htmlEscape(_ input: String) -> String {
         return input
@@ -74,16 +78,250 @@ extension XCTestReport {
 
     func extractRunDetailTexts(from testRuns: [TestRunDetail]) -> [String] {
         var texts = [String]()
+        func collectDetailTexts(_ detail: TestRunChildDetail) {
+            texts.append(detail.name)
+            if let url = detail.url, !url.isEmpty {
+                texts.append(url)
+            }
+            for child in detail.children ?? [] {
+                collectDetailTexts(child)
+            }
+        }
         for run in testRuns {
             texts.append(run.name)
             for child in run.children ?? [] {
                 texts.append(child.name)
                 for detail in child.children ?? [] {
-                    texts.append(detail.name)
+                    collectDetailTexts(detail)
                 }
             }
         }
         return texts
+    }
+
+    func renderSourceReferenceSection(from testRuns: [TestRunDetail], testIdentifierURL: String?) -> String {
+        let references = sourceReferences(from: testRuns)
+        guard !references.isEmpty else { return "" }
+
+        let projectHint = projectNameHint(from: testIdentifierURL)
+        let items = references.prefix(20).map { reference in
+            let sourceName = htmlEscape(reference.name)
+            let location = resolveSourceReferenceLocation(
+                referenceName: reference.name,
+                referenceURL: reference.url,
+                projectHint: projectHint
+            )
+
+            var suffix = ""
+            if let location {
+                let lineBadge = "<span class=\"source-ref-line\">L\(location.line)</span>"
+                let fileName = (location.filePath as NSString).lastPathComponent
+                let fileLabel = "<span class=\"source-ref-file\">\(htmlEscape("\(fileName):\(location.line)"))</span>"
+                if let xcodeLink = xcodeURL(
+                    filePath: location.filePath, line: location.line, column: location.column)
+                {
+                    suffix = " \(lineBadge) \(fileLabel) <a href=\"\(xcodeLink)\">Open in Xcode</a>"
+                } else {
+                    suffix = " \(lineBadge) \(fileLabel)"
+                }
+            } else {
+                suffix = " <span class=\"source-ref-line source-ref-line-missing\">L?</span>"
+            }
+
+            return "<li><code class=\"source-ref-code\">\(sourceName)</code>\(suffix)</li>"
+        }.joined(separator: "")
+
+        return """
+            <h3>Source References</h3>
+            <ol class="source-ref-list">\(items)</ol>
+            """
+    }
+
+    private func sourceReferences(from testRuns: [TestRunDetail]) -> [(name: String, url: String?)] {
+        var references = [(name: String, url: String?)]()
+        var seen = Set<String>()
+
+        func walkDetail(_ detail: TestRunChildDetail) {
+            if detail.nodeType == "Source Code Reference" {
+                let key = "\(detail.name)|\(detail.url ?? "")"
+                if !seen.contains(key) {
+                    seen.insert(key)
+                    references.append((detail.name, detail.url))
+                }
+            }
+            for child in detail.children ?? [] {
+                walkDetail(child)
+            }
+        }
+
+        for run in testRuns {
+            for child in run.children ?? [] {
+                for detail in child.children ?? [] {
+                    walkDetail(detail)
+                }
+            }
+        }
+        return references
+    }
+
+    private func projectNameHint(from testIdentifierURL: String?) -> String? {
+        guard let testIdentifierURL, let components = URLComponents(string: testIdentifierURL)
+        else { return nil }
+        let pathComponents = components.path.split(separator: "/").map(String.init)
+        return pathComponents.first
+    }
+
+    private func resolveSourceReferenceLocation(
+        referenceName: String,
+        referenceURL: String?,
+        projectHint: String?
+    ) -> SourceLocation? {
+        let explicitTexts = [referenceName, referenceURL ?? ""].joined(separator: " ")
+        if let explicit = extractSourceLocations(from: explicitTexts).first {
+            return explicit
+        }
+
+        guard let symbol = parseSourceReferenceSymbol(referenceName) else { return nil }
+        let cacheKey = "\(projectHint ?? "_")|\(symbol.typeName ?? "_")|\(symbol.functionName)"
+
+        sourceReferenceCacheLock.lock()
+        if let cached = sourceReferenceResolvedCache[cacheKey] {
+            sourceReferenceCacheLock.unlock()
+            return cached
+        }
+        if sourceReferenceMissingCache.contains(cacheKey) {
+            sourceReferenceCacheLock.unlock()
+            return nil
+        }
+        sourceReferenceCacheLock.unlock()
+
+        let pattern =
+            #"func\s+\#(NSRegularExpression.escapedPattern(for: symbol.functionName))\s*\("#
+        for root in sourceSearchRoots(projectHint: projectHint) {
+            var args = [
+                "rg", "-n", "--no-heading", "--no-ignore-messages", "--glob", "*.swift", "-m",
+                "40",
+            ]
+            if let typeName = symbol.typeName, !typeName.isEmpty {
+                args += ["--glob", "*\(typeName)*.swift"]
+            }
+            args += [pattern, root]
+
+            let (output, exitCode) = shell(args)
+            guard exitCode == 0, let output else { continue }
+            let matches = output
+                .split(separator: "\n")
+                .compactMap { parseRipgrepLocation(from: String($0)) }
+            guard !matches.isEmpty else { continue }
+            let location =
+                matches.max { lhs, rhs in
+                    let leftScore = sourcePathScore(lhs.filePath, projectHint: projectHint)
+                    let rightScore = sourcePathScore(rhs.filePath, projectHint: projectHint)
+                    if leftScore == rightScore {
+                        return lhs.filePath.count > rhs.filePath.count
+                    }
+                    return leftScore < rightScore
+                } ?? matches[0]
+
+            sourceReferenceCacheLock.lock()
+            sourceReferenceResolvedCache[cacheKey] = location
+            sourceReferenceCacheLock.unlock()
+            return location
+        }
+
+        sourceReferenceCacheLock.lock()
+        sourceReferenceMissingCache.insert(cacheKey)
+        sourceReferenceCacheLock.unlock()
+        return nil
+    }
+
+    private func sourceSearchRoots(projectHint: String?) -> [String] {
+        let fileManager = FileManager.default
+        var orderedRoots = [String]()
+        var seen = Set<String>()
+
+        func appendRoot(_ root: String) {
+            guard !root.isEmpty, !seen.contains(root) else { return }
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: root, isDirectory: &isDirectory), isDirectory.boolValue
+            else { return }
+            seen.insert(root)
+            orderedRoots.append(root)
+        }
+
+        appendRoot(fileManager.currentDirectoryPath)
+        appendRoot((xcresultPath as NSString).deletingLastPathComponent)
+
+        let home = fileManager.homeDirectoryForCurrentUser.path
+        let gitsRoot = (home as NSString).appendingPathComponent("Gits")
+        if let projectHint,
+            let entries = try? fileManager.contentsOfDirectory(atPath: gitsRoot)
+        {
+            let filtered = entries
+                .filter { $0.lowercased().contains(projectHint.lowercased()) }
+                .sorted()
+            for entry in filtered {
+                appendRoot((gitsRoot as NSString).appendingPathComponent(entry))
+            }
+        }
+        appendRoot(gitsRoot)
+
+        return orderedRoots
+    }
+
+    private func parseSourceReferenceSymbol(_ sourceReference: String) -> (typeName: String?, functionName: String)? {
+        var symbol = sourceReference.trimmingCharacters(in: .whitespacesAndNewlines)
+        if symbol.hasPrefix("static ") {
+            symbol = String(symbol.dropFirst("static ".count))
+        }
+
+        if let parenIndex = symbol.firstIndex(of: "(") {
+            symbol = String(symbol[..<parenIndex])
+        }
+        symbol = symbol.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !symbol.isEmpty else { return nil }
+
+        let parts = symbol.split(separator: ".").map(String.init)
+        if parts.count >= 2 {
+            let rawType = parts[parts.count - 2]
+            let typeName = rawType.split(separator: " ").last.map(String.init)
+            let functionName = parts[parts.count - 1]
+            guard !functionName.isEmpty else { return nil }
+            return (typeName, functionName)
+        }
+
+        let fallbackFunction = symbol.split(separator: " ").last.map(String.init) ?? symbol
+        guard !fallbackFunction.isEmpty else { return nil }
+        return (nil, fallbackFunction)
+    }
+
+    private func parseRipgrepLocation(from line: String) -> SourceLocation? {
+        let nsLine = line as NSString
+        guard let regex = try? NSRegularExpression(pattern: #"^(.+?):(\d+):"#) else { return nil }
+        let range = NSRange(location: 0, length: nsLine.length)
+        guard let match = regex.firstMatch(in: line, options: [], range: range) else { return nil }
+        guard match.numberOfRanges >= 3 else { return nil }
+
+        let filePath = nsLine.substring(with: match.range(at: 1))
+        let lineRaw = nsLine.substring(with: match.range(at: 2))
+        guard let lineNumber = Int(lineRaw) else { return nil }
+        return SourceLocation(filePath: filePath, line: lineNumber, column: nil)
+    }
+
+    private func sourcePathScore(_ filePath: String, projectHint: String?) -> Int {
+        let lowercasedPath = filePath.lowercased()
+        var score = 0
+
+        if let projectHint = projectHint?.lowercased() {
+            if lowercasedPath.contains("/\(projectHint)/") { score += 5 }
+            if lowercasedPath.contains("/\(projectHint)-ios/") { score += 4 }
+        }
+        if lowercasedPath.contains("/uitests/") { score += 3 }
+        if lowercasedPath.contains("/tests/") { score += 2 }
+        if lowercasedPath.contains("codex") { score -= 3 }
+        if lowercasedPath.contains("review") { score -= 2 }
+
+        return score
     }
 
     func renderSourceLocationSection(candidateTexts: [String]) -> String {

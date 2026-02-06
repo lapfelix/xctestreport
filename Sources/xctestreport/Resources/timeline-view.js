@@ -68,6 +68,7 @@
   var selectedHierarchyElementId = null;
   var hoveredHierarchyElementId = null;
   var currentHierarchyCandidateIds = [];
+  var currentHierarchyHintIds = [];
   var hierarchyParentMapCache = Object.create(null);
   var PLAY_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 6V18L18 12Z"></path></svg>';
   var PAUSE_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="6" width="4" height="12" rx="1"></rect><rect x="13" y="6" width="4" height="12" rx="1"></rect></svg>';
@@ -471,9 +472,11 @@
 
     var scaleX = rect.width / snapshot.width;
     var scaleY = rect.height / snapshot.height;
-    var hintIds = [];
-    if (selectedHierarchyElementId) hintIds.push(selectedHierarchyElementId);
-    if (hoveredHierarchyElementId && hoveredHierarchyElementId !== selectedHierarchyElementId) {
+    var hintIds = currentHierarchyHintIds.slice();
+    if (selectedHierarchyElementId && hintIds.indexOf(selectedHierarchyElementId) === -1) {
+      hintIds.push(selectedHierarchyElementId);
+    }
+    if (hoveredHierarchyElementId && hintIds.indexOf(hoveredHierarchyElementId) === -1) {
       hintIds.push(hoveredHierarchyElementId);
     }
 
@@ -503,6 +506,8 @@
 
   function closeHierarchyMenu() {
     currentHierarchyCandidateIds = [];
+    currentHierarchyHintIds = [];
+    selectedHierarchyElementId = null;
     if (hierarchyCandidateList) {
       hierarchyCandidateList.innerHTML = '';
     }
@@ -537,6 +542,9 @@
     hierarchyCandidateEmpty.textContent = message || 'No elements at this point.';
     hierarchyCandidateEmpty.hidden = false;
     currentHierarchyCandidateIds = [];
+    currentHierarchyHintIds = [];
+    selectedHierarchyElementId = null;
+    hoveredHierarchyElementId = null;
     updateHierarchyHintOverlays(snapshot || null);
     flashHierarchyCandidatePanel();
   }
@@ -786,7 +794,9 @@
     setHierarchyPanelExpanded(true);
     var options = candidates.slice(0, 20);
     currentHierarchyCandidateIds = options.map(function(element) { return element.id; });
+    currentHierarchyHintIds = currentHierarchyCandidateIds.slice();
     selectedHierarchyElementId = options[0] ? options[0].id : null;
+    hoveredHierarchyElementId = null;
     hierarchyCandidateList.innerHTML = options.map(function(element) {
       return '<button type="button" class="hierarchy-candidate-item" data-hierarchy-element-id="' + escapeHTML(element.id) + '">'
         + '<span class="hierarchy-candidate-title">' + escapeHTML(hierarchyElementTitle(element)) + '</span>'

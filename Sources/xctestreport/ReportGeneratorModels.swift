@@ -91,6 +91,7 @@ extension XCTestReport {
         let startTime: Double?
         let testDescription: String
         let testIdentifier: String
+        let testIdentifierURL: String?
         let testName: String
         let testPlanConfigurations: [TestPlanConfiguration]
         let testResult: String
@@ -115,8 +116,11 @@ extension XCTestReport {
     }
 
     struct TestRunChildDetail: Decodable {
+        let children: [TestRunChildDetail]?
         let name: String
         let nodeType: String
+        let result: String?
+        let url: String?
     }
 
     struct TestHistory {

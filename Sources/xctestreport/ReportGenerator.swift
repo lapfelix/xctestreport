@@ -231,6 +231,16 @@ extension XCTestReport {
                     }
 
                     if result != "Passed" {
+                        if let testRuns = testDetails?.testRuns {
+                            let sourceReferenceHtml = renderSourceReferenceSection(
+                                from: testRuns,
+                                testIdentifierURL: testDetails?.testIdentifierURL
+                            )
+                            if !sourceReferenceHtml.isEmpty {
+                                failureInfo += sourceReferenceHtml
+                            }
+                        }
+
                         let sourceLocationsHtml = renderSourceLocationSection(
                             candidateTexts: sourceLocationCandidateTexts)
                         if !sourceLocationsHtml.isEmpty {

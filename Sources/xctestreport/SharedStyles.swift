@@ -213,6 +213,49 @@ let sharedStyles = """
         font-size: 0.9rem;
     }
 
+    .source-ref-list {
+        margin: 0 0 10px 18px;
+        padding: 0;
+        display: grid;
+        gap: 6px;
+    }
+
+    .source-ref-list li {
+        line-height: 1.35;
+    }
+
+    .source-ref-code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+        font-size: 0.82rem;
+    }
+
+    .source-ref-line {
+        display: inline-block;
+        margin-left: 6px;
+        padding: 0 6px;
+        border-radius: 999px;
+        border: 1px solid #CAD6E8;
+        background: #F1F5FC;
+        color: #2B456F;
+        font-size: 0.7rem;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        line-height: 1.35;
+    }
+
+    .source-ref-line.source-ref-line-missing {
+        color: #8A5A5A;
+        border-color: #E4CACA;
+        background: #FAF1F1;
+    }
+
+    .source-ref-file {
+        margin-left: 6px;
+        color: #66758D;
+        font-size: 0.75rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+
     .test-main-content {
         min-height: 0;
         display: flex;
@@ -1837,6 +1880,22 @@ let sharedStyles = """
             background: #171717;
             border-color: #424242;
             box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+        }
+
+        .source-ref-line {
+            border-color: #475B7E;
+            background: #1C2A40;
+            color: #D4E3FF;
+        }
+
+        .source-ref-line.source-ref-line-missing {
+            color: #F2BBBB;
+            border-color: #6B4A4A;
+            background: #2A1F1F;
+        }
+
+        .source-ref-file {
+            color: #B6C1D4;
         }
 
         .video-card {

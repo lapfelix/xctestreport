@@ -178,12 +178,12 @@ extension XCTestReport {
     }
 
     struct AttachmentManifestEntry: Decodable {
-        let attachments: [AttachmentManifestItem]
+        var attachments: [AttachmentManifestItem]
         let testIdentifier: String
     }
 
     struct AttachmentManifestItem: Decodable {
-        let exportedFileName: String
+        var exportedFileName: String
         let isAssociatedWithFailure: Bool?
         let suggestedHumanReadableName: String?
     }

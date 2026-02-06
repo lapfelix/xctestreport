@@ -250,7 +250,9 @@ extension XCTestReport {
         at filePath: String, snapshotId: String, label: String, timestamp: Double,
         failureAssociated: Bool
     ) -> UIHierarchySnapshot? {
-        guard let content = try? String(contentsOfFile: filePath, encoding: .utf8) else { return nil }
+        guard let data = readAttachmentData(at: filePath),
+            let content = String(data: data, encoding: .utf8)
+        else { return nil }
 
         let linePattern =
             #"^(\s*)(.+?),\s*0x[0-9A-Fa-f]+,\s*\{\{(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)\},\s*\{(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)\}\}(?:,\s*(.*?))?\s*<.*$"#
@@ -461,10 +463,38 @@ extension XCTestReport {
         return nil
     }
 
+    func readAttachmentData(at filePath: String) -> Data? {
+        let fileURL = URL(fileURLWithPath: filePath)
+        if fileURL.pathExtension.caseInsensitiveCompare("gz") != .orderedSame {
+            return FileManager.default.contents(atPath: filePath)
+        }
+
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        task.arguments = ["gunzip", "-c", filePath]
+
+        let outputPipe = Pipe()
+        let errorPipe = Pipe()
+        task.standardOutput = outputPipe
+        task.standardError = errorPipe
+
+        do {
+            try task.run()
+        } catch {
+            return nil
+        }
+
+        let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
+        _ = errorPipe.fileHandleForReading.readDataToEndOfFile()
+        task.waitUntilExit()
+        guard task.terminationStatus == 0, !data.isEmpty else { return nil }
+        return data
+    }
+
     func parseSynthesizedEventGesture(
         at filePath: String, baseTimestamp: Double
     ) -> TouchGestureOverlay? {
-        guard let data = FileManager.default.contents(atPath: filePath) else { return nil }
+        guard let data = readAttachmentData(at: filePath) else { return nil }
         let plistObject = (try? PropertyListSerialization.propertyList(
             from: data, options: [], format: nil))
         guard let plistObject else { return nil }

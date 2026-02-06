@@ -5,6 +5,10 @@ private let testDetailsCacheLock = NSLock()
 private var testDetailsCache = [String: XCTestReport.TestDetails]()
 private let testActivitiesCacheLock = NSLock()
 private var testActivitiesCache = [String: XCTestReport.TestActivities]()
+private let previousRunsCacheLock = NSLock()
+private var previousRunsCache = [String: [XCTestReport.TestRunDetail]]()
+private let previousRunsDirsCacheLock = NSLock()
+private var previousRunsDirsCache = [String: [String]]()
 
 extension XCTestReport {
     func shell(_ args: [String], outputFile: String? = nil, captureOutput: Bool = true) -> (
@@ -201,45 +205,74 @@ extension XCTestReport {
     }
 
     func getPreviousRuns(for testIdentifier: String) -> [TestRunDetail] {
-        var previousRuns = [TestRunDetail]()
         let fileManager = FileManager.default
         let parentDir = (outputDir as NSString).deletingLastPathComponent
         let currentDirName = (outputDir as NSString).lastPathComponent
+        let previousRunsCacheKey = "\(parentDir)|\(currentDirName)|\(testIdentifier)"
 
-        if let contents = try? fileManager.contentsOfDirectory(atPath: parentDir) {
-            let previousDirs =
-                contents
-                .filter { entry in
-                    guard entry != currentDirName && entry != ".DS_Store" else { return false }
-                    let fullPath = (parentDir as NSString).appendingPathComponent(entry)
-                    var isDirectory: ObjCBool = false
-                    guard fileManager.fileExists(atPath: fullPath, isDirectory: &isDirectory) else {
-                        return false
-                    }
-                    return isDirectory.boolValue
-                }
-                .sorted()
-                .reversed()
+        previousRunsCacheLock.lock()
+        if let cached = previousRunsCache[previousRunsCacheKey] {
+            previousRunsCacheLock.unlock()
+            return cached
+        }
+        previousRunsCacheLock.unlock()
 
-            for dir in previousDirs.prefix(10) {
-                let testDetailsPath = (parentDir as NSString).appendingPathComponent(
-                    "\(dir)/test_details/\(testIdentifier.replacingOccurrences(of: "/", with: "_")).json"
-                )
-
-                if fileManager.fileExists(atPath: testDetailsPath) {
-                    do {
-                        let data = try Data(contentsOf: URL(fileURLWithPath: testDetailsPath))
-                        let testDetails = try JSONDecoder().decode(TestDetails.self, from: data)
-
-                        if let testRuns = testDetails.testRuns {
-                            previousRuns.append(contentsOf: testRuns)
+        let dirsCacheKey = "\(parentDir)|\(currentDirName)"
+        let previousDirs: [String]
+        previousRunsDirsCacheLock.lock()
+        if let cached = previousRunsDirsCache[dirsCacheKey] {
+            previousDirs = cached
+            previousRunsDirsCacheLock.unlock()
+        } else {
+            previousRunsDirsCacheLock.unlock()
+            let discoveredDirs: [String]
+            if let contents = try? fileManager.contentsOfDirectory(atPath: parentDir) {
+                discoveredDirs =
+                    contents
+                    .filter { entry in
+                        guard entry != currentDirName && entry != ".DS_Store" else { return false }
+                        let fullPath = (parentDir as NSString).appendingPathComponent(entry)
+                        var isDirectory: ObjCBool = false
+                        guard fileManager.fileExists(atPath: fullPath, isDirectory: &isDirectory)
+                        else {
+                            return false
                         }
-                    } catch {
-                        print("Failed to load previous run details at \(testDetailsPath): \(error)")
+                        return isDirectory.boolValue
                     }
+                    .sorted()
+                    .reversed()
+            } else {
+                discoveredDirs = []
+            }
+            previousRunsDirsCacheLock.lock()
+            previousRunsDirsCache[dirsCacheKey] = discoveredDirs
+            previousRunsDirsCacheLock.unlock()
+            previousDirs = discoveredDirs
+        }
+
+        var previousRuns = [TestRunDetail]()
+        for dir in previousDirs.prefix(10) {
+            let testDetailsPath = (parentDir as NSString).appendingPathComponent(
+                "\(dir)/test_details/\(testIdentifier.replacingOccurrences(of: "/", with: "_")).json"
+            )
+
+            if fileManager.fileExists(atPath: testDetailsPath) {
+                do {
+                    let data = try Data(contentsOf: URL(fileURLWithPath: testDetailsPath))
+                    let testDetails = try JSONDecoder().decode(TestDetails.self, from: data)
+
+                    if let testRuns = testDetails.testRuns {
+                        previousRuns.append(contentsOf: testRuns)
+                    }
+                } catch {
+                    print("Failed to load previous run details at \(testDetailsPath): \(error)")
                 }
             }
         }
+
+        previousRunsCacheLock.lock()
+        previousRunsCache[previousRunsCacheKey] = previousRuns
+        previousRunsCacheLock.unlock()
         return previousRuns
     }
 
@@ -300,6 +333,148 @@ extension XCTestReport {
             print("Failed to parse attachment manifest: \(error)")
             return [:]
         }
+    }
+
+    func compressBinaryPlistAttachmentsForWebPreviewIfPossible() {
+        let attachmentsDir = (outputDir as NSString).appendingPathComponent("attachments")
+        guard FileManager.default.fileExists(atPath: attachmentsDir) else {
+            return
+        }
+
+        guard isGzipInstalled() else {
+            print("Binary plist compression skipped: gzip was not found.")
+            return
+        }
+
+        let fileManager = FileManager.default
+        var candidateCount = 0
+        var compressedCount = 0
+        var skippedCount = 0
+        var failedCount = 0
+        var originalBytesTotal: UInt64 = 0
+        var compressedBytesTotal: UInt64 = 0
+
+        guard let entries = try? fileManager.contentsOfDirectory(atPath: attachmentsDir) else {
+            print("Binary plist compression skipped: unable to read attachments directory.")
+            return
+        }
+
+        let candidateFiles = entries.sorted().compactMap { exportedFileName -> (String, String)? in
+            guard exportedFileName != "manifest.json" else { return nil }
+            let inputPath = (attachmentsDir as NSString).appendingPathComponent(exportedFileName)
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: inputPath, isDirectory: &isDirectory),
+                !isDirectory.boolValue
+            else { return nil }
+            guard isBinaryPlistFile(at: inputPath) else { return nil }
+            return (exportedFileName, inputPath)
+        }
+
+        candidateCount = candidateFiles.count
+        guard !candidateFiles.isEmpty else {
+            print("No binary plist attachments found to compress.")
+            return
+        }
+
+        // `plutil -p` output is large for UI snapshots. Keep worker count bounded.
+        let compressionWorkers = max(1, min(2, ProcessInfo.processInfo.activeProcessorCount))
+        let limiter = DispatchSemaphore(value: compressionWorkers)
+        let statsLock = NSLock()
+        let group = DispatchGroup()
+        let compressionQueue = DispatchQueue(label: "binaryPlistCompression", attributes: .concurrent)
+
+        for (exportedFileName, inputPath) in candidateFiles {
+            limiter.wait()
+            group.enter()
+            compressionQueue.async {
+                defer {
+                    limiter.signal()
+                    group.leave()
+                }
+
+                let localFileManager = FileManager.default
+                let (plutilOutput, plutilExit) = self.shell(["plutil", "-p", inputPath])
+                guard plutilExit == 0, let plutilOutput,
+                    let previewData = plutilOutput.data(using: .utf8),
+                    !previewData.isEmpty
+                else {
+                    statsLock.lock()
+                    failedCount += 1
+                    statsLock.unlock()
+                    return
+                }
+
+                let tempPlainPath = (attachmentsDir as NSString).appendingPathComponent(
+                    ".plist-preview-\(UUID().uuidString).txt")
+                let tempCompressedPath = tempPlainPath + ".gz"
+                defer {
+                    try? localFileManager.removeItem(atPath: tempPlainPath)
+                    try? localFileManager.removeItem(atPath: tempCompressedPath)
+                }
+
+                do {
+                    try previewData.write(to: URL(fileURLWithPath: tempPlainPath), options: .atomic)
+                } catch {
+                    statsLock.lock()
+                    failedCount += 1
+                    statsLock.unlock()
+                    return
+                }
+                guard self.gzipCompressFile(inputPath: tempPlainPath, outputPath: tempCompressedPath)
+                else {
+                    statsLock.lock()
+                    failedCount += 1
+                    statsLock.unlock()
+                    return
+                }
+
+                guard let originalSize = self.fileSizeInBytes(at: inputPath),
+                    let compressedSize = self.fileSizeInBytes(at: tempCompressedPath)
+                else {
+                    statsLock.lock()
+                    failedCount += 1
+                    statsLock.unlock()
+                    return
+                }
+                guard compressedSize < originalSize else {
+                    statsLock.lock()
+                    skippedCount += 1
+                    statsLock.unlock()
+                    return
+                }
+
+                do {
+                    try localFileManager.removeItem(atPath: inputPath)
+                    try localFileManager.moveItem(atPath: tempCompressedPath, toPath: inputPath)
+                    statsLock.lock()
+                    compressedCount += 1
+                    originalBytesTotal += originalSize
+                    compressedBytesTotal += compressedSize
+                    statsLock.unlock()
+                } catch {
+                    statsLock.lock()
+                    failedCount += 1
+                    statsLock.unlock()
+                    print("Binary plist compression replace failed for \(exportedFileName): \(error)")
+                }
+            }
+        }
+
+        group.wait()
+
+        let ratioText: String
+        if compressedBytesTotal > 0 {
+            let ratio = Double(originalBytesTotal) / Double(compressedBytesTotal)
+            ratioText = String(format: "%.2fx", ratio)
+        } else {
+            ratioText = "n/a"
+        }
+
+        print(
+            """
+            Binary plist compression complete: candidates \(candidateCount), compressed \(compressedCount), skipped \(skippedCount), failed \(failedCount), ratio \(ratioText).
+            """
+        )
     }
 
     private func compressExportedVideosIfPossible(
@@ -513,6 +688,54 @@ extension XCTestReport {
     private func isFFmpegInstalled() -> Bool {
         let (_, exitCode) = shell(["ffmpeg", "-version"])
         return exitCode == 0
+    }
+
+    private func isGzipInstalled() -> Bool {
+        let (_, exitCode) = shell(["gzip", "--version"])
+        return exitCode == 0
+    }
+
+    private func isBinaryPlistFile(at path: String) -> Bool {
+        guard let fileHandle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: path)) else {
+            return false
+        }
+        defer {
+            try? fileHandle.close()
+        }
+
+        let headerData = fileHandle.readData(ofLength: 8)
+        return headerData == Data("bplist00".utf8)
+    }
+
+    private func gzipCompressFile(inputPath: String, outputPath: String) -> Bool {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        task.arguments = ["gzip", "-9", "-c", inputPath]
+
+        let outputPipe = Pipe()
+        let errorPipe = Pipe()
+        task.standardOutput = outputPipe
+        task.standardError = errorPipe
+
+        do {
+            try task.run()
+        } catch {
+            return false
+        }
+
+        let compressedData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+        _ = errorPipe.fileHandleForReading.readDataToEndOfFile()
+        task.waitUntilExit()
+        guard task.terminationStatus == 0, !compressedData.isEmpty else {
+            return false
+        }
+
+        do {
+            try compressedData.write(to: URL(fileURLWithPath: outputPath), options: .atomic)
+            return true
+        } catch {
+            return false
+        }
     }
 
     private func runFFmpegCommand(

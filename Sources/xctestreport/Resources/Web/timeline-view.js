@@ -261,6 +261,25 @@
     previewText.style.display = 'block';
   }
 
+  function maybeDecompressGzipBuffer(buffer) {
+    var bytes = new Uint8Array(buffer);
+    var isGzip = bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
+    if (!isGzip) {
+      return Promise.resolve(buffer);
+    }
+    if (typeof DecompressionStream !== 'function') {
+      return Promise.reject(new Error('This browser cannot decompress gzip plist previews.'));
+    }
+
+    try {
+      var compressedBlob = new Blob([buffer]);
+      var decompressedStream = compressedBlob.stream().pipeThrough(new DecompressionStream('gzip'));
+      return new Response(decompressedStream).arrayBuffer();
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
   function loadBinaryPlistPreview(href, requestToken) {
     fetch(href)
       .then(function(response) {
@@ -270,12 +289,35 @@
         return response.arrayBuffer();
       })
       .then(function(buffer) {
+        return maybeDecompressGzipBuffer(buffer);
+      })
+      .then(function(buffer) {
         if (!previewModal || previewModal.hidden || requestToken !== plistPreviewRequestToken) return;
-        if (!globalThis.PlistPreview || typeof globalThis.PlistPreview.parseBinaryPlistToText !== 'function') {
-          throw new Error('Plist parser is unavailable.');
+        var bytes = new Uint8Array(buffer);
+        var isBinaryPlist = bytes.length >= 8
+          && bytes[0] === 0x62
+          && bytes[1] === 0x70
+          && bytes[2] === 0x6c
+          && bytes[3] === 0x69
+          && bytes[4] === 0x73
+          && bytes[5] === 0x74
+          && bytes[6] === 0x30
+          && bytes[7] === 0x30;
+
+        if (isBinaryPlist) {
+          if (!globalThis.PlistPreview || typeof globalThis.PlistPreview.parseBinaryPlistToText !== 'function') {
+            throw new Error('Plist parser is unavailable.');
+          }
+          var parsedText = globalThis.PlistPreview.parseBinaryPlistToText(buffer);
+          setAttachmentTextPreview(parsedText);
+          return;
         }
-        var parsedText = globalThis.PlistPreview.parseBinaryPlistToText(buffer);
-        setAttachmentTextPreview(parsedText);
+
+        var decodedText = new TextDecoder('utf-8').decode(bytes);
+        if (!decodedText || !decodedText.trim()) {
+          throw new Error('Preview payload is empty.');
+        }
+        setAttachmentTextPreview(decodedText);
       })
       .catch(function(error) {
         if (!previewModal || previewModal.hidden || requestToken !== plistPreviewRequestToken) return;

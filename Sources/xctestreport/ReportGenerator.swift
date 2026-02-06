@@ -128,19 +128,29 @@ extension XCTestReport {
         var processedTests = 0
         let processedTestsQueue = DispatchQueue(label: "processedTests")
         let preprocessingGroup = DispatchGroup()
-        let concurrentQueue = DispatchQueue(label: "testPreprocessing", attributes: .concurrent)
-        let maxConcurrent = 1  //ProcessInfo.processInfo.processorCount
+        let preprocessingQueue = DispatchQueue(
+            label: "testPreprocessing", attributes: .concurrent)
+        let suiteQueue = DispatchQueue(label: "suiteGeneration", attributes: .concurrent)
+        let availableCores = max(1, ProcessInfo.processInfo.activeProcessorCount)
+        let preprocessingWorkers = min(4, availableCores)
+        let suiteWorkers = 1  // Keep deterministic suite row order.
 
-        let testsPerCore = (allTests.count + maxConcurrent - 1) / maxConcurrent
-        let testChunks = stride(from: 0, through: allTests.count - 1, by: testsPerCore).map {
-            Array(allTests[$0..<min($0 + testsPerCore, allTests.count)])
+        func chunkTests(_ tests: [TestNode], workerCount: Int) -> [[TestNode]] {
+            guard !tests.isEmpty else { return [] }
+            let boundedWorkers = max(1, workerCount)
+            let chunkSize = max(1, (tests.count + boundedWorkers - 1) / boundedWorkers)
+            return stride(from: 0, to: tests.count, by: chunkSize).map {
+                Array(tests[$0..<min($0 + chunkSize, tests.count)])
+            }
         }
+        let preprocessingChunks = chunkTests(allTests, workerCount: preprocessingWorkers)
+        let suiteChunks = chunkTests(allTests, workerCount: suiteWorkers)
 
-        print("Preprocessing \(allTests.count) tests using \(maxConcurrent) cores...")
+        print("Preprocessing \(allTests.count) tests using \(preprocessingWorkers) cores...")
 
-        for chunk in testChunks {
+        for chunk in preprocessingChunks {
             preprocessingGroup.enter()
-            concurrentQueue.async {
+            preprocessingQueue.async {
                 for test in chunk {
                     let testPageName = "test_\(test.nodeIdentifier ?? test.name).html"
                         .replacingOccurrences(of: "/", with: "_")
@@ -339,7 +349,7 @@ extension XCTestReport {
         let previousResults = findPreviousResults()
 
         // Parallelize test HTML generation for suites
-        print("Processing \(totalTests) tests for suite generation using \(maxConcurrent) cores...")
+        print("Processing \(totalTests) tests for suite generation using \(suiteWorkers) cores...")
 
         let suiteHTMLQueue = DispatchQueue(label: "suiteHTML")
         var suiteSections = [String: [String]](minimumCapacity: groupedTests.count)
@@ -402,9 +412,9 @@ extension XCTestReport {
         }
 
         let suiteGroup = DispatchGroup()
-        for chunk in testChunks {
+        for chunk in suiteChunks {
             suiteGroup.enter()
-            concurrentQueue.async {
+            suiteQueue.async {
                 for test in chunk {
                     let suite =
                         test.nodeIdentifier?.split(separator: "/").first.map(String.init)
@@ -605,6 +615,10 @@ extension XCTestReport {
 
         let indexPath = (outputDir as NSString).appendingPathComponent("index.html")
         try indexHTML.write(toFile: indexPath, atomically: true, encoding: .utf8)
+
+        // Store large binary plist attachments as gzip-compressed textual previews
+        // after timeline extraction is complete.
+        compressBinaryPlistAttachmentsForWebPreviewIfPossible()
 
         print("HTML report generated at \(indexPath)")
     }

@@ -35,7 +35,7 @@ Web UI assets are now file-based (not embedded as large Swift strings):
 - Stylesheet: `Sources/xctestreport/Resources/Web/report.css`
 - Page behavior scripts: `Sources/xctestreport/Resources/Web/index-page.js`, `Sources/xctestreport/Resources/Web/timeline-view.js`, and `Sources/xctestreport/Resources/Web/plist-preview.js`
 - Mobile-first rendering: test tables collapse into labeled cards on narrow screens; detail timeline reflows to avoid clipping.
-- Binary plist attachments are parsed in-browser on demand when previewing (no pre-expanded `.preview.txt` files generated during export).
+- Binary plist attachments are converted to textual previews and then gzip-compressed in place at the end of report generation; preview content is decompressed in-browser on demand.
 
 Rendering flow:
 
@@ -63,6 +63,8 @@ swift run xctestreport /path/to/results.xcresult /tmp/xctestreport-output --comp
 ```
 
 If `--compress-video` is set but `ffmpeg` is not installed, compression is skipped and report generation continues.
+
+If plist attachment payloads are compressed, preview requires browser `DecompressionStream` support.
 
 ## Installation
 

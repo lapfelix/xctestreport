@@ -267,6 +267,31 @@ extension XCTestReport {
             let points: [TouchGesturePoint]
         }
 
+        struct UIHierarchyElement: Codable {
+            let id: String
+            let depth: Int
+            let role: String
+            let name: String?
+            let label: String?
+            let identifier: String?
+            let value: String?
+            let x: Double
+            let y: Double
+            let width: Double
+            let height: Double
+            let properties: [String: String]
+        }
+
+        struct UIHierarchySnapshot: Codable {
+            let id: String
+            let label: String
+            let time: Double
+            let width: Double
+            let height: Double
+            let failureAssociated: Bool
+            let elements: [UIHierarchyElement]
+        }
+
         func shell(_ args: [String], outputFile: String? = nil, captureOutput: Bool = true) -> (
             String?, Int32
         ) {
@@ -857,6 +882,169 @@ extension XCTestReport {
             }
         }
 
+        func hierarchySnapshotDisplayLabel(from attachmentName: String) -> String {
+            let prefix = "app ui hierarchy for "
+            let lowered = attachmentName.lowercased()
+            guard let range = lowered.range(of: prefix) else { return "UI Hierarchy" }
+
+            let startIndex = range.upperBound
+            let originalSuffix = attachmentName[startIndex...].trimmingCharacters(
+                in: .whitespacesAndNewlines)
+            guard !originalSuffix.isEmpty else { return "UI Hierarchy" }
+
+            let components = originalSuffix.split(separator: ".").map { String($0) }
+            if let last = components.last, !last.isEmpty {
+                return "UI Hierarchy (\(last))"
+            }
+            return "UI Hierarchy (\(originalSuffix))"
+        }
+
+        func parseHierarchyInlineProperties(_ metadata: String) -> [String: String] {
+            let pattern =
+                #"(identifier|label|value|title|placeholderValue|hint|traits):\s*(?:'([^']*)'|([^,]+))"#
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return [:] }
+            let nsRange = NSRange(metadata.startIndex..<metadata.endIndex, in: metadata)
+            let matches = regex.matches(in: metadata, range: nsRange)
+            guard !matches.isEmpty else { return [:] }
+
+            var properties = [String: String]()
+            for match in matches {
+                guard let keyRange = Range(match.range(at: 1), in: metadata) else { continue }
+                let key = String(metadata[keyRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+                var value = ""
+                if let quotedRange = Range(match.range(at: 2), in: metadata) {
+                    value = String(metadata[quotedRange])
+                } else if let plainRange = Range(match.range(at: 3), in: metadata) {
+                    if plainRange.lowerBound != plainRange.upperBound {
+                        value = String(metadata[plainRange])
+                    }
+                }
+
+                let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !key.isEmpty, !trimmedValue.isEmpty {
+                    properties[key] = trimmedValue
+                }
+            }
+
+            return properties
+        }
+
+        func splitHierarchyRoleAndName(_ value: String) -> (role: String, name: String?) {
+            guard let openParen = value.lastIndex(of: "("), value.hasSuffix(")"),
+                openParen > value.startIndex
+            else { return (value, nil) }
+
+            let rolePart = value[..<openParen].trimmingCharacters(in: .whitespacesAndNewlines)
+            let namePart = value[value.index(after: openParen)..<value.index(before: value.endIndex)]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !rolePart.isEmpty else { return (value, nil) }
+            return (rolePart, namePart.isEmpty ? nil : namePart)
+        }
+
+        func parseHierarchyElementIdentifier(from line: String) -> String? {
+            let pattern = #"elementOrHash\.elementID:\s*([0-9.]+)"#
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+            let nsRange = NSRange(line.startIndex..<line.endIndex, in: line)
+            guard let match = regex.firstMatch(in: line, range: nsRange),
+                let valueRange = Range(match.range(at: 1), in: line)
+            else { return nil }
+            return String(line[valueRange])
+        }
+
+        func parseUIHierarchySnapshot(
+            at filePath: String, snapshotId: String, label: String, timestamp: Double,
+            failureAssociated: Bool
+        ) -> UIHierarchySnapshot? {
+            guard let content = try? String(contentsOfFile: filePath, encoding: .utf8) else { return nil }
+
+            let linePattern =
+                #"^(\s*)(.+?),\s*0x[0-9A-Fa-f]+,\s*\{\{(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)\},\s*\{(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)\}\}(?:,\s*(.*?))?\s*<.*$"#
+            guard let lineRegex = try? NSRegularExpression(pattern: linePattern) else { return nil }
+
+            var elements = [UIHierarchyElement]()
+            elements.reserveCapacity(128)
+            var snapshotWidth: Double = 0
+            var snapshotHeight: Double = 0
+            var maxRight: Double = 0
+            var maxBottom: Double = 0
+
+            let lines = content.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+            for (index, line) in lines.enumerated() {
+                let nsRange = NSRange(line.startIndex..<line.endIndex, in: line)
+                guard let match = lineRegex.firstMatch(in: line, range: nsRange) else { continue }
+
+                func capture(_ group: Int) -> String? {
+                    guard let range = Range(match.range(at: group), in: line) else { return nil }
+                    return String(line[range])
+                }
+
+                let indent = capture(1) ?? ""
+                let rawRole = (capture(2) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !rawRole.isEmpty else { continue }
+                guard let x = Double(capture(3) ?? ""), let y = Double(capture(4) ?? ""),
+                    let width = Double(capture(5) ?? ""), let height = Double(capture(6) ?? "")
+                else { continue }
+
+                let metadata = (capture(7) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let depth = max(0, indent.count / 2)
+                let (role, name) = splitHierarchyRoleAndName(rawRole)
+                var properties = parseHierarchyInlineProperties(metadata)
+                let labelValue = properties["label"]
+                let identifierValue = properties["identifier"]
+                let valueValue = properties["value"]
+                let elementIdentifier =
+                    parseHierarchyElementIdentifier(from: line)
+                    ?? "\(snapshotId)-\(index + 1)"
+
+                if !metadata.isEmpty {
+                    properties["metadata"] = metadata
+                }
+                properties["frame"] = "{{\(x), \(y)}, {\(width), \(height)}}"
+                properties["depth"] = String(depth)
+
+                if snapshotWidth <= 0, snapshotHeight <= 0, role.lowercased().hasPrefix("window"),
+                    width > 1, height > 1
+                {
+                    snapshotWidth = width
+                    snapshotHeight = height
+                }
+                maxRight = max(maxRight, x + width)
+                maxBottom = max(maxBottom, y + height)
+
+                elements.append(
+                    UIHierarchyElement(
+                        id: elementIdentifier,
+                        depth: depth,
+                        role: role,
+                        name: name,
+                        label: labelValue,
+                        identifier: identifierValue,
+                        value: valueValue,
+                        x: x,
+                        y: y,
+                        width: width,
+                        height: height,
+                        properties: properties
+                    ))
+            }
+
+            guard !elements.isEmpty else { return nil }
+
+            let normalizedWidth = snapshotWidth > 1 ? snapshotWidth : maxRight
+            let normalizedHeight = snapshotHeight > 1 ? snapshotHeight : maxBottom
+            guard normalizedWidth > 1, normalizedHeight > 1 else { return nil }
+
+            return UIHierarchySnapshot(
+                id: snapshotId,
+                label: label,
+                time: timestamp,
+                width: normalizedWidth,
+                height: normalizedHeight,
+                failureAssociated: failureAssociated,
+                elements: elements
+            )
+        }
+
         func jsStringEscape(_ input: String) -> String {
             return input
                 .replacingOccurrences(of: "\\", with: "\\\\")
@@ -1145,6 +1333,50 @@ extension XCTestReport {
             return sortedGestures
         }
 
+        func buildUIHierarchySnapshots(from nodes: [TimelineNode]) -> [UIHierarchySnapshot] {
+            var flatNodes = [TimelineNode]()
+            flattenTimelineNodes(nodes, into: &flatNodes)
+
+            let attachmentRoot = (outputDir as NSString).appendingPathComponent("attachments")
+            var snapshots = [UIHierarchySnapshot]()
+            var seenSnapshotKeys = Set<String>()
+
+            for node in flatNodes {
+                for attachment in node.attachments {
+                    guard attachment.name.localizedCaseInsensitiveContains("app ui hierarchy"),
+                        let relativePath = attachment.relativePath
+                    else { continue }
+
+                    let fileName = relativePath
+                        .replacingOccurrences(of: "attachments/", with: "")
+                        .removingPercentEncoding ?? relativePath.replacingOccurrences(
+                        of: "attachments/", with: "")
+                    let filePath = (attachmentRoot as NSString).appendingPathComponent(fileName)
+                    guard let timestamp = attachment.timestamp ?? node.timestamp else { continue }
+
+                    let snapshotKey = "\(fileName)|\(String(format: "%.6f", timestamp))"
+                    guard !seenSnapshotKeys.contains(snapshotKey) else { continue }
+                    seenSnapshotKeys.insert(snapshotKey)
+
+                    let label = hierarchySnapshotDisplayLabel(from: attachment.name)
+                    guard
+                        let snapshot = parseUIHierarchySnapshot(
+                            at: filePath,
+                            snapshotId: snapshotKey.replacingOccurrences(of: "|", with: "_"),
+                            label: label,
+                            timestamp: timestamp,
+                            failureAssociated: attachment.failureAssociated)
+                    else { continue }
+                    snapshots.append(snapshot)
+                }
+            }
+
+            return snapshots.sorted { lhs, rhs in
+                if lhs.time == rhs.time { return lhs.label < rhs.label }
+                return lhs.time < rhs.time
+            }
+        }
+
         func buildAttachmentLookup(
             for testIdentifier: String, attachmentsByTestIdentifier: [String: [AttachmentManifestItem]]
         ) -> [String: [AttachmentManifestItem]] {
@@ -1366,12 +1598,18 @@ extension XCTestReport {
                 let hasInteractionAttachment = node.attachments.contains {
                     $0.name.lowercased().contains("synthesized event")
                 }
+                let hasHierarchyAttachment = node.attachments.contains {
+                    $0.name.lowercased().contains("app ui hierarchy")
+                }
                 if loweredTitle.hasPrefix("tap ")
                     || loweredTitle.hasPrefix("swipe ")
                     || loweredTitle.contains("synthesize event")
                     || hasInteractionAttachment
                 {
                     eventClassList.append("timeline-interaction")
+                }
+                if hasHierarchyAttachment {
+                    eventClassList.append("timeline-hierarchy")
                 }
                 if hasChildren {
                     eventClassList.append("timeline-has-children")
@@ -1467,6 +1705,7 @@ extension XCTestReport {
                 testIdentifier: testIdentifier,
                 attachmentsByTestIdentifier: attachmentsByTestIdentifier
             )
+            let hierarchySnapshots = buildUIHierarchySnapshots(from: collapsedTimelineNodes)
             let touchGestureJSON: String = {
                 guard !touchGestures.isEmpty else { return "[]" }
                 guard let encoded = try? JSONEncoder().encode(touchGestures) else { return "[]" }
@@ -1475,6 +1714,11 @@ extension XCTestReport {
             let screenshotJSON: String = {
                 guard !screenshotSources.isEmpty else { return "[]" }
                 guard let encoded = try? JSONEncoder().encode(screenshotSources) else { return "[]" }
+                return String(data: encoded, encoding: .utf8) ?? "[]"
+            }()
+            let hierarchyJSON: String = {
+                guard !hierarchySnapshots.isEmpty else { return "[]" }
+                guard let encoded = try? JSONEncoder().encode(hierarchySnapshots) else { return "[]" }
                 return String(data: encoded, encoding: .utf8) ?? "[]"
             }()
 
@@ -1530,6 +1774,10 @@ extension XCTestReport {
                                     <a href="\(relativePath)">Download video</a>
                                 </video>
                                 <div class="touch-overlay-layer" data-touch-overlay></div>
+                                <div class="hierarchy-overlay-layer" data-hierarchy-overlay>
+                                    <div class="hierarchy-highlight-box" data-hierarchy-highlight hidden></div>
+                                    <div class="hierarchy-candidate-menu" data-hierarchy-menu hidden></div>
+                                </div>
                             </div>
                         </div>
                         """
@@ -1545,6 +1793,10 @@ extension XCTestReport {
                         <div class="timeline-video-frame">
                             <img class="timeline-still" data-still-frame src="\(firstScreenshot.src)" alt="\(firstAlt)">
                             <div class="touch-overlay-layer" data-touch-overlay></div>
+                            <div class="hierarchy-overlay-layer" data-hierarchy-overlay>
+                                <div class="hierarchy-highlight-box" data-hierarchy-highlight hidden></div>
+                                <div class="hierarchy-candidate-menu" data-hierarchy-menu hidden></div>
+                            </div>
                         </div>
                     </div>
                     """
@@ -1571,6 +1823,15 @@ extension XCTestReport {
                     <div class="video-panel">
                         \(videoSelector)
                         \(videoElements)
+                        <div class="hierarchy-toolbar" data-hierarchy-toolbar hidden>
+                            <span class="hierarchy-toolbar-dot" aria-hidden="true"></span>
+                            <span data-hierarchy-status>No hierarchy snapshot near this moment.</span>
+                        </div>
+                        <div class="hierarchy-inspector" data-hierarchy-inspector hidden>
+                            <div class="hierarchy-inspector-title" data-hierarchy-selected-title>UI Hierarchy</div>
+                            <div class="hierarchy-inspector-subtitle" data-hierarchy-selected-subtitle>Click on the media to inspect overlapping elements.</div>
+                            <div class="hierarchy-inspector-properties" data-hierarchy-properties></div>
+                        </div>
                     </div>
                     """
 
@@ -1650,6 +1911,12 @@ extension XCTestReport {
                   var previewVideo = previewModal ? previewModal.querySelector('[data-attachment-video]') : null;
                   var previewFrame = previewModal ? previewModal.querySelector('[data-attachment-frame]') : null;
                   var previewEmpty = previewModal ? previewModal.querySelector('[data-attachment-empty]') : null;
+                  var hierarchyToolbar = root.querySelector('[data-hierarchy-toolbar]');
+                  var hierarchyStatus = hierarchyToolbar ? hierarchyToolbar.querySelector('[data-hierarchy-status]') : null;
+                  var hierarchyInspector = root.querySelector('[data-hierarchy-inspector]');
+                  var hierarchySelectedTitle = hierarchyInspector ? hierarchyInspector.querySelector('[data-hierarchy-selected-title]') : null;
+                  var hierarchySelectedSubtitle = hierarchyInspector ? hierarchyInspector.querySelector('[data-hierarchy-selected-subtitle]') : null;
+                  var hierarchyProperties = hierarchyInspector ? hierarchyInspector.querySelector('[data-hierarchy-properties]') : null;
                   var selector = root.querySelector('[data-video-selector]');
                   var cards = Array.prototype.slice.call(root.querySelectorAll('[data-video-index]'));
                   var events = [\(eventData)];
@@ -1657,6 +1924,7 @@ extension XCTestReport {
                   var mediaMode = root.dataset.mediaMode || 'video';
                   var touchGestures = \(touchGestureJSON);
                   var screenshots = \(screenshotJSON);
+                  var hierarchySnapshots = \(hierarchyJSON);
                   var timelineBase = parseFloat(root.dataset.timelineBase || '0');
                   var fallbackVideoBase = parseFloat(root.dataset.videoBase || '0');
                   var activeIndex = 0;
@@ -1673,6 +1941,10 @@ extension XCTestReport {
                   var TOUCH_RELEASE_DURATION = 0.18;
                   var TOUCH_PLAYBACK_LEAD_WINDOW = 0.06;
                   var SCRUB_PREVIEW_WINDOW = 0.22;
+                  var HIERARCHY_MATCH_WINDOW = 0.30;
+                  var currentHierarchySnapshotId = null;
+                  var selectedHierarchyElementId = null;
+                  var hoveredHierarchyElementId = null;
                   var PLAY_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 6V18L18 12Z"></path></svg>';
                   var PAUSE_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="6" width="4" height="12" rx="1"></rect><rect x="13" y="6" width="4" height="12" rx="1"></rect></svg>';
 
@@ -1814,6 +2086,311 @@ extension XCTestReport {
                         card.style.setProperty('--media-aspect', ratioValue);
                       }
                     }
+                  }
+
+                  function escapeHTML(value) {
+                    return String(value == null ? '' : value)
+                      .replace(/&/g, '&amp;')
+                      .replace(/</g, '&lt;')
+                      .replace(/>/g, '&gt;')
+                      .replace(/\"/g, '&quot;')
+                      .replace(/'/g, '&#39;');
+                  }
+
+                  function getActiveHierarchyLayer() {
+                    var card = getActiveVideoCard();
+                    return card ? card.querySelector('[data-hierarchy-overlay]') : null;
+                  }
+
+                  function getActiveHierarchyHighlight() {
+                    var layer = getActiveHierarchyLayer();
+                    return layer ? layer.querySelector('[data-hierarchy-highlight]') : null;
+                  }
+
+                  function getActiveHierarchyMenu() {
+                    var layer = getActiveHierarchyLayer();
+                    return layer ? layer.querySelector('[data-hierarchy-menu]') : null;
+                  }
+
+                  function closeHierarchyMenu() {
+                    var menu = getActiveHierarchyMenu();
+                    if (!menu) return;
+                    menu.hidden = true;
+                    menu.innerHTML = '';
+                    hoveredHierarchyElementId = null;
+                  }
+
+                  function hierarchySnapshotById(snapshotId) {
+                    if (!snapshotId) return null;
+                    for (var i = 0; i < hierarchySnapshots.length; i += 1) {
+                      if (hierarchySnapshots[i].id === snapshotId) return hierarchySnapshots[i];
+                    }
+                    return null;
+                  }
+
+                  function hierarchySnapshotForAbsoluteTime(absoluteTime) {
+                    if (!hierarchySnapshots.length) return null;
+                    var best = null;
+                    var bestDelta = HIERARCHY_MATCH_WINDOW + 1;
+                    for (var i = 0; i < hierarchySnapshots.length; i += 1) {
+                      var snapshot = hierarchySnapshots[i];
+                      var delta = Math.abs((snapshot.time || 0) - absoluteTime);
+                      if (delta > HIERARCHY_MATCH_WINDOW) continue;
+                      if (delta < bestDelta - 0.0001) {
+                        best = snapshot;
+                        bestDelta = delta;
+                      } else if (Math.abs(delta - bestDelta) <= 0.0001 && best && (snapshot.time || 0) > (best.time || 0)) {
+                        best = snapshot;
+                      }
+                    }
+                    return best;
+                  }
+
+                  function hierarchyElementById(snapshot, elementId) {
+                    if (!snapshot || !elementId || !snapshot.elements) return null;
+                    for (var i = 0; i < snapshot.elements.length; i += 1) {
+                      if (snapshot.elements[i].id === elementId) return snapshot.elements[i];
+                    }
+                    return null;
+                  }
+
+                  function hierarchyElementTitle(element) {
+                    if (!element) return 'UI Element';
+                    var descriptor = element.role || 'Element';
+                    if (element.label) return descriptor + ' "' + element.label + '"';
+                    if (element.identifier) return descriptor + ' #' + element.identifier;
+                    if (element.name) return descriptor + ' (' + element.name + ')';
+                    return descriptor;
+                  }
+
+                  function setHierarchyHighlight(snapshot, element) {
+                    var highlight = getActiveHierarchyHighlight();
+                    var media = getActiveMediaElement();
+                    if (!highlight || !media || !snapshot || !element || element.width <= 0 || element.height <= 0 || snapshot.width <= 0 || snapshot.height <= 0) {
+                      if (highlight) highlight.hidden = true;
+                      return;
+                    }
+
+                    var rect = getDisplayedMediaRect(media);
+                    if (rect.width <= 0 || rect.height <= 0) {
+                      highlight.hidden = true;
+                      return;
+                    }
+
+                    var scaleX = rect.width / snapshot.width;
+                    var scaleY = rect.height / snapshot.height;
+                    var left = rect.x + (element.x * scaleX);
+                    var top = rect.y + (element.y * scaleY);
+                    var width = Math.max(2, element.width * scaleX);
+                    var height = Math.max(2, element.height * scaleY);
+
+                    highlight.style.left = left + 'px';
+                    highlight.style.top = top + 'px';
+                    highlight.style.width = width + 'px';
+                    highlight.style.height = height + 'px';
+                    highlight.hidden = false;
+                  }
+
+                  function updateHierarchyInspector(snapshot, element) {
+                    if (!hierarchyToolbar || !hierarchyStatus || !hierarchyInspector || !hierarchySelectedTitle || !hierarchySelectedSubtitle || !hierarchyProperties) return;
+                    if (!hierarchySnapshots.length || mediaMode === 'none') {
+                      hierarchyToolbar.hidden = true;
+                      hierarchyInspector.hidden = true;
+                      hierarchyProperties.innerHTML = '';
+                      return;
+                    }
+
+                    hierarchyToolbar.hidden = false;
+                    if (!snapshot) {
+                      hierarchyStatus.textContent = 'No hierarchy snapshot near this moment.';
+                      hierarchyInspector.hidden = true;
+                      hierarchyProperties.innerHTML = '';
+                      return;
+                    }
+
+                    var offset = Math.max(0, (snapshot.time || 0) - (timelineBase || 0));
+                    var elementCount = snapshot.elements ? snapshot.elements.length : 0;
+                    hierarchyStatus.textContent = snapshot.label + ' @ ' + formatSeconds(offset) + ' (' + elementCount + ' nodes)';
+
+                    hierarchyInspector.hidden = false;
+                    if (!element) {
+                      hierarchySelectedTitle.textContent = snapshot.label;
+                      hierarchySelectedSubtitle.textContent = 'Click inside the media to choose from overlapping elements.';
+                      hierarchyProperties.innerHTML = '<div class="hierarchy-prop-row"><span class="hierarchy-prop-key">Snapshot</span><span class="hierarchy-prop-value">' + escapeHTML(snapshot.label) + '</span></div>'
+                        + '<div class="hierarchy-prop-row"><span class="hierarchy-prop-key">Nodes</span><span class="hierarchy-prop-value">' + String(elementCount) + '</span></div>';
+                      return;
+                    }
+
+                    hierarchySelectedTitle.textContent = hierarchyElementTitle(element);
+                    hierarchySelectedSubtitle.textContent = 'Frame {{' + Number(element.x).toFixed(1) + ', ' + Number(element.y).toFixed(1) + '}, {' + Number(element.width).toFixed(1) + ', ' + Number(element.height).toFixed(1) + '}}';
+
+                    var rows = [];
+                    function pushRow(key, value) {
+                      if (value == null || value === '') return;
+                      rows.push('<div class="hierarchy-prop-row"><span class="hierarchy-prop-key">' + escapeHTML(key) + '</span><span class="hierarchy-prop-value">' + escapeHTML(value) + '</span></div>');
+                    }
+
+                    pushRow('Role', element.role || '');
+                    pushRow('Name', element.name || '');
+                    pushRow('Label', element.label || '');
+                    pushRow('Identifier', element.identifier || '');
+                    pushRow('Value', element.value || '');
+                    pushRow('Element ID', element.id || '');
+                    pushRow('Depth', String(element.depth == null ? '' : element.depth));
+
+                    var properties = element.properties || {};
+                    var propertyKeys = Object.keys(properties).sort();
+                    propertyKeys.forEach(function(key) {
+                      if (key === 'depth') return;
+                      var normalized = key.toLowerCase();
+                      if (normalized === 'label' || normalized === 'identifier' || normalized === 'value') return;
+                      pushRow(key, properties[key]);
+                    });
+
+                    hierarchyProperties.innerHTML = rows.join('');
+                  }
+
+                  function hierarchyElementsAtPoint(snapshot, x, y) {
+                    if (!snapshot || !snapshot.elements) return [];
+                    var maxElementWidth = snapshot.width * 1.35;
+                    var maxElementHeight = snapshot.height * 1.35;
+                    var seenIds = Object.create(null);
+                    var matches = snapshot.elements.filter(function(element) {
+                      if (!element || !element.id || seenIds[element.id]) return false;
+                      seenIds[element.id] = true;
+                      if (element.width <= 2 || element.height <= 2) return false;
+                      if (element.width > maxElementWidth || element.height > maxElementHeight) return false;
+                      if (element.x > snapshot.width + 20 || element.y > snapshot.height + 20) return false;
+                      if ((element.x + element.width) < -20 || (element.y + element.height) < -20) return false;
+                      return x >= element.x && y >= element.y && x <= (element.x + element.width) && y <= (element.y + element.height);
+                    });
+                    matches.sort(function(a, b) {
+                      var areaA = Math.max(0, a.width * a.height);
+                      var areaB = Math.max(0, b.width * b.height);
+                      if (areaA !== areaB) return areaA - areaB;
+                      return (b.depth || 0) - (a.depth || 0);
+                    });
+                    return matches;
+                  }
+
+                  function openHierarchyCandidateMenu(snapshot, candidates, localX, localY) {
+                    var menu = getActiveHierarchyMenu();
+                    var layer = getActiveHierarchyLayer();
+                    if (!menu || !layer || !candidates.length) return;
+
+                    var options = candidates.slice(0, 14);
+                    menu.innerHTML = options.map(function(element) {
+                      return '<button type="button" class="hierarchy-candidate-item" data-hierarchy-element-id="' + escapeHTML(element.id) + '">'
+                        + '<span class="hierarchy-candidate-title">' + escapeHTML(hierarchyElementTitle(element)) + '</span>'
+                        + '<span class="hierarchy-candidate-frame">{{' + Number(element.x).toFixed(0) + ', ' + Number(element.y).toFixed(0) + '}, {' + Number(element.width).toFixed(0) + ', ' + Number(element.height).toFixed(0) + '}}</span>'
+                        + '</button>';
+                    }).join('');
+                    menu.hidden = false;
+
+                    var maxLeft = Math.max(4, layer.clientWidth - menu.offsetWidth - 4);
+                    var maxTop = Math.max(4, layer.clientHeight - menu.offsetHeight - 4);
+                    menu.style.left = Math.min(maxLeft, Math.max(4, localX + 8)) + 'px';
+                    menu.style.top = Math.min(maxTop, Math.max(4, localY + 8)) + 'px';
+
+                    Array.prototype.forEach.call(menu.querySelectorAll('.hierarchy-candidate-item'), function(button) {
+                      var elementId = button.getAttribute('data-hierarchy-element-id');
+                      button.addEventListener('mouseenter', function() {
+                        hoveredHierarchyElementId = elementId;
+                        updateHierarchyOverlay();
+                      });
+                      button.addEventListener('mouseleave', function() {
+                        hoveredHierarchyElementId = null;
+                        updateHierarchyOverlay();
+                      });
+                      button.addEventListener('click', function(event) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        selectedHierarchyElementId = elementId;
+                        hoveredHierarchyElementId = null;
+                        closeHierarchyMenu();
+                        updateHierarchyOverlay();
+                      });
+                    });
+                  }
+
+                  function handleHierarchyOverlayClick(event, layer) {
+                    if (!layer) return;
+                    var snapshot = hierarchySnapshotById(currentHierarchySnapshotId);
+                    var media = getActiveMediaElement();
+                    if (!snapshot || !media || snapshot.width <= 0 || snapshot.height <= 0) return;
+
+                    var layerRect = layer.getBoundingClientRect();
+                    var localX = event.clientX - layerRect.left;
+                    var localY = event.clientY - layerRect.top;
+                    var mediaRect = getDisplayedMediaRect(media);
+
+                    if (localX < mediaRect.x || localY < mediaRect.y || localX > (mediaRect.x + mediaRect.width) || localY > (mediaRect.y + mediaRect.height)) {
+                      closeHierarchyMenu();
+                      return;
+                    }
+
+                    var normalizedX = (localX - mediaRect.x) / Math.max(1, mediaRect.width);
+                    var normalizedY = (localY - mediaRect.y) / Math.max(1, mediaRect.height);
+                    var hierarchyX = normalizedX * snapshot.width;
+                    var hierarchyY = normalizedY * snapshot.height;
+                    var candidates = hierarchyElementsAtPoint(snapshot, hierarchyX, hierarchyY);
+
+                    if (!candidates.length) {
+                      selectedHierarchyElementId = null;
+                      hoveredHierarchyElementId = null;
+                      closeHierarchyMenu();
+                      updateHierarchyOverlay();
+                      return;
+                    }
+
+                    openHierarchyCandidateMenu(snapshot, candidates, localX, localY);
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }
+
+                  function updateHierarchyOverlay() {
+                    var highlight = getActiveHierarchyHighlight();
+                    var media = getActiveMediaElement();
+                    if (!highlight || !media || !hierarchySnapshots.length || mediaMode === 'none') {
+                      currentHierarchySnapshotId = null;
+                      selectedHierarchyElementId = null;
+                      hoveredHierarchyElementId = null;
+                      closeHierarchyMenu();
+                      if (highlight) highlight.hidden = true;
+                      updateHierarchyInspector(null, null);
+                      return;
+                    }
+
+                    var snapshot = hierarchySnapshotForAbsoluteTime(currentAbsoluteTime());
+                    if (!snapshot) {
+                      if (currentHierarchySnapshotId !== null) {
+                        closeHierarchyMenu();
+                      }
+                      currentHierarchySnapshotId = null;
+                      selectedHierarchyElementId = null;
+                      hoveredHierarchyElementId = null;
+                      highlight.hidden = true;
+                      updateHierarchyInspector(null, null);
+                      return;
+                    }
+
+                    if (snapshot.id !== currentHierarchySnapshotId) {
+                      currentHierarchySnapshotId = snapshot.id;
+                      selectedHierarchyElementId = null;
+                      hoveredHierarchyElementId = null;
+                      closeHierarchyMenu();
+                    }
+
+                    var highlightedElement = hierarchyElementById(snapshot, hoveredHierarchyElementId)
+                      || hierarchyElementById(snapshot, selectedHierarchyElementId);
+                    if (selectedHierarchyElementId && !hierarchyElementById(snapshot, selectedHierarchyElementId)) {
+                      selectedHierarchyElementId = null;
+                    }
+                    if (hoveredHierarchyElementId && !hierarchyElementById(snapshot, hoveredHierarchyElementId)) {
+                      hoveredHierarchyElementId = null;
+                    }
+                    setHierarchyHighlight(snapshot, highlightedElement);
+                    updateHierarchyInspector(snapshot, hierarchyElementById(snapshot, selectedHierarchyElementId));
                   }
 
                   function updateStillFrameForTime(absoluteTime) {
@@ -1970,6 +2547,7 @@ extension XCTestReport {
                     function tick() {
                       touchAnimationFrame = 0;
                       updateTouchOverlay();
+                      updateHierarchyOverlay();
                       var video = getActiveVideo();
                       var shouldContinue = (video && !video.paused) || (!video && virtualPlaying);
                       if (shouldContinue) {
@@ -2203,6 +2781,7 @@ extension XCTestReport {
                     if (totalTimeLabel) totalTimeLabel.textContent = formatSeconds(duration);
                     setPlayButtonIcon(video ? !video.paused : virtualPlaying);
                     updateTouchOverlay();
+                    updateHierarchyOverlay();
                   }
 
                   function clampScrubber(video) {
@@ -2248,6 +2827,7 @@ extension XCTestReport {
                       still.addEventListener('load', function() {
                         updateActiveMediaAspect();
                         updateTouchOverlay();
+                        updateHierarchyOverlay();
                       });
                       if (still.complete) {
                         updateActiveMediaAspect();
@@ -2280,6 +2860,18 @@ extension XCTestReport {
                       }
                       return;
                     }
+
+                    if (event.target.closest('.hierarchy-candidate-item')) {
+                      return;
+                    }
+
+                    var hierarchyLayer = event.target.closest('[data-hierarchy-overlay]');
+                    if (hierarchyLayer) {
+                      handleHierarchyOverlayClick(event, hierarchyLayer);
+                      return;
+                    }
+
+                    closeHierarchyMenu();
 
                     var node = event.target.closest('.timeline-event[data-event-time]');
                     if (!node) return;
@@ -2342,6 +2934,7 @@ extension XCTestReport {
                     selector.addEventListener('change', function() {
                       stopTouchAnimation();
                       stopVirtualPlayback();
+                      closeHierarchyMenu();
                       activeIndex = parseInt(selector.value, 10) || 0;
                       cards.forEach(function(card, idx) {
                         var video = card.querySelector('video');
@@ -2364,13 +2957,25 @@ extension XCTestReport {
                     });
                   }
 
-                  window.addEventListener('resize', updateTouchOverlay);
+                  window.addEventListener('resize', function() {
+                    updateTouchOverlay();
+                    updateHierarchyOverlay();
+                  });
 
                   window.addEventListener('keydown', function(event) {
                     if (previewModal && !previewModal.hidden && event.key === 'Escape') {
                       event.preventDefault();
                       closeAttachmentPreview();
                       return;
+                    }
+                    if (event.key === 'Escape') {
+                      var hierarchyMenu = getActiveHierarchyMenu();
+                      if (hierarchyMenu && !hierarchyMenu.hidden) {
+                        event.preventDefault();
+                        closeHierarchyMenu();
+                        updateHierarchyOverlay();
+                        return;
+                      }
                     }
                     if (event.defaultPrevented) return;
                     if (isKeyboardEditableTarget(event.target)) return;

@@ -455,6 +455,12 @@ let sharedStyles = """
         min-height: 0;
     }
 
+    .test-detail-page .video-media-column {
+        min-height: 0;
+        justify-content: flex-start;
+        overflow: hidden;
+    }
+
     .timeline-panel-stack {
         min-height: 0;
         display: flex;
@@ -1040,12 +1046,14 @@ let sharedStyles = """
     }
 
     .timeline-video-card {
-        width: min(100%, 460px, calc((100dvh - 260px) * var(--media-aspect, 9 / 16)));
+        width: min(100%, 420px);
+        max-width: 100%;
         margin: 0 auto;
+        flex: 0 1 auto;
     }
 
     .test-detail-page .timeline-video-card {
-        width: min(100%, calc((100dvh - 280px) * var(--media-aspect, 9 / 16)));
+        width: min(100%, 420px);
     }
 
     .timeline-video-frame {
@@ -1059,8 +1067,8 @@ let sharedStyles = """
     }
 
     .test-detail-page .timeline-video-frame {
-        max-height: calc(100dvh - 280px);
         margin: 0 auto;
+        max-width: 100%;
     }
 
     .timeline-video {
@@ -1509,6 +1517,18 @@ let sharedStyles = """
     }
 
     @media (max-width: 980px) {
+        body.test-detail-page {
+            height: auto;
+            min-height: 100dvh;
+            overflow: auto;
+        }
+
+        .test-detail-shell {
+            height: auto;
+            min-height: 100dvh;
+            grid-template-rows: auto auto auto auto;
+        }
+
         .timeline-video-layout {
             grid-template-columns: 1fr;
         }
@@ -1563,16 +1583,22 @@ let sharedStyles = """
 
         .test-detail-page .timeline-video-layout {
             grid-template-columns: 1fr;
-            grid-template-rows: minmax(0, 1fr) auto;
+            grid-template-rows: auto auto;
             gap: 10px;
+            height: auto;
         }
 
         .test-detail-page .timeline-video-card {
-            width: min(100%, 300px, calc((100dvh - 460px) * var(--media-aspect, 9 / 16)));
+            width: min(100%, 320px);
         }
 
         .test-detail-page .timeline-video-frame {
-            max-height: calc(100dvh - 460px);
+            max-height: 58vh;
+        }
+
+        .test-detail-page .timeline-video-section {
+            height: auto;
+            grid-template-rows: auto auto;
         }
 
         .test-detail-page .test-meta-content {

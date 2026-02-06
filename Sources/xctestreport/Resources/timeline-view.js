@@ -293,6 +293,68 @@
         card.style.setProperty('--media-aspect', ratioValue);
       }
     }
+    updateActiveMediaLayout();
+  }
+
+  function aspectRatioFromFrame(frame) {
+    if (!frame) return 9 / 16;
+    var ratioRaw = frame.style.getPropertyValue('--media-aspect')
+      || window.getComputedStyle(frame).getPropertyValue('--media-aspect')
+      || '';
+    var parts = ratioRaw.split('/');
+    if (parts.length === 2) {
+      var w = parseFloat(parts[0]);
+      var h = parseFloat(parts[1]);
+      if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
+        return w / h;
+      }
+    }
+    return 9 / 16;
+  }
+
+  function updateActiveMediaLayout() {
+    var card = getActiveVideoCard();
+    if (!card) return;
+    var frame = card.querySelector('.timeline-video-frame');
+    if (!frame) return;
+    var mediaColumn = card.closest('.video-media-column');
+    if (!mediaColumn) return;
+
+    card.style.width = '';
+
+    var columnRect = mediaColumn.getBoundingClientRect();
+    if (!columnRect.width || !columnRect.height) return;
+
+    var visibleChildren = Array.prototype.filter.call(mediaColumn.children, function(child) {
+      return child.offsetParent !== null;
+    });
+    var reservedHeight = 0;
+    var cardPosition = -1;
+    visibleChildren.forEach(function(child, index) {
+      if (child === card) {
+        cardPosition = index;
+      } else {
+        reservedHeight += child.getBoundingClientRect().height;
+      }
+    });
+
+    var mediaColumnStyles = window.getComputedStyle(mediaColumn);
+    var rowGap = parseFloat(mediaColumnStyles.rowGap || mediaColumnStyles.gap || '0');
+    if (!Number.isFinite(rowGap)) rowGap = 0;
+    if (visibleChildren.length > 1) {
+      reservedHeight += rowGap * (visibleChildren.length - 1);
+    }
+
+    var availableHeight = columnRect.height - reservedHeight;
+    if (availableHeight <= 0) return;
+
+    var ratio = aspectRatioFromFrame(frame);
+    var widthByHeight = availableHeight * ratio;
+    var widthByContainer = columnRect.width;
+    var targetWidth = Math.max(120, Math.floor(Math.min(widthByHeight, widthByContainer)));
+
+    if (cardPosition < 0 || !Number.isFinite(targetWidth)) return;
+    card.style.width = targetWidth + 'px';
   }
 
   function escapeHTML(value) {
@@ -325,6 +387,9 @@
     hierarchyPanel.classList.toggle('is-collapsed', !shouldExpand);
     hierarchyBody.hidden = !shouldExpand;
     hierarchyToggle.setAttribute('aria-expanded', shouldExpand ? 'true' : 'false');
+    updateActiveMediaLayout();
+    updateTouchOverlay();
+    updateHierarchyOverlay();
   }
 
   function refreshHierarchyPanelVisibility() {
@@ -334,6 +399,7 @@
     if (!hasHierarchyData) {
       setHierarchyPanelExpanded(false);
     }
+    updateActiveMediaLayout();
   }
 
   function updateHierarchyCandidateSelectionState() {
@@ -1342,6 +1408,7 @@
   }
 
   window.addEventListener('resize', function() {
+    updateActiveMediaLayout();
     updateTouchOverlay();
     updateHierarchyOverlay();
   });

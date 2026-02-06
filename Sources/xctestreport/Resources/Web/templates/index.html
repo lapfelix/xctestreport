@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Test Report</title>
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<h1>Test Report: {{report_title}}</h1>
+<div class="summary-stats">
+    <div>
+        Total: <span class="stat-number">{{total_tests}}</span>,
+        Passed: <span class="stat-number passed-number">{{passed_tests}}</span>,
+        Failed: <span class="stat-number failed-number">{{failed_tests}}</span>,
+        Skipped: <span class="stat-number skipped-number">{{skipped_tests}}</span>
+    </div>
+    <button id="toggle-all">Collapse All</button>
+</div>
+{{build_results_html}}
+{{comparison_info_html}}
+{{suite_sections_html}}
+<script src="index-page.js"></script>
+</body>
+</html>

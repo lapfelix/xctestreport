@@ -6,6 +6,8 @@ extension XCTestReport {
 
         try? FileManager.default.createDirectory(
             atPath: outputDir, withIntermediateDirectories: true)
+        let webTemplates = try loadWebTemplates()
+        try copyWebAssets(to: outputDir)
 
         // Check xcresult file size
         let fileManager = FileManager.default
@@ -118,6 +120,9 @@ extension XCTestReport {
             }
             return "Unknown Suite"
         }
+        let testDetailTemplate = webTemplates.testDetailTemplate
+        let indexTemplate = webTemplates.indexTemplate
+        let timelineTemplate = webTemplates.timelineSectionTemplate
 
         // Preprocessing step (parallelized)
         let totalTests = allTests.count
@@ -271,7 +276,8 @@ extension XCTestReport {
                         for: test.nodeIdentifier,
                         activities: testActivities,
                         attachmentsByTestIdentifier: attachmentsByTestIdentifier,
-                        sourceLocationBySymbol: timelineSourceLocationMap
+                        sourceLocationBySymbol: timelineSourceLocationMap,
+                        template: timelineTemplate
                     )
 
                     let detailsPanelHtml: String
@@ -289,44 +295,27 @@ extension XCTestReport {
                     }
                     let testSubtitle = htmlEscape(test.nodeIdentifier ?? "Test report")
 
-                    let testDetailHTML = """
-                        <!DOCTYPE html>
-                        <html>
-                        <head>
-                        <meta charset="UTF-8">
-                        <title>Test Detail: \(test.name)</title>
-                        <style>
-                        \(sharedStyles)
-                        </style>
-                        </head>
-                        <body class="test-detail-page">
-                        <div class="test-detail-shell">
-                            <header class="test-header-compact">
-                                <a class="test-back-link" href="index.html" aria-label="Back to report index">
-                                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                        <path fill="currentColor" d="M14.71 5.29a1 1 0 0 1 0 1.42L10.41 11H20a1 1 0 1 1 0 2h-9.59l4.3 4.29a1 1 0 1 1-1.42 1.42l-6-6a1 1 0 0 1 0-1.42l6-6a1 1 0 0 1 1.42 0Z"/>
-                                    </svg>
-                                    <span>Back</span>
-                                </a>
-                                <div class="test-title-group">
-                                    <div class="test-title-row">
-                                        <h1 class="test-title-compact">\(htmlEscape(test.name))</h1>
-                                        <span class="status-badge \(statusBadgeClass)">\(htmlEscape(result))</span>
-                                        <span class="test-duration-pill">\(htmlEscape(duration))</span>
-                                    </div>
-                                    <div class="test-subtitle">\(testSubtitle)</div>
-                                </div>
-                                <div class="test-header-spacer" aria-hidden="true"></div>
-                            </header>
-                            \(compactFailureBoxHtml)
-                            \(detailsPanelHtml)
-                            <main class="test-main-content">
-                                \(timelineAndVideoSection)
-                            </main>
-                        </div>
-                        </body>
-                        </html>
-                        """
+                    let testDetailHTML: String
+                    do {
+                        testDetailHTML = try renderTemplate(
+                            testDetailTemplate,
+                            values: [
+                                "page_title": htmlEscape(test.name),
+                                "test_name": htmlEscape(test.name),
+                                "status_badge_class": statusBadgeClass,
+                                "status_text": htmlEscape(result),
+                                "duration_text": htmlEscape(duration),
+                                "test_subtitle": testSubtitle,
+                                "compact_failure_box_html": compactFailureBoxHtml,
+                                "details_panel_html": detailsPanelHtml,
+                                "timeline_and_video_section_html": timelineAndVideoSection,
+                            ],
+                            templateName: "test-detail.html")
+                    } catch {
+                        print(
+                            "Failed to render test detail template for \(test.name): \(error)")
+                        continue
+                    }
                     let testPagePath = (outputDir as NSString).appendingPathComponent(testPageName)
                     try? testDetailHTML.write(
                         toFile: testPagePath, atomically: true, encoding: .utf8)
@@ -557,29 +546,7 @@ extension XCTestReport {
             suiteSections[suite]?.append("</table></div></div>")
         }
 
-        // Initialize the HTML template first
-        var indexHTML = """
-            <!DOCTYPE html>
-            <html>
-            <head>
-            <meta charset="UTF-8">
-            <title>Test Report</title>
-            <style>
-            \(sharedStyles)
-            </style>
-            </head>
-            <body>
-            <h1>Test Report: \(summary.title)</h1>
-            <div class="summary-stats">
-                <div>
-                    Total: <span class="stat-number">\(summary.totalTestCount)</span>, 
-                    Passed: <span class="stat-number passed-number">\(summary.passedTests)</span>, 
-                    Failed: <span class="stat-number failed-number">\(summary.failedTests)</span>, 
-                    Skipped: <span class="stat-number skipped-number">\(summary.skippedTests)</span>
-                </div>
-                <button id="toggle-all">Collapse All</button>
-            </div>
-            """
+        var buildResultsHTML = ""
 
         let buildResultsCmd = [
             "xcrun", "xcresulttool", "get", "build-results", "--path", xcresultPath, "--format",
@@ -591,11 +558,12 @@ extension XCTestReport {
         {
             let buildResults = try? decoder.decode(BuildResults.self, from: bdData)
             if let buildResults = buildResults {
-                indexHTML +=
+                buildResultsHTML =
                     "<p>🛑 Errors: \(buildResults.errorCount) &nbsp; ⚠️ Warnings: \(buildResults.warningCount)</p>"
             }
         }
 
+        var comparisonInfoHTML = ""
         if let previousResults = previousResults {
             let dateFormatter = DateFormatter()
             dateFormatter.dateStyle = .medium
@@ -605,54 +573,31 @@ extension XCTestReport {
             let dateString = dateFormatter.string(from: previousResults.date)
                 .replacingOccurrences(of: ":", with: "&#58;")
                 .replacingOccurrences(of: " ", with: "&#32;")
-            indexHTML +=
+            comparisonInfoHTML =
                 "<p class=\"comparison-info\">Compared with previous run from: \(dateString)</p>"
         }
 
         // Add suite sections to HTML in sorted order
+        var suiteSectionsHTML = ""
         for suite in groupedTests.keys.sorted() {
             if let section = suiteSections[suite] {
-                indexHTML += section.joined()
+                suiteSectionsHTML += section.joined()
             }
         }
 
-        indexHTML += """
-            <script>
-            var coll = document.getElementsByClassName("collapsible");
-            var i;
-
-            // Initialize sections as expanded
-            for (i = 0; i < coll.length; i++) {
-              var content = coll[i].nextElementSibling;
-              content.style.display = "block";
-              // Don't add collapsed class initially since we're expanded
-            }
-
-            // Add click handlers
-            for (i = 0; i < coll.length; i++) {
-              coll[i].addEventListener("click", function() {
-                this.classList.toggle("collapsed");
-                // Remove display manipulation - CSS transitions will handle it
-              });
-            }
-
-            var toggleAllBtn = document.getElementById("toggle-all");
-            toggleAllBtn.textContent = "Collapse All";
-
-            toggleAllBtn.addEventListener("click", function() {
-              var expanded = toggleAllBtn.textContent === "Collapse All";
-              for (i = 0; i < coll.length; i++) {
-                if (expanded) {
-                    coll[i].classList.add("collapsed");
-                } else {
-                    coll[i].classList.remove("collapsed");
-                }
-              }
-              toggleAllBtn.textContent = expanded ? "Expand All" : "Collapse All";
-            });
-            </script>
-            </body></html>
-            """
+        let indexHTML = try renderTemplate(
+            indexTemplate,
+            values: [
+                "report_title": htmlEscape(summary.title),
+                "total_tests": String(summary.totalTestCount),
+                "passed_tests": String(summary.passedTests),
+                "failed_tests": String(summary.failedTests),
+                "skipped_tests": String(summary.skippedTests),
+                "build_results_html": buildResultsHTML,
+                "comparison_info_html": comparisonInfoHTML,
+                "suite_sections_html": suiteSectionsHTML,
+            ],
+            templateName: "index.html")
 
         let indexPath = (outputDir as NSString).appendingPathComponent("index.html")
         try indexHTML.write(toFile: indexPath, atomically: true, encoding: .utf8)

@@ -1,6 +1,11 @@
 import Dispatch
 import Foundation
 
+private let testDetailsCacheLock = NSLock()
+private var testDetailsCache = [String: XCTestReport.TestDetails]()
+private let testActivitiesCacheLock = NSLock()
+private var testActivitiesCache = [String: XCTestReport.TestActivities]()
+
 extension XCTestReport {
     func shell(_ args: [String], outputFile: String? = nil, captureOutput: Bool = true) -> (
         String?, Int32
@@ -45,6 +50,14 @@ extension XCTestReport {
     }
 
     func getTestDetails(for testIdentifier: String) -> TestDetails? {
+        let cacheKey = "\(xcresultPath)|\(testIdentifier)"
+        testDetailsCacheLock.lock()
+        if let cached = testDetailsCache[cacheKey] {
+            testDetailsCacheLock.unlock()
+            return cached
+        }
+        testDetailsCacheLock.unlock()
+
         let testDetailsCmd = [
             "xcrun", "xcresulttool", "get", "test-results", "test-details", "--test-id",
             testIdentifier, "--path", xcresultPath, "--format", "json", "--compact",
@@ -73,6 +86,9 @@ extension XCTestReport {
         let decoder = JSONDecoder()
         do {
             let result = try decoder.decode(TestDetails.self, from: data)
+            testDetailsCacheLock.lock()
+            testDetailsCache[cacheKey] = result
+            testDetailsCacheLock.unlock()
             return result
         } catch {
             print("Failed to decode test details: \(error)")
@@ -82,6 +98,14 @@ extension XCTestReport {
     }
 
     func getTestActivities(for testIdentifier: String) -> TestActivities? {
+        let cacheKey = "\(xcresultPath)|\(testIdentifier)"
+        testActivitiesCacheLock.lock()
+        if let cached = testActivitiesCache[cacheKey] {
+            testActivitiesCacheLock.unlock()
+            return cached
+        }
+        testActivitiesCacheLock.unlock()
+
         let cmd = [
             "xcrun", "xcresulttool", "get", "test-results", "activities", "--test-id",
             testIdentifier, "--path", xcresultPath, "--format", "json", "--compact",
@@ -93,7 +117,11 @@ extension XCTestReport {
         }
 
         do {
-            return try JSONDecoder().decode(TestActivities.self, from: data)
+            let activities = try JSONDecoder().decode(TestActivities.self, from: data)
+            testActivitiesCacheLock.lock()
+            testActivitiesCache[cacheKey] = activities
+            testActivitiesCacheLock.unlock()
+            return activities
         } catch {
             print("Failed to decode activities for \(testIdentifier): \(error)")
             return nil
@@ -126,7 +154,15 @@ extension XCTestReport {
         if let contents = try? fileManager.contentsOfDirectory(atPath: parentDir) {
             let previousDirs =
                 contents
-                .filter { $0 != currentDirName && $0 != ".DS_Store" }
+                .filter { entry in
+                    guard entry != currentDirName && entry != ".DS_Store" else { return false }
+                    let fullPath = (parentDir as NSString).appendingPathComponent(entry)
+                    var isDirectory: ObjCBool = false
+                    guard fileManager.fileExists(atPath: fullPath, isDirectory: &isDirectory) else {
+                        return false
+                    }
+                    return isDirectory.boolValue
+                }
                 .sorted()
                 .reversed()
 
@@ -208,7 +244,15 @@ extension XCTestReport {
 
             let previousDirs =
                 contents
-                .filter { $0 != currentDirName && $0 != ".DS_Store" }
+                .filter { entry in
+                    guard entry != currentDirName && entry != ".DS_Store" else { return false }
+                    let fullPath = (parentDir as NSString).appendingPathComponent(entry)
+                    var isDirectory: ObjCBool = false
+                    guard fileManager.fileExists(atPath: fullPath, isDirectory: &isDirectory) else {
+                        return false
+                    }
+                    return isDirectory.boolValue
+                }
                 .sorted()
                 .reversed()
 
@@ -276,6 +320,15 @@ extension XCTestReport {
         do {
             let data = try Data(contentsOf: URL(fileURLWithPath: manifestPath))
             let manifestEntries = try JSONDecoder().decode([AttachmentManifestEntry].self, from: data)
+
+            if compressVideo {
+                compressExportedVideosIfPossible(
+                    in: attachmentsDir,
+                    manifestEntries: manifestEntries,
+                    maxDimension: videoHeight
+                )
+            }
+
             var attachmentsByTest = [String: [AttachmentManifestItem]](
                 minimumCapacity: manifestEntries.count)
 
@@ -297,5 +350,124 @@ extension XCTestReport {
             print("Failed to parse attachment manifest: \(error)")
             return [:]
         }
+    }
+
+    private func compressExportedVideosIfPossible(
+        in attachmentsDir: String,
+        manifestEntries: [AttachmentManifestEntry],
+        maxDimension: Int
+    ) {
+        guard maxDimension > 0 else {
+            print("Video compression skipped: invalid --video-height (\(maxDimension)).")
+            return
+        }
+
+        guard isFFmpegInstalled() else {
+            print("Video compression requested, but ffmpeg was not found. Skipping compression.")
+            return
+        }
+
+        let videoFileNames = Set(
+            manifestEntries
+                .flatMap(\.attachments)
+                .filter { isVideoAttachment($0) }
+                .map(\.exportedFileName)
+        )
+        guard !videoFileNames.isEmpty else {
+            print("No video attachments found to compress.")
+            return
+        }
+
+        print(
+            "Compressing \(videoFileNames.count) video attachment(s) with ffmpeg (max dimension: \(maxDimension))..."
+        )
+
+        var compressedCount = 0
+        var failedCount = 0
+        var skippedCount = 0
+        let fileManager = FileManager.default
+        let scaleFilter =
+            "scale='if(gte(iw,ih),trunc(min(iw,\(maxDimension))/2)*2,-2)':'if(gte(iw,ih),-2,trunc(min(ih,\(maxDimension))/2)*2)'"
+
+        for exportedFileName in videoFileNames.sorted() {
+            let inputPath = (attachmentsDir as NSString).appendingPathComponent(exportedFileName)
+            guard fileManager.fileExists(atPath: inputPath) else {
+                skippedCount += 1
+                print("Video compression skipped (missing file): \(exportedFileName)")
+                continue
+            }
+
+            let inputExtension = URL(fileURLWithPath: inputPath).pathExtension
+            let tempOutputPath: String
+            if inputExtension.isEmpty {
+                tempOutputPath = inputPath + ".compressed"
+            } else {
+                tempOutputPath = inputPath + ".compressed.\(inputExtension)"
+            }
+            try? fileManager.removeItem(atPath: tempOutputPath)
+
+            let compressCmd = [
+                "ffmpeg",
+                "-y",
+                "-i",
+                inputPath,
+                "-map",
+                "0:0",
+                "-map_chapters",
+                "0",
+                "-threads",
+                "0",
+                "-vf",
+                scaleFilter,
+                "-c:v",
+                "hevc_videotoolbox",
+                "-pix_fmt",
+                "yuv420p",
+                "-q:v",
+                "50",
+                "-allow_sw",
+                "1",
+                "-movflags",
+                "+faststart",
+                "-profile:v",
+                "main",
+                "-vtag",
+                "hvc1",
+                "-an",
+                "-sn",
+                "-max_muxing_queue_size",
+                "40000",
+                "-map_metadata",
+                "0",
+                tempOutputPath,
+            ]
+
+            let (_, compressExit) = shell(compressCmd)
+            guard compressExit == 0, fileManager.fileExists(atPath: tempOutputPath) else {
+                failedCount += 1
+                try? fileManager.removeItem(atPath: tempOutputPath)
+                print("Video compression failed: \(exportedFileName)")
+                continue
+            }
+
+            do {
+                try fileManager.removeItem(atPath: inputPath)
+                try fileManager.moveItem(atPath: tempOutputPath, toPath: inputPath)
+                compressedCount += 1
+            } catch {
+                failedCount += 1
+                print("Video compression replace failed for \(exportedFileName): \(error)")
+                try? fileManager.removeItem(atPath: tempOutputPath)
+            }
+        }
+
+        print(
+            "Video compression complete: compressed \(compressedCount), failed \(failedCount), skipped \(skippedCount)."
+        )
+    }
+
+    private func isFFmpegInstalled() -> Bool {
+        let (_, exitCode) = shell(["ffmpeg", "-version"])
+        return exitCode == 0
     }
 }

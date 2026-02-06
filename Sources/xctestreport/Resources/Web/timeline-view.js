@@ -2,6 +2,18 @@
   var root = document.querySelector('[data-timeline-root]');
   if (!root) return;
 
+  function parseJSONScript(selector) {
+    var node = document.querySelector(selector);
+    if (!node) return [];
+    try {
+      var value = JSON.parse(node.textContent || '[]');
+      return Array.isArray(value) ? value : [];
+    } catch (error) {
+      console.warn('Failed to parse timeline JSON payload for selector:', selector, error);
+      return [];
+    }
+  }
+
   var controls = document.querySelector('[data-timeline-controls]');
   var scrubber = controls.querySelector('[data-scrubber]');
   var timeLabel = controls.querySelector('[data-playback-time]');
@@ -39,13 +51,13 @@
   var hierarchyProperties = hierarchyInspector ? hierarchyInspector.querySelector('[data-hierarchy-properties]') : null;
   var selector = root.querySelector('[data-video-selector]');
   var cards = Array.prototype.slice.call(root.querySelectorAll('[data-video-index]'));
-  var runStates = __RUN_STATES_JSON__;
+  var runStates = parseJSONScript('[data-timeline-run-states]');
   var activeRunIndex = 0;
   var events = [];
   var initialFailureEventIndex = -1;
   var mediaMode = root.dataset.mediaMode || 'video';
   var touchGestures = [];
-  var screenshots = __SCREENSHOT_JSON__;
+  var screenshots = parseJSONScript('[data-timeline-screenshots]');
   var hierarchySnapshots = [];
   var timelineBase = 0;
   var fallbackVideoBase = parseFloat(root.dataset.videoBase || '0');

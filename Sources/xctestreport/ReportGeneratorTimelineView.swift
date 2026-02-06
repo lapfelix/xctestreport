@@ -2,25 +2,11 @@ import Dispatch
 import Foundation
 
 extension XCTestReport {
-    private func timelineViewScriptTag(runStatesJSON: String, screenshotJSON: String) -> String {
-        guard let scriptURL = Bundle.module.url(forResource: "timeline-view", withExtension: "js"),
-            var scriptTemplate = try? String(contentsOf: scriptURL, encoding: .utf8)
-        else {
-            print("Warning: timeline-view.js resource was not found. Timeline interactivity is disabled.")
-            return ""
-        }
-
-        scriptTemplate = scriptTemplate.replacingOccurrences(
-            of: "__RUN_STATES_JSON__", with: runStatesJSON)
-        scriptTemplate = scriptTemplate.replacingOccurrences(
-            of: "__SCREENSHOT_JSON__", with: screenshotJSON)
-        return "<script>\n\(scriptTemplate)\n</script>"
-    }
-
     func renderTimelineVideoSection(
         for testIdentifier: String?, activities: TestActivities?,
         attachmentsByTestIdentifier: [String: [AttachmentManifestItem]],
-        sourceLocationBySymbol: [String: SourceLocation] = [:]
+        sourceLocationBySymbol: [String: SourceLocation] = [:],
+        template: String
     ) -> String {
         guard let testIdentifier else { return "" }
 
@@ -278,65 +264,24 @@ extension XCTestReport {
                 </div>
                 """
 
-        return """
-            <div class="timeline-video-section">
-                <div class="timeline-video-layout\(layoutClass)" data-timeline-root data-media-mode="\(mediaMode)" data-timeline-base="\(defaultTimelineBase)" data-video-base="\(defaultVideoStart)">
-                    <div class="timeline-panel-stack">
-                        \(runSelectorHTML)
-                        \(runPanelsHTML.joined(separator: ""))
-                    </div>
-                    \(videoPanelHtml)
-                </div>
-                <div class="timeline-controls" data-timeline-controls>
-                    <input type="range" class="timeline-scrubber" min="0" max="0" step="0.05" value="0" data-scrubber>
-                    <div class="timeline-timebar">
-                        <span data-playback-time>00:00</span>
-                        <span data-total-time>00:00</span>
-                    </div>
-                    <div class="timeline-buttons">
-                        <button type="button" class="timeline-button" data-nav="prev" aria-label="Previous event">
-                            <svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                <path d="M15.5 6L9.5 12L15.5 18L17 16.5L12.5 12L17 7.5Z"></path>
-                            </svg>
-                        </button>
-                        <button type="button" class="timeline-button timeline-button-play" data-nav="play" aria-label="Play or pause">
-                            <svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                <path d="M8 6V18L18 12Z"></path>
-                            </svg>
-                        </button>
-                        <button type="button" class="timeline-button" data-nav="next" aria-label="Next event">
-                            <svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                <path d="M8.5 6L14.5 12L8.5 18L7 16.5L11.5 12L7 7.5Z"></path>
-                            </svg>
-                        </button>
-                        <a class="timeline-button timeline-button-download" data-download-video aria-label="Download active video" title="Download active video" hidden>
-                            <svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                <path d="M12 4A1 1 0 0 1 13 5V13.59L15.3 11.29A1 1 0 1 1 16.7 12.7L12.7 16.7A1 1 0 0 1 11.3 16.7L7.3 12.7A1 1 0 1 1 8.7 11.29L11 13.59V5A1 1 0 0 1 12 4ZM5 18A1 1 0 0 1 6 17H18A1 1 0 1 1 18 19H6A1 1 0 0 1 5 18Z"></path>
-                            </svg>
-                        </a>
-                    </div>
-                </div>
-            </div>
-            <div class="attachment-preview-modal" data-attachment-modal hidden>
-                <div class="attachment-preview-backdrop" data-attachment-close></div>
-                <div class="attachment-preview-dialog" role="dialog" aria-modal="true" aria-label="Attachment preview">
-                    <div class="attachment-preview-header">
-                        <div class="attachment-preview-title" data-attachment-title>Attachment Preview</div>
-                        <div class="attachment-preview-actions">
-                            <a class="attachment-preview-open" data-attachment-open href="#" target="_blank" rel="noopener">Open file</a>
-                            <button type="button" class="attachment-preview-close" data-attachment-close>Close</button>
-                        </div>
-                    </div>
-                    <div class="attachment-preview-body">
-                        <img class="attachment-preview-image" data-attachment-image alt="">
-                        <video class="attachment-preview-video" data-attachment-video controls preload="metadata"></video>
-                        <iframe class="attachment-preview-frame" data-attachment-frame title="Attachment preview"></iframe>
-                        <div class="attachment-preview-empty" data-attachment-empty>Preview unavailable for this attachment.</div>
-                    </div>
-                </div>
-            </div>
-            \(timelineViewScriptTag(runStatesJSON: runStatesJSON, screenshotJSON: screenshotJSON))
-            """
+        do {
+            return try renderTemplate(
+                template,
+                values: [
+                    "layout_class": layoutClass,
+                    "media_mode": mediaMode,
+                    "default_timeline_base": String(format: "%.6f", defaultTimelineBase),
+                    "default_video_start": String(format: "%.6f", defaultVideoStart),
+                    "run_selector_html": runSelectorHTML,
+                    "run_panels_html": runPanelsHTML.joined(separator: ""),
+                    "video_panel_html": videoPanelHtml,
+                    "run_states_json": jsonForScriptTag(runStatesJSON),
+                    "screenshot_json": jsonForScriptTag(screenshotJSON),
+                ],
+                templateName: "timeline-section.html")
+        } catch {
+            print("Warning: failed to render timeline section template: \(error)")
+            return "<div class=\"timeline-status\">Timeline rendering unavailable.</div>"
+        }
     }
-
 }

@@ -9,13 +9,16 @@ A command-line utility to generate a simple HTML test report from an `.xcresult`
 ```bash
 OVERVIEW: A utility to generate simple HTML reports from XCTest results.
 
-USAGE: xctestreport <xcresult-path> <output-dir>
+USAGE: xctestreport <xcresult-path> <output-dir> [--compress-video] [--video-height <video-height>]
 
 ARGUMENTS:
   <xcresult-path>         Path to the .xcresult file.
   <output-dir>            Output directory for the HTML report.
 
 OPTIONS:
+  --compress-video        Compress exported video attachments with ffmpeg (HEVC VideoToolbox).
+  --video-height <video-height>
+                          Maximum compressed video dimension (longest edge).
   -h, --help              Show help information.
 ```
 
@@ -23,6 +26,41 @@ OPTIONS:
 
 - Support for non-video attachments (for example screenshots and text logs) in test detail pages
 - Support for multiple test plans
+
+## Web rendering layout
+
+Web UI assets are now file-based (not embedded as large Swift strings):
+
+- HTML templates: `Sources/xctestreport/Resources/Web/templates/`
+- Stylesheet: `Sources/xctestreport/Resources/Web/report.css`
+- Page behavior scripts: `Sources/xctestreport/Resources/Web/index-page.js` and `Sources/xctestreport/Resources/Web/timeline-view.js`
+
+Rendering flow:
+
+1. Swift loads templates and verifies required `{{placeholders}}`.
+2. Swift copies static web assets into the report output directory.
+3. Swift injects dynamic report/test/timeline data into templates.
+4. Timeline data is passed via JSON script tags, and consumed by `timeline-view.js`.
+
+## Local validation
+
+Example run with an external xcresult (not copied into this repo):
+
+```bash
+swift run xctestreport /path/to/results.xcresult /tmp/xctestreport-output
+```
+
+Video compression examples:
+
+```bash
+# Enable compression (longest edge defaults to 1024)
+swift run xctestreport /path/to/results.xcresult /tmp/xctestreport-output --compress-video
+
+# Enable compression and cap longest edge at 1280
+swift run xctestreport /path/to/results.xcresult /tmp/xctestreport-output --compress-video --video-height 1280
+```
+
+If `--compress-video` is set but `ffmpeg` is not installed, compression is skipped and report generation continues.
 
 ## Installation
 

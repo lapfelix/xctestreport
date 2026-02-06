@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Test Detail: {{page_title}}</title>
+<link rel="stylesheet" href="report.css">
+</head>
+<body class="test-detail-page">
+<div class="test-detail-shell">
+    <header class="test-header-compact">
+        <a class="test-back-link" href="index.html" aria-label="Back to report index">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path fill="currentColor" d="M14.71 5.29a1 1 0 0 1 0 1.42L10.41 11H20a1 1 0 1 1 0 2h-9.59l4.3 4.29a1 1 0 1 1-1.42 1.42l-6-6a1 1 0 0 1 0-1.42l6-6a1 1 0 0 1 1.42 0Z"/>
+            </svg>
+            <span>Back</span>
+        </a>
+        <div class="test-title-group">
+            <div class="test-title-row">
+                <h1 class="test-title-compact">{{test_name}}</h1>
+                <span class="status-badge {{status_badge_class}}">{{status_text}}</span>
+                <span class="test-duration-pill">{{duration_text}}</span>
+            </div>
+            <div class="test-subtitle">{{test_subtitle}}</div>
+        </div>
+        <div class="test-header-spacer" aria-hidden="true"></div>
+    </header>
+    {{compact_failure_box_html}}
+    {{details_panel_html}}
+    <main class="test-main-content">
+        {{timeline_and_video_section_html}}
+    </main>
+</div>
+</body>
+</html>

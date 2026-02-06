@@ -761,6 +761,102 @@ extension XCTestReport {
             return false
         }
 
+        func attachmentFileExtension(from relativePath: String?) -> String {
+            guard let relativePath else { return "" }
+            let fileName = relativePath
+                .replacingOccurrences(of: "attachments/", with: "")
+                .removingPercentEncoding ?? relativePath
+            return URL(fileURLWithPath: fileName).pathExtension.lowercased()
+        }
+
+        func attachmentPreviewKind(name: String, relativePath: String?) -> String {
+            let ext = attachmentFileExtension(from: relativePath)
+            if ["png", "jpg", "jpeg", "heic", "gif", "webp", "tiff", "bmp"].contains(ext) {
+                return "image"
+            }
+            if ["mp4", "mov", "m4v"].contains(ext) {
+                return "video"
+            }
+            if ext == "pdf" {
+                return "pdf"
+            }
+            if ["json"].contains(ext) {
+                return "json"
+            }
+            if ["txt", "log", "crash", "ips", "plist"].contains(ext) {
+                return "text"
+            }
+            if ["html", "htm"].contains(ext) {
+                return "html"
+            }
+
+            let lowered = name.lowercased()
+            if lowered.contains("ui snapshot") || lowered.contains("screenshot")
+                || lowered.contains("kxctattachmentlegacysnapshot")
+            {
+                return "image"
+            }
+            if lowered.contains("screen recording") {
+                return "video"
+            }
+            if lowered.contains("app ui hierarchy") {
+                return "text"
+            }
+
+            return "file"
+        }
+
+        func cleanedAttachmentLabel(_ rawName: String) -> String {
+            let lowered = rawName.lowercased()
+
+            if lowered.contains("kxctattachmentlegacysnapshot") || lowered.contains("ui snapshot")
+                || lowered.contains("screenshot")
+            {
+                return "UI Snapshot"
+            }
+            if lowered.contains("kxctattachmentlegacysynthesizedevent")
+                || lowered.contains("synthesized event")
+            {
+                return "Synthesized Event"
+            }
+            if lowered.contains("app ui hierarchy") {
+                return "UI Hierarchy"
+            }
+            if lowered.contains("debug description") {
+                return "Debug Description"
+            }
+            if lowered.contains("screen recording") {
+                return "Screen Recording"
+            }
+
+            let withoutDate = rawName.replacingOccurrences(
+                of: #" \d{4}-\d{2}-\d{2} at \d{1,2}\.\d{2}\.\d{2} [AP]M"#,
+                with: "",
+                options: .regularExpression
+            )
+            let trimmed = withoutDate.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? rawName : trimmed
+        }
+
+        func attachmentIconLabel(for previewKind: String) -> String {
+            switch previewKind {
+            case "image":
+                return "IMG"
+            case "video":
+                return "VID"
+            case "pdf":
+                return "PDF"
+            case "json":
+                return "JSON"
+            case "text":
+                return "TXT"
+            case "html":
+                return "WEB"
+            default:
+                return "FILE"
+            }
+        }
+
         func jsStringEscape(_ input: String) -> String {
             return input
                 .replacingOccurrences(of: "\\", with: "\\\\")
@@ -1298,22 +1394,25 @@ extension XCTestReport {
                     attachmentList = ""
                 } else {
                     let renderedAttachments = node.attachments.map { attachment -> String in
-                        let attachmentName = htmlEscape(attachment.name)
-                        let timeText: String
-                        if let timestamp = attachment.timestamp, let baseTime {
-                            timeText = " @ \(formatTimelineOffset(timestamp - baseTime))"
-                        } else {
-                            timeText = ""
-                        }
+                        let cleanedLabel = cleanedAttachmentLabel(attachment.name)
+                        let attachmentName = htmlEscape(cleanedLabel)
+                        let previewKind = attachmentPreviewKind(
+                            name: attachment.name, relativePath: attachment.relativePath)
+                        let iconLabel = attachmentIconLabel(for: previewKind)
                         let linkOrText: String
                         if let relativePath = attachment.relativePath {
-                            linkOrText =
-                                "<a href=\"\(relativePath)\" target=\"_blank\" rel=\"noopener\">\(attachmentName)</a>"
+                            linkOrText = """
+                                <a class="timeline-attachment-link" href="\(relativePath)" target="_blank" rel="noopener" data-preview-kind="\(previewKind)" data-preview-title="\(attachmentName)">
+                                    <span class="timeline-attachment-icon">\(iconLabel)</span>
+                                    <span class="timeline-attachment-label">\(attachmentName)</span>
+                                </a>
+                                """
                         } else {
-                            linkOrText = attachmentName
+                            linkOrText =
+                                "<span class=\"timeline-attachment-link\"><span class=\"timeline-attachment-icon\">\(iconLabel)</span><span class=\"timeline-attachment-label\">\(attachmentName)</span></span>"
                         }
 
-                        return "<li class=\"timeline-attachment\">\(linkOrText)\(timeText)</li>"
+                        return "<li class=\"timeline-attachment\">\(linkOrText)</li>"
                     }.joined(separator: "")
                     attachmentList = "<ul class=\"timeline-attachments\">\(renderedAttachments)</ul>"
                 }
@@ -1510,6 +1609,24 @@ extension XCTestReport {
                         </div>
                     </div>
                 </div>
+                <div class="attachment-preview-modal" data-attachment-modal hidden>
+                    <div class="attachment-preview-backdrop" data-attachment-close></div>
+                    <div class="attachment-preview-dialog" role="dialog" aria-modal="true" aria-label="Attachment preview">
+                        <div class="attachment-preview-header">
+                            <div class="attachment-preview-title" data-attachment-title>Attachment Preview</div>
+                            <div class="attachment-preview-actions">
+                                <a class="attachment-preview-open" data-attachment-open href="#" target="_blank" rel="noopener">Open file</a>
+                                <button type="button" class="attachment-preview-close" data-attachment-close>Close</button>
+                            </div>
+                        </div>
+                        <div class="attachment-preview-body">
+                            <img class="attachment-preview-image" data-attachment-image alt="">
+                            <video class="attachment-preview-video" data-attachment-video controls preload="metadata"></video>
+                            <iframe class="attachment-preview-frame" data-attachment-frame title="Attachment preview"></iframe>
+                            <div class="attachment-preview-empty" data-attachment-empty>Preview unavailable for this attachment.</div>
+                        </div>
+                    </div>
+                </div>
                 <script>
                 (function() {
                   var root = document.querySelector('[data-timeline-root]');
@@ -1526,6 +1643,13 @@ extension XCTestReport {
                   var nextButton = controls.querySelector('[data-nav=\"next\"]');
                   var collapseAllButton = root.querySelector('[data-tree-action=\"collapse\"]');
                   var expandAllButton = root.querySelector('[data-tree-action=\"expand\"]');
+                  var previewModal = document.querySelector('[data-attachment-modal]');
+                  var previewTitle = previewModal ? previewModal.querySelector('[data-attachment-title]') : null;
+                  var previewOpen = previewModal ? previewModal.querySelector('[data-attachment-open]') : null;
+                  var previewImage = previewModal ? previewModal.querySelector('[data-attachment-image]') : null;
+                  var previewVideo = previewModal ? previewModal.querySelector('[data-attachment-video]') : null;
+                  var previewFrame = previewModal ? previewModal.querySelector('[data-attachment-frame]') : null;
+                  var previewEmpty = previewModal ? previewModal.querySelector('[data-attachment-empty]') : null;
                   var selector = root.querySelector('[data-video-selector]');
                   var cards = Array.prototype.slice.call(root.querySelectorAll('[data-video-index]'));
                   var events = [\(eventData)];
@@ -1563,6 +1687,61 @@ extension XCTestReport {
                   function setPlayButtonIcon(isPlaying) {
                     if (!playButton) return;
                     playButton.innerHTML = isPlaying ? PAUSE_ICON : PLAY_ICON;
+                  }
+
+                  function resetAttachmentPreviewContent() {
+                    if (previewImage) {
+                      previewImage.style.display = 'none';
+                      previewImage.removeAttribute('src');
+                    }
+                    if (previewVideo) {
+                      previewVideo.pause();
+                      previewVideo.style.display = 'none';
+                      previewVideo.removeAttribute('src');
+                    }
+                    if (previewFrame) {
+                      previewFrame.style.display = 'none';
+                      previewFrame.removeAttribute('src');
+                    }
+                    if (previewEmpty) {
+                      previewEmpty.style.display = 'none';
+                    }
+                  }
+
+                  function closeAttachmentPreview() {
+                    if (!previewModal || previewModal.hidden) return;
+                    previewModal.hidden = true;
+                    resetAttachmentPreviewContent();
+                  }
+
+                  function openAttachmentPreview(link) {
+                    if (!previewModal || !link) return false;
+                    var kind = link.dataset.previewKind || 'file';
+                    if (kind === 'file') return false;
+
+                    var href = link.getAttribute('href');
+                    if (!href) return false;
+                    var title = link.dataset.previewTitle || link.textContent || 'Attachment';
+
+                    if (previewTitle) previewTitle.textContent = title;
+                    if (previewOpen) previewOpen.href = href;
+                    resetAttachmentPreviewContent();
+
+                    if (kind === 'image' && previewImage) {
+                      previewImage.src = href;
+                      previewImage.style.display = 'block';
+                    } else if (kind === 'video' && previewVideo) {
+                      previewVideo.src = href;
+                      previewVideo.style.display = 'block';
+                    } else if (previewFrame && (kind === 'text' || kind === 'json' || kind === 'pdf' || kind === 'html')) {
+                      previewFrame.src = href;
+                      previewFrame.style.display = 'block';
+                    } else if (previewEmpty) {
+                      previewEmpty.style.display = 'flex';
+                    }
+
+                    previewModal.hidden = false;
+                    return true;
                   }
 
                   function getActiveVideoCard() {
@@ -1851,15 +2030,65 @@ extension XCTestReport {
                     }
                   }
 
-                  function setActiveEvent(eventId, shouldReveal, scrollBehavior) {
+                  function collapsedAncestorSummaryEvent(node) {
+                    var details = node ? node.closest('details') : null;
+                    while (details) {
+                      if (!details.open) {
+                        var summary = details.firstElementChild;
+                        var summaryEvent = summary ? summary.querySelector('.timeline-event') : null;
+                        if (summaryEvent) return summaryEvent;
+                      }
+                      details = details.parentElement ? details.parentElement.closest('details') : null;
+                    }
+                    return null;
+                  }
+
+                  function updateContextHighlight(node) {
+                    Array.prototype.forEach.call(
+                      root.querySelectorAll('.timeline-event.timeline-context-active'),
+                      function(el) { el.classList.remove('timeline-context-active'); }
+                    );
+                    var details = node ? node.closest('details') : null;
+                    while (details) {
+                      var summary = details.firstElementChild;
+                      var summaryEvent = summary ? summary.querySelector('.timeline-event') : null;
+                      if (summaryEvent && summaryEvent !== node) {
+                        summaryEvent.classList.add('timeline-context-active');
+                      }
+                      details = details.parentElement ? details.parentElement.closest('details') : null;
+                    }
+                  }
+
+                  function setCollapsedProxyActive(node) {
+                    Array.prototype.forEach.call(
+                      root.querySelectorAll('.timeline-event.timeline-active-proxy'),
+                      function(el) { el.classList.remove('timeline-active-proxy'); }
+                    );
+                    if (node) {
+                      node.classList.add('timeline-active-proxy');
+                    }
+                  }
+
+                  function setActiveEvent(eventId, shouldReveal, scrollBehavior, scrollWhenCollapsed) {
                     if (!eventId) return;
                     var idx = eventIndexById(eventId);
                     if (idx >= 0) activeEventIndex = idx;
                     var next = root.querySelector('.timeline-event[data-event-id=\"' + eventId + '\"]');
+                    if (next) {
+                      updateContextHighlight(next);
+                    }
+
+                    var collapsedSummary = (!shouldReveal && scrollWhenCollapsed) ? collapsedAncestorSummaryEvent(next) : null;
+                    var proxyNode = (collapsedSummary && collapsedSummary !== next) ? collapsedSummary : null;
+                    var scrollTarget = collapsedSummary || next;
+
                     if (eventId === activeEventId) {
                       if (next && shouldReveal) {
                         expandAncestorDetails(next);
-                        next.scrollIntoView({ block: 'nearest', behavior: scrollBehavior || 'smooth' });
+                      }
+                      setCollapsedProxyActive(proxyNode);
+                      if (scrollTarget && scrollBehavior) {
+                        scrollTarget.scrollIntoView({ block: 'nearest', behavior: scrollBehavior });
                       }
                       return;
                     }
@@ -1870,9 +2099,10 @@ extension XCTestReport {
                         expandAncestorDetails(next);
                       }
                       next.classList.add('timeline-active');
-                      if (shouldReveal) {
-                        next.scrollIntoView({ block: 'nearest', behavior: scrollBehavior || 'smooth' });
-                      }
+                    }
+                    setCollapsedProxyActive(proxyNode);
+                    if (scrollTarget && (shouldReveal || scrollBehavior)) {
+                      scrollTarget.scrollIntoView({ block: 'nearest', behavior: scrollBehavior || 'smooth' });
                     }
                     activeEventId = eventId;
                   }
@@ -1963,7 +2193,7 @@ extension XCTestReport {
                       }
                     }
                     if (idx >= 0) {
-                      setActiveEvent(events[idx].id, false);
+                      setActiveEvent(events[idx].id, false, null, true);
                       if (eventLabel) eventLabel.textContent = events[idx].title;
                     }
                     var currentOffset = video ? (video.currentTime || 0) : (virtualCurrentTime || 0);
@@ -2041,6 +2271,15 @@ extension XCTestReport {
                   }
 
                   root.addEventListener('click', function(event) {
+                    var attachmentLink = event.target.closest('.timeline-attachment-link[data-preview-kind]');
+                    if (attachmentLink) {
+                      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                      if (openAttachmentPreview(attachmentLink)) {
+                        event.preventDefault();
+                      }
+                      return;
+                    }
+
                     var node = event.target.closest('.timeline-event[data-event-time]');
                     if (!node) return;
                     var raw = node.getAttribute('data-event-time');
@@ -2053,6 +2292,17 @@ extension XCTestReport {
                     if (matched && eventLabel) eventLabel.textContent = matched.title;
                     updateFromVideoTime();
                   });
+
+                  if (previewModal) {
+                    Array.prototype.forEach.call(
+                      previewModal.querySelectorAll('[data-attachment-close]'),
+                      function(closeTrigger) {
+                        closeTrigger.addEventListener('click', function() {
+                          closeAttachmentPreview();
+                        });
+                      }
+                    );
+                  }
 
                   prevButton.addEventListener('click', function() {
                     goToPreviousEvent();
@@ -2077,7 +2327,7 @@ extension XCTestReport {
                     var absoluteTime = video ? (activeMediaStartTime() + value) : ((timelineBase || 0) + virtualCurrentTime);
                     var idx = eventIndexForAbsoluteTime(absoluteTime);
                     if (idx >= 0) {
-                      setActiveEvent(events[idx].id, true, 'auto');
+                      setActiveEvent(events[idx].id, false, 'auto', true);
                       if (eventLabel) eventLabel.textContent = events[idx].title;
                     }
                     if (!video) {
@@ -2116,6 +2366,11 @@ extension XCTestReport {
                   window.addEventListener('resize', updateTouchOverlay);
 
                   window.addEventListener('keydown', function(event) {
+                    if (previewModal && !previewModal.hidden && event.key === 'Escape') {
+                      event.preventDefault();
+                      closeAttachmentPreview();
+                      return;
+                    }
                     if (event.defaultPrevented) return;
                     if (isKeyboardEditableTarget(event.target)) return;
                     if (event.metaKey || event.ctrlKey || event.altKey) return;

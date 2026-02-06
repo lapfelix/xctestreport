@@ -618,6 +618,17 @@ let sharedStyles = """
         border-color: #8EB1FF;
     }
 
+    .timeline-event.timeline-context-active:not(.timeline-active) {
+        background: #F1F6FF;
+        border-color: #C8D9FF;
+    }
+
+    .timeline-event.timeline-active-proxy:not(.timeline-active) {
+        background: #E4EEFF;
+        border-color: #7EA4F2;
+        box-shadow: inset 0 0 0 1px rgba(88, 130, 222, 0.45);
+    }
+
     .timeline-tree ul > li.timeline-node > .timeline-event.timeline-failure,
     .timeline-tree ul > li.timeline-node > details > summary > .timeline-event.timeline-failure {
         background: #FDECEE;
@@ -634,6 +645,13 @@ let sharedStyles = """
     .timeline-tree ul > li.timeline-node > details > summary > .timeline-event.timeline-failure.timeline-active {
         background: #F8D3D9;
         border-color: #DF7F8D;
+    }
+
+    .timeline-tree ul > li.timeline-node > .timeline-event.timeline-failure.timeline-active-proxy:not(.timeline-active),
+    .timeline-tree ul > li.timeline-node > details > summary > .timeline-event.timeline-failure.timeline-active-proxy:not(.timeline-active) {
+        background: #F6DDE2;
+        border-color: #D88B96;
+        box-shadow: inset 0 0 0 1px rgba(204, 95, 111, 0.35);
     }
 
     .timeline-event.timeline-failure .timeline-title {
@@ -676,12 +694,171 @@ let sharedStyles = """
     .timeline-attachments {
         margin: 4px 0 8px;
         padding-left: calc(24px + (var(--timeline-depth, 0) * 14px));
+        display: grid;
+        gap: 5px;
     }
 
     .timeline-attachment {
-        font-size: 0.86em;
+        font-size: 0.83em;
         color: #666;
-        margin: 2px 0;
+        margin: 0;
+        list-style: none;
+    }
+
+    .timeline-attachment-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        max-width: 100%;
+        border: 1px solid #DFE6F3;
+        border-radius: 7px;
+        background: #F8FAFE;
+        color: #2E3F5A;
+        padding: 5px 8px;
+        text-decoration: none;
+        line-height: 1.25;
+    }
+
+    .timeline-attachment-link:hover {
+        border-color: #C4D3EE;
+        background: #F0F5FF;
+        text-decoration: none;
+    }
+
+    .timeline-attachment-icon {
+        flex: 0 0 auto;
+        min-width: 28px;
+        text-align: center;
+        border-radius: 999px;
+        border: 1px solid #CBD7EA;
+        background: #EEF3FC;
+        color: #3A4E72;
+        font-size: 0.66rem;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        padding: 1px 6px;
+    }
+
+    .timeline-attachment-label {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .attachment-preview-modal[hidden] {
+        display: none;
+    }
+
+    .attachment-preview-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 1200;
+        display: grid;
+        place-items: center;
+    }
+
+    .attachment-preview-backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgba(7, 13, 26, 0.6);
+    }
+
+    .attachment-preview-dialog {
+        position: relative;
+        width: min(92vw, 1040px);
+        max-height: 88vh;
+        border-radius: 12px;
+        border: 1px solid #CFDBEF;
+        background: #FFFFFF;
+        box-shadow: 0 20px 44px rgba(15, 30, 53, 0.3);
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+        overflow: hidden;
+    }
+
+    .attachment-preview-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 10px 12px;
+        border-bottom: 1px solid #E2E9F5;
+        background: #F6F9FF;
+    }
+
+    .attachment-preview-title {
+        font-size: 0.9rem;
+        font-weight: 600;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: #1E2D46;
+    }
+
+    .attachment-preview-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .attachment-preview-open {
+        font-size: 0.8rem;
+        border: 1px solid #CBD7EA;
+        border-radius: 6px;
+        padding: 4px 8px;
+        background: #FFFFFF;
+        color: #2A4D86;
+        text-decoration: none;
+    }
+
+    .attachment-preview-close {
+        border: 1px solid #CBD7EA;
+        border-radius: 6px;
+        padding: 4px 8px;
+        background: #FFFFFF;
+        color: #334155;
+        font-size: 0.8rem;
+        cursor: pointer;
+    }
+
+    .attachment-preview-body {
+        min-height: 0;
+        background: #FBFDFF;
+        display: grid;
+    }
+
+    .attachment-preview-image,
+    .attachment-preview-video,
+    .attachment-preview-frame,
+    .attachment-preview-empty {
+        display: none;
+        width: 100%;
+        height: 100%;
+        min-height: 320px;
+    }
+
+    .attachment-preview-image {
+        object-fit: contain;
+        background: #0F172A;
+    }
+
+    .attachment-preview-video {
+        background: #000;
+    }
+
+    .attachment-preview-frame {
+        border: 0;
+        background: #FFF;
+    }
+
+    .attachment-preview-empty {
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        color: #60708B;
+        font-size: 0.9rem;
     }
 
     .timeline-controls {
@@ -1175,8 +1352,19 @@ let sharedStyles = """
         }
 
         .timeline-event.timeline-active {
-            background: #223c6d;
-            border-color: #5f8de8;
+            background: #2D5DAF;
+            border-color: #90B3FF;
+        }
+
+        .timeline-event.timeline-context-active:not(.timeline-active) {
+            background: #263A63;
+            border-color: #5F7FAF;
+        }
+
+        .timeline-event.timeline-active-proxy:not(.timeline-active) {
+            background: #345692;
+            border-color: #7FA5E8;
+            box-shadow: inset 0 0 0 1px rgba(186, 214, 255, 0.38);
         }
 
         .timeline-tree ul > li.timeline-node > .timeline-event.timeline-failure,
@@ -1195,6 +1383,13 @@ let sharedStyles = """
         .timeline-tree ul > li.timeline-node > details > summary > .timeline-event.timeline-failure.timeline-active {
             background: #5A2C38;
             border-color: #A66A79;
+        }
+
+        .timeline-tree ul > li.timeline-node > .timeline-event.timeline-failure.timeline-active-proxy:not(.timeline-active),
+        .timeline-tree ul > li.timeline-node > details > summary > .timeline-event.timeline-failure.timeline-active-proxy:not(.timeline-active) {
+            background: #643641;
+            border-color: #B27A86;
+            box-shadow: inset 0 0 0 1px rgba(255, 188, 198, 0.35);
         }
 
         .timeline-event.timeline-failure .timeline-title {
@@ -1246,6 +1441,57 @@ let sharedStyles = """
 
         .timeline-button:hover {
             background-color: #575757;
+        }
+
+        .timeline-attachment-link {
+            background: #1F2734;
+            border-color: #3A475B;
+            color: #DDE6F7;
+        }
+
+        .timeline-attachment-link:hover {
+            background: #273246;
+            border-color: #516686;
+        }
+
+        .timeline-attachment-icon {
+            background: #263750;
+            border-color: #486489;
+            color: #CAE0FF;
+        }
+
+        .attachment-preview-dialog {
+            background: #171717;
+            border-color: #424242;
+            box-shadow: 0 24px 46px rgba(0, 0, 0, 0.55);
+        }
+
+        .attachment-preview-header {
+            background: #1E2633;
+            border-bottom-color: #424242;
+        }
+
+        .attachment-preview-title {
+            color: #E6EEF9;
+        }
+
+        .attachment-preview-open,
+        .attachment-preview-close {
+            background: #253043;
+            border-color: #4B5E80;
+            color: #DCE6F8;
+        }
+
+        .attachment-preview-body {
+            background: #111827;
+        }
+
+        .attachment-preview-frame {
+            background: #111827;
+        }
+
+        .attachment-preview-empty {
+            color: #B2BDD0;
         }
         
         th {

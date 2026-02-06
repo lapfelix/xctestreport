@@ -283,7 +283,7 @@ table {
     background: #FFF;
     border: 1px solid #DDD;
     box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    table-layout: fixed;
+    table-layout: auto;
 }
 
 th, td {
@@ -298,16 +298,25 @@ th {
     font-weight: 600;
 }
 
-th:nth-child(1), td:nth-child(1) {
+.suite-tests-table {
+    table-layout: fixed;
+}
+
+.suite-tests-table th:nth-child(1), .suite-tests-table td:nth-child(1) {
     width: 60%;
 }
 
-th:nth-child(2), td:nth-child(2) {
+.suite-tests-table th:nth-child(2), .suite-tests-table td:nth-child(2) {
     width: 20%;
 }
 
-th:nth-child(3), td:nth-child(3) {
+.suite-tests-table th:nth-child(3), .suite-tests-table td:nth-child(3) {
     width: 20%;
+}
+
+.suite-tests-table td:first-child a {
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .test-case {
@@ -1662,6 +1671,166 @@ button#toggle-all {
     
     .suite-name {
         margin-right: 0;
+    }
+}
+
+@media (max-width: 767px) {
+    body {
+        margin: 12px;
+    }
+
+    h1 {
+        font-size: clamp(1.9rem, 9.4vw, 2.4rem);
+        line-height: 1.12;
+        margin: 0 0 12px;
+    }
+
+    .summary-stats {
+        margin: 12px 0;
+        padding: 12px;
+        gap: 12px;
+    }
+
+    .summary-stats > div {
+        line-height: 1.35;
+        overflow-wrap: anywhere;
+    }
+
+    .collapsible {
+        gap: 6px;
+        padding-right: 20px;
+    }
+
+    .collapsible::after {
+        right: 4px;
+    }
+
+    .suite-name {
+        margin-right: 0;
+        overflow-wrap: anywhere;
+    }
+
+    .suite-stats {
+        width: 100%;
+        padding-right: 0;
+        gap: 6px 10px;
+    }
+
+    .suite-tests-table {
+        border: 0;
+        background: transparent;
+        box-shadow: none;
+        margin-top: 8px;
+    }
+
+    .suite-tests-table thead {
+        display: none;
+    }
+
+    .suite-tests-table tbody,
+    .suite-tests-table tr,
+    .suite-tests-table td {
+        display: block;
+        width: 100%;
+    }
+
+    .suite-tests-table tr {
+        margin-bottom: 8px;
+        border: 1px solid #E3E8F0;
+        border-radius: 8px;
+        background: #FFF;
+        overflow: hidden;
+    }
+
+    .suite-tests-table tr.failed {
+        background: #FFF1F3;
+        border-color: #F1CAD1;
+    }
+
+    .suite-tests-table td {
+        border-bottom: 1px solid #EDF1F7;
+        padding: 8px 10px;
+    }
+
+    .suite-tests-table td:last-child {
+        border-bottom: 0;
+    }
+
+    .suite-tests-table td::before {
+        content: attr(data-label);
+        display: block;
+        color: #66748A;
+        font-size: 0.65rem;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        margin-bottom: 2px;
+    }
+
+    .suite-tests-table td[data-label="Status"] {
+        font-weight: 600;
+    }
+
+    .suite-tests-table td[data-label="Duration"] {
+        color: #58667E;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .test-detail-page .test-title-compact {
+        max-width: 100%;
+        white-space: normal;
+        overflow: visible;
+        text-overflow: clip;
+        overflow-wrap: anywhere;
+    }
+
+    .test-detail-page .test-subtitle {
+        white-space: normal;
+        text-overflow: clip;
+        overflow: visible;
+        overflow-wrap: anywhere;
+    }
+
+    .test-detail-page .timeline-tree-actions {
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
+
+    .test-detail-page .timeline-event {
+        grid-template-columns: 14px minmax(0, 1fr);
+        row-gap: 4px;
+        column-gap: 8px;
+        padding: 6px 8px 6px calc(8px + (var(--timeline-depth, 0) * 10px));
+    }
+
+    .test-detail-page .timeline-title,
+    .test-detail-page .timeline-time {
+        grid-column: 2;
+    }
+
+    .test-detail-page .timeline-time {
+        justify-self: start;
+        text-align: left;
+        min-width: 0;
+        padding-left: 18px;
+        margin-top: 0;
+    }
+
+    .test-detail-page .timeline-attachments {
+        padding-left: calc(22px + (var(--timeline-depth, 0) * 10px));
+    }
+
+    .test-detail-page .timeline-attachment-label {
+        white-space: normal;
+        overflow: visible;
+        text-overflow: clip;
+        overflow-wrap: anywhere;
+    }
+
+    .test-detail-page .stack-trace {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        word-break: break-word;
     }
 }
 

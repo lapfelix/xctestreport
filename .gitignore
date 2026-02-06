@@ -1,3 +1,4 @@
 *.xcresult
 output/*
 .build/*
+.playwright-cli/*

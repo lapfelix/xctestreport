@@ -216,13 +216,13 @@ extension XCTestReport {
                                     """
                                 let previousRunsHTML = previousRuns.map { run in
                                     return
-                                        "<tr><td>\(run.name)</td><td>\(run.result ?? "Unknown")</td><td>\(run.duration)</td></tr>"
+                                        "<tr><td data-label=\"Run\">\(htmlEscape(run.name))</td><td data-label=\"Status\">\(htmlEscape(run.result ?? "Unknown"))</td><td data-label=\"Duration\">\(htmlEscape(run.duration))</td></tr>"
                                 }.joined(separator: "")
                                 failureInfo += """
                                     <h3>Previous Runs (Last 10)</h3>
-                                    <table>
-                                    <tr><th>Run</th><th>Status</th><th>Duration</th></tr>
-                                    \(previousRunsHTML)
+                                    <table class="data-table previous-runs-table">
+                                    <thead><tr><th scope="col">Run</th><th scope="col">Status</th><th scope="col">Duration</th></tr></thead>
+                                    <tbody>\(previousRunsHTML)</tbody>
                                     </table>
                                     """
                             } else {
@@ -395,8 +395,9 @@ extension XCTestReport {
                             <span class="suite-duration">\(durationText)</span>
                         </span>
                     </h2><div class="content">
-                    <table style="margin-top:0px">
-                    <tr><th>Test Name</th><th>Status</th><th>Duration</th></tr>
+                    <table class="data-table suite-tests-table" style="margin-top:0px">
+                    <thead><tr><th scope="col">Test Name</th><th scope="col">Status</th><th scope="col">Duration</th></tr></thead>
+                    <tbody>
                     """)
             }
         }
@@ -415,6 +416,10 @@ extension XCTestReport {
                     let statusClass = result == "Passed" ? "passed" : "failed"
                     let duration = test.duration ?? "0s"
                     let rowClass = result == "Passed" ? "" : " class=\"failed\""
+                    let escapedResult = htmlEscape(result)
+                    let escapedDuration = htmlEscape(duration)
+                    let escapedTestName = htmlEscape(test.name)
+                    let escapedPageName = htmlEscape(testPageName)
 
                     var statusEmoji = ""
                     if let previousResults = previousResults,
@@ -453,7 +458,7 @@ extension XCTestReport {
                     }
 
                     let testRow =
-                        "<tr\(rowClass)><td><a href=\"\(testPageName)\">\(test.name)</a></td><td class=\"\(statusClass)\">\(result)\(statusEmoji)</td><td>\(duration)</td></tr>"
+                        "<tr\(rowClass)><td data-label=\"Test Name\"><a href=\"\(escapedPageName)\">\(escapedTestName)</a></td><td data-label=\"Status\" class=\"\(statusClass)\">\(escapedResult)\(statusEmoji)</td><td data-label=\"Duration\">\(escapedDuration)</td></tr>"
 
                     suiteHTMLQueue.sync {
                         suiteSections[suite]?.append(testRow)
@@ -543,7 +548,7 @@ extension XCTestReport {
 
         // Close all suite sections
         for suite in groupedTests.keys {
-            suiteSections[suite]?.append("</table></div></div>")
+            suiteSections[suite]?.append("</tbody></table></div></div>")
         }
 
         var buildResultsHTML = ""

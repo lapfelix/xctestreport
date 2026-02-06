@@ -68,21 +68,14 @@ extension XCTestReport {
             return nil
         }
 
-        print("Got test details for: \(testIdentifier)")
-
         // Save test details JSON to test_details folder
         let testDetailsDir = (outputDir as NSString).appendingPathComponent("test_details")
-        print("Saving test details to: \(testDetailsDir)")
         try? FileManager.default.createDirectory(
             atPath: testDetailsDir, withIntermediateDirectories: true)
-        print("Test identifier: \(testIdentifier)")
         let safeTestIdentifier = testIdentifier.replacingOccurrences(of: "/", with: "_")
-        print("Safe test identifier: \(safeTestIdentifier)")
         let testDetailsPath = (testDetailsDir as NSString).appendingPathComponent(
             "\(safeTestIdentifier).json")
-        print("Writing test details to: \(testDetailsPath)")
         try? testDetailsJSON?.write(toFile: testDetailsPath, atomically: true, encoding: .utf8)
-        print("Wrote \(testDetailsJSON?.count ?? 0) bytes")
         let decoder = JSONDecoder()
         do {
             let result = try decoder.decode(TestDetails.self, from: data)
@@ -147,9 +140,6 @@ extension XCTestReport {
         let fileManager = FileManager.default
         let parentDir = (outputDir as NSString).deletingLastPathComponent
         let currentDirName = (outputDir as NSString).lastPathComponent
-        print("\nLooking for previous results...")
-        print("Current directory: \(currentDirName)")
-        print("Parent directory: \(parentDir)")
 
         if let contents = try? fileManager.contentsOfDirectory(atPath: parentDir) {
             let previousDirs =
@@ -166,26 +156,16 @@ extension XCTestReport {
                 .sorted()
                 .reversed()
 
-            print("Found \(previousDirs.count) potential previous directories:")
-            previousDirs.forEach { print("- \($0)") }
-
             for dir in previousDirs {
                 let fullTestsPath = (parentDir as NSString).appendingPathComponent(
                     "\(dir)/tests_full.json")
-                print("\nChecking directory: \(dir)")
-                print("Looking for: \(fullTestsPath)")
 
                 if FileManager.default.fileExists(atPath: fullTestsPath) {
-                    print("Found tests_full.json")
                     if let fullData = try? Data(contentsOf: URL(fileURLWithPath: fullTestsPath))
                     {
-                        print("Loaded \(fullData.count) bytes")
                         do {
                             let previousResults = try JSONDecoder().decode(
                                 FullTestResults.self, from: fullData)
-                            print(
-                                "Successfully decoded results with \(previousResults.testNodes.count) test nodes"
-                            )
 
                             // Convert to simplified format
                             var testResults = [String: TestResult]()
@@ -203,29 +183,19 @@ extension XCTestReport {
                                 }
                             }
                             processNodes(previousResults.testNodes)
-                            print("Processed \(testResults.count) individual test results")
 
                             let startTime = findFirstValidStartTime(previousResults.testNodes)
-                            print("Found start time: \(startTime)")
 
                             return TestHistory(
                                 date: Date(timeIntervalSince1970: startTime),
                                 results: testResults
                             )
                         } catch {
-                            print("Failed to decode results: \(error)")
                             continue
                         }
-                    } else {
-                        print("Could not read file data")
                     }
-                } else {
-                    print("No tests_full.json found")
                 }
             }
-            print("\nNo valid previous results found in any directory")
-        } else {
-            print("Could not read parent directory contents")
         }
         return nil
     }
@@ -236,12 +206,7 @@ extension XCTestReport {
         let parentDir = (outputDir as NSString).deletingLastPathComponent
         let currentDirName = (outputDir as NSString).lastPathComponent
 
-        print("Parent directory: \(parentDir)")
-        print("Current directory name: \(currentDirName)")
-
         if let contents = try? fileManager.contentsOfDirectory(atPath: parentDir) {
-            print("Contents of parent directory: \(contents)")
-
             let previousDirs =
                 contents
                 .filter { entry in
@@ -256,40 +221,25 @@ extension XCTestReport {
                 .sorted()
                 .reversed()
 
-            print("Filtered and sorted previous directories: \(previousDirs)")
-
             for dir in previousDirs.prefix(10) {
                 let testDetailsPath = (parentDir as NSString).appendingPathComponent(
                     "\(dir)/test_details/\(testIdentifier.replacingOccurrences(of: "/", with: "_")).json"
                 )
-                print("Looking for test details file at path: \(testDetailsPath)")
 
                 if fileManager.fileExists(atPath: testDetailsPath) {
-                    print("Found test details file: \(testDetailsPath)")
-
                     do {
                         let data = try Data(contentsOf: URL(fileURLWithPath: testDetailsPath))
-                        print("Loaded data from file.")
-
                         let testDetails = try JSONDecoder().decode(TestDetails.self, from: data)
 
                         if let testRuns = testDetails.testRuns {
                             previousRuns.append(contentsOf: testRuns)
                         }
                     } catch {
-                        print(
-                            "Failed to load or decode file at \(testDetailsPath). Error: \(error)"
-                        )
+                        print("Failed to load previous run details at \(testDetailsPath): \(error)")
                     }
-                } else {
-                    print("Test details file does not exist: \(testDetailsPath)")
                 }
             }
-        } else {
-            print("Failed to read contents of directory: \(parentDir)")
         }
-
-        print("Collected \(previousRuns.count) previous runs")
         return previousRuns
     }
 

@@ -34,6 +34,7 @@ Web UI assets are now file-based (not embedded as large Swift strings):
 - HTML templates: `Sources/xctestreport/Resources/Web/templates/`
 - Stylesheet: `Sources/xctestreport/Resources/Web/report.css`
 - Page behavior scripts: `Sources/xctestreport/Resources/Web/index-page.js` and `Sources/xctestreport/Resources/Web/timeline-view.js`
+- Mobile-first rendering: test tables collapse into labeled cards on narrow screens; detail timeline reflows to avoid clipping.
 
 Rendering flow:
 

@@ -17,6 +17,9 @@ let package = Package(
             name: "xctestreport",
             dependencies: [
                 .product(name: "ArgumentParser", package: "swift-argument-parser")
+            ],
+            resources: [
+                .process("Resources")
             ]
         )
     ]

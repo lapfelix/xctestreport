@@ -1877,7 +1877,6 @@ extension XCTestReport {
                                 <div class="touch-overlay-layer" data-touch-overlay></div>
                                 <div class="hierarchy-overlay-layer" data-hierarchy-overlay>
                                     <div class="hierarchy-highlight-box" data-hierarchy-highlight hidden></div>
-                                    <div class="hierarchy-candidate-menu" data-hierarchy-menu hidden></div>
                                 </div>
                             </div>
                         </div>
@@ -1896,7 +1895,6 @@ extension XCTestReport {
                             <div class="touch-overlay-layer" data-touch-overlay></div>
                             <div class="hierarchy-overlay-layer" data-hierarchy-overlay>
                                 <div class="hierarchy-highlight-box" data-hierarchy-highlight hidden></div>
-                                <div class="hierarchy-candidate-menu" data-hierarchy-menu hidden></div>
                             </div>
                         </div>
                     </div>
@@ -1913,17 +1911,34 @@ extension XCTestReport {
                 ? ""
                 : """
                     <div class="video-panel">
-                        \(videoSelector)
-                        \(videoElements)
-                        <div class="hierarchy-toolbar" data-hierarchy-toolbar hidden>
-                            <span class="hierarchy-toolbar-dot" aria-hidden="true"></span>
-                            <span data-hierarchy-status>No hierarchy snapshot near this moment.</span>
+                        <div class="video-media-column">
+                            \(videoSelector)
+                            \(videoElements)
                         </div>
-                        <div class="hierarchy-inspector" data-hierarchy-inspector hidden>
-                            <div class="hierarchy-inspector-title" data-hierarchy-selected-title>UI Hierarchy</div>
-                            <div class="hierarchy-inspector-subtitle" data-hierarchy-selected-subtitle>Click on the media to inspect overlapping elements.</div>
-                            <div class="hierarchy-inspector-properties" data-hierarchy-properties></div>
-                        </div>
+                        <aside class="hierarchy-side-panel is-collapsed" data-hierarchy-panel hidden>
+                            <button type="button" class="hierarchy-side-toggle" data-hierarchy-toggle aria-expanded="false" aria-label="Toggle hierarchy inspector">
+                                <svg class="hierarchy-side-toggle-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                                    <path d="M12.6 4.6L7.2 10L12.6 15.4L11.2 16.8L4.4 10L11.2 3.2Z"></path>
+                                </svg>
+                                <span class="hierarchy-side-toggle-label">Inspector</span>
+                            </button>
+                            <div class="hierarchy-side-body" data-hierarchy-body hidden>
+                                <div class="hierarchy-toolbar" data-hierarchy-toolbar>
+                                    <span class="hierarchy-toolbar-dot" aria-hidden="true"></span>
+                                    <span data-hierarchy-status>No hierarchy snapshot near this moment.</span>
+                                </div>
+                                <div class="hierarchy-candidate-panel" data-hierarchy-candidate-panel>
+                                    <div class="hierarchy-candidate-heading" data-hierarchy-candidate-heading>Elements at cursor</div>
+                                    <div class="hierarchy-candidate-empty" data-hierarchy-candidate-empty>Click inside the media to list overlapping elements.</div>
+                                    <div class="hierarchy-candidate-list" data-hierarchy-candidate-list></div>
+                                </div>
+                                <div class="hierarchy-inspector" data-hierarchy-inspector>
+                                    <div class="hierarchy-inspector-title" data-hierarchy-selected-title>UI Hierarchy</div>
+                                    <div class="hierarchy-inspector-subtitle" data-hierarchy-selected-subtitle>Click inside the media to inspect overlapping elements.</div>
+                                    <div class="hierarchy-inspector-properties" data-hierarchy-properties></div>
+                                </div>
+                            </div>
+                        </aside>
                     </div>
                     """
 
@@ -2004,9 +2019,15 @@ extension XCTestReport {
                   var previewVideo = previewModal ? previewModal.querySelector('[data-attachment-video]') : null;
                   var previewFrame = previewModal ? previewModal.querySelector('[data-attachment-frame]') : null;
                   var previewEmpty = previewModal ? previewModal.querySelector('[data-attachment-empty]') : null;
-                  var hierarchyToolbar = root.querySelector('[data-hierarchy-toolbar]');
+                  var hierarchyPanel = root.querySelector('[data-hierarchy-panel]');
+                  var hierarchyToggle = hierarchyPanel ? hierarchyPanel.querySelector('[data-hierarchy-toggle]') : null;
+                  var hierarchyBody = hierarchyPanel ? hierarchyPanel.querySelector('[data-hierarchy-body]') : null;
+                  var hierarchyToolbar = hierarchyPanel ? hierarchyPanel.querySelector('[data-hierarchy-toolbar]') : null;
                   var hierarchyStatus = hierarchyToolbar ? hierarchyToolbar.querySelector('[data-hierarchy-status]') : null;
-                  var hierarchyInspector = root.querySelector('[data-hierarchy-inspector]');
+                  var hierarchyCandidateHeading = hierarchyPanel ? hierarchyPanel.querySelector('[data-hierarchy-candidate-heading]') : null;
+                  var hierarchyCandidateEmpty = hierarchyPanel ? hierarchyPanel.querySelector('[data-hierarchy-candidate-empty]') : null;
+                  var hierarchyCandidateList = hierarchyPanel ? hierarchyPanel.querySelector('[data-hierarchy-candidate-list]') : null;
+                  var hierarchyInspector = hierarchyPanel ? hierarchyPanel.querySelector('[data-hierarchy-inspector]') : null;
                   var hierarchySelectedTitle = hierarchyInspector ? hierarchyInspector.querySelector('[data-hierarchy-selected-title]') : null;
                   var hierarchySelectedSubtitle = hierarchyInspector ? hierarchyInspector.querySelector('[data-hierarchy-selected-subtitle]') : null;
                   var hierarchyProperties = hierarchyInspector ? hierarchyInspector.querySelector('[data-hierarchy-properties]') : null;
@@ -2099,7 +2120,9 @@ extension XCTestReport {
                       hierarchySnapshots = [];
                       timelineBase = fallbackVideoBase || 0;
                       initialFailureEventIndex = -1;
+                      closeHierarchyMenu();
                       refreshRunScopedBindings();
+                      refreshHierarchyPanelVisibility();
                       return;
                     }
 
@@ -2127,6 +2150,7 @@ extension XCTestReport {
                     closeHierarchyMenu();
                     hideTouchMarker();
                     refreshRunScopedBindings();
+                    refreshHierarchyPanelVisibility();
                     if (eventLabel) {
                       eventLabel.textContent = runState.firstEventLabel || 'No event selected';
                     }
@@ -2283,16 +2307,42 @@ extension XCTestReport {
                     return layer ? layer.querySelector('[data-hierarchy-highlight]') : null;
                   }
 
-                  function getActiveHierarchyMenu() {
-                    var layer = getActiveHierarchyLayer();
-                    return layer ? layer.querySelector('[data-hierarchy-menu]') : null;
+                  function setHierarchyPanelExpanded(expanded) {
+                    if (!hierarchyPanel || !hierarchyBody || !hierarchyToggle) return;
+                    var shouldExpand = !!expanded;
+                    hierarchyPanel.classList.toggle('is-collapsed', !shouldExpand);
+                    hierarchyBody.hidden = !shouldExpand;
+                    hierarchyToggle.setAttribute('aria-expanded', shouldExpand ? 'true' : 'false');
+                  }
+
+                  function refreshHierarchyPanelVisibility() {
+                    if (!hierarchyPanel) return;
+                    var hasHierarchyData = hierarchySnapshots.length > 0 && mediaMode !== 'none';
+                    hierarchyPanel.hidden = !hasHierarchyData;
+                    if (!hasHierarchyData) {
+                      setHierarchyPanelExpanded(false);
+                    }
+                  }
+
+                  function updateHierarchyCandidateSelectionState() {
+                    if (!hierarchyCandidateList) return;
+                    Array.prototype.forEach.call(hierarchyCandidateList.querySelectorAll('.hierarchy-candidate-item'), function(button) {
+                      var elementId = button.getAttribute('data-hierarchy-element-id');
+                      button.classList.toggle('is-selected', !!selectedHierarchyElementId && elementId === selectedHierarchyElementId);
+                      button.classList.toggle('is-hovered', !!hoveredHierarchyElementId && elementId === hoveredHierarchyElementId);
+                    });
                   }
 
                   function closeHierarchyMenu() {
-                    var menu = getActiveHierarchyMenu();
-                    if (!menu) return;
-                    menu.hidden = true;
-                    menu.innerHTML = '';
+                    if (hierarchyCandidateList) {
+                      hierarchyCandidateList.innerHTML = '';
+                    }
+                    if (hierarchyCandidateEmpty) {
+                      hierarchyCandidateEmpty.hidden = false;
+                    }
+                    if (hierarchyCandidateHeading) {
+                      hierarchyCandidateHeading.textContent = 'Elements at cursor';
+                    }
                     hoveredHierarchyElementId = null;
                   }
 
@@ -2368,19 +2418,24 @@ extension XCTestReport {
                   }
 
                   function updateHierarchyInspector(snapshot, element) {
-                    if (!hierarchyToolbar || !hierarchyStatus || !hierarchyInspector || !hierarchySelectedTitle || !hierarchySelectedSubtitle || !hierarchyProperties) return;
-                    if (!hierarchySnapshots.length || mediaMode === 'none') {
-                      hierarchyToolbar.hidden = true;
-                      hierarchyInspector.hidden = true;
+                    if (!hierarchyPanel || !hierarchyToolbar || !hierarchyStatus || !hierarchyInspector || !hierarchySelectedTitle || !hierarchySelectedSubtitle || !hierarchyProperties) return;
+                    refreshHierarchyPanelVisibility();
+                    if (hierarchyPanel.hidden) {
                       hierarchyProperties.innerHTML = '';
                       return;
                     }
 
-                    hierarchyToolbar.hidden = false;
                     if (!snapshot) {
                       hierarchyStatus.textContent = 'No hierarchy snapshot near this moment.';
-                      hierarchyInspector.hidden = true;
+                      hierarchySelectedTitle.textContent = 'UI Hierarchy';
+                      hierarchySelectedSubtitle.textContent = 'Scrub near a hierarchy snapshot, then click inside the media.';
                       hierarchyProperties.innerHTML = '';
+                      if (hierarchyCandidateHeading) hierarchyCandidateHeading.textContent = 'Elements at cursor';
+                      if (hierarchyCandidateEmpty) {
+                        hierarchyCandidateEmpty.textContent = 'No hierarchy snapshot near this moment.';
+                        hierarchyCandidateEmpty.hidden = false;
+                      }
+                      if (hierarchyCandidateList) hierarchyCandidateList.innerHTML = '';
                       return;
                     }
 
@@ -2388,7 +2443,6 @@ extension XCTestReport {
                     var elementCount = snapshot.elements ? snapshot.elements.length : 0;
                     hierarchyStatus.textContent = snapshot.label + ' @ ' + formatSeconds(offset) + ' (' + elementCount + ' nodes)';
 
-                    hierarchyInspector.hidden = false;
                     if (!element) {
                       hierarchySelectedTitle.textContent = snapshot.label;
                       hierarchySelectedSubtitle.textContent = 'Click inside the media to choose from overlapping elements.';
@@ -2424,6 +2478,7 @@ extension XCTestReport {
                     });
 
                     hierarchyProperties.innerHTML = rows.join('');
+                    updateHierarchyCandidateSelectionState();
                   }
 
                   function hierarchyElementsAtPoint(snapshot, x, y) {
@@ -2449,33 +2504,36 @@ extension XCTestReport {
                     return matches;
                   }
 
-                  function openHierarchyCandidateMenu(snapshot, candidates, localX, localY) {
-                    var menu = getActiveHierarchyMenu();
-                    var layer = getActiveHierarchyLayer();
-                    if (!menu || !layer || !candidates.length) return;
+                  function openHierarchyCandidateMenu(snapshot, candidates) {
+                    if (!hierarchyCandidateList || !candidates.length) return;
 
-                    var options = candidates.slice(0, 14);
-                    menu.innerHTML = options.map(function(element) {
+                    setHierarchyPanelExpanded(true);
+                    var options = candidates.slice(0, 20);
+                    hierarchyCandidateList.innerHTML = options.map(function(element) {
                       return '<button type="button" class="hierarchy-candidate-item" data-hierarchy-element-id="' + escapeHTML(element.id) + '">'
                         + '<span class="hierarchy-candidate-title">' + escapeHTML(hierarchyElementTitle(element)) + '</span>'
                         + '<span class="hierarchy-candidate-frame">{{' + Number(element.x).toFixed(0) + ', ' + Number(element.y).toFixed(0) + '}, {' + Number(element.width).toFixed(0) + ', ' + Number(element.height).toFixed(0) + '}}</span>'
                         + '</button>';
                     }).join('');
-                    menu.hidden = false;
+                    if (hierarchyCandidateHeading) {
+                      var offset = Math.max(0, (snapshot.time || 0) - (timelineBase || 0));
+                      hierarchyCandidateHeading.textContent = 'Elements at ' + formatSeconds(offset);
+                    }
+                    if (hierarchyCandidateEmpty) {
+                      hierarchyCandidateEmpty.textContent = 'Click inside the media to list overlapping elements.';
+                      hierarchyCandidateEmpty.hidden = true;
+                    }
 
-                    var maxLeft = Math.max(4, layer.clientWidth - menu.offsetWidth - 4);
-                    var maxTop = Math.max(4, layer.clientHeight - menu.offsetHeight - 4);
-                    menu.style.left = Math.min(maxLeft, Math.max(4, localX + 8)) + 'px';
-                    menu.style.top = Math.min(maxTop, Math.max(4, localY + 8)) + 'px';
-
-                    Array.prototype.forEach.call(menu.querySelectorAll('.hierarchy-candidate-item'), function(button) {
+                    Array.prototype.forEach.call(hierarchyCandidateList.querySelectorAll('.hierarchy-candidate-item'), function(button) {
                       var elementId = button.getAttribute('data-hierarchy-element-id');
                       button.addEventListener('mouseenter', function() {
                         hoveredHierarchyElementId = elementId;
+                        updateHierarchyCandidateSelectionState();
                         updateHierarchyOverlay();
                       });
                       button.addEventListener('mouseleave', function() {
                         hoveredHierarchyElementId = null;
+                        updateHierarchyCandidateSelectionState();
                         updateHierarchyOverlay();
                       });
                       button.addEventListener('click', function(event) {
@@ -2483,10 +2541,11 @@ extension XCTestReport {
                         event.stopPropagation();
                         selectedHierarchyElementId = elementId;
                         hoveredHierarchyElementId = null;
-                        closeHierarchyMenu();
+                        updateHierarchyCandidateSelectionState();
                         updateHierarchyOverlay();
                       });
                     });
+                    updateHierarchyCandidateSelectionState();
                   }
 
                   function handleHierarchyOverlayClick(event, layer) {
@@ -2502,6 +2561,7 @@ extension XCTestReport {
 
                     if (localX < mediaRect.x || localY < mediaRect.y || localX > (mediaRect.x + mediaRect.width) || localY > (mediaRect.y + mediaRect.height)) {
                       closeHierarchyMenu();
+                      updateHierarchyInspector(snapshot, hierarchyElementById(snapshot, selectedHierarchyElementId));
                       return;
                     }
 
@@ -2519,7 +2579,7 @@ extension XCTestReport {
                       return;
                     }
 
-                    openHierarchyCandidateMenu(snapshot, candidates, localX, localY);
+                    openHierarchyCandidateMenu(snapshot, candidates);
                     event.preventDefault();
                     event.stopPropagation();
                   }
@@ -2567,6 +2627,7 @@ extension XCTestReport {
                     }
                     setHierarchyHighlight(snapshot, highlightedElement);
                     updateHierarchyInspector(snapshot, hierarchyElementById(snapshot, selectedHierarchyElementId));
+                    updateHierarchyCandidateSelectionState();
                   }
 
                   function updateStillFrameForTime(absoluteTime) {
@@ -3035,7 +3096,19 @@ extension XCTestReport {
                       return;
                     }
 
+                    var hierarchyToggleButton = event.target.closest('[data-hierarchy-toggle]');
+                    if (hierarchyToggleButton) {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setHierarchyPanelExpanded(hierarchyPanel ? hierarchyPanel.classList.contains('is-collapsed') : false);
+                      return;
+                    }
+
                     if (event.target.closest('.hierarchy-candidate-item')) {
+                      return;
+                    }
+
+                    if (event.target.closest('[data-hierarchy-panel]')) {
                       return;
                     }
 
@@ -3169,8 +3242,7 @@ extension XCTestReport {
                       return;
                     }
                     if (event.key === 'Escape') {
-                      var hierarchyMenu = getActiveHierarchyMenu();
-                      if (hierarchyMenu && !hierarchyMenu.hidden) {
+                      if (hierarchyCandidateList && hierarchyCandidateList.children.length) {
                         event.preventDefault();
                         closeHierarchyMenu();
                         updateHierarchyOverlay();

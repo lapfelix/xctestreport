@@ -68,7 +68,6 @@
   var selectedHierarchyElementId = null;
   var hoveredHierarchyElementId = null;
   var currentHierarchyCandidateIds = [];
-  var currentHierarchyHintIds = [];
   var hierarchyParentMapCache = Object.create(null);
   var PLAY_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 6V18L18 12Z"></path></svg>';
   var PAUSE_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="6" width="4" height="12" rx="1"></rect><rect x="13" y="6" width="4" height="12" rx="1"></rect></svg>';
@@ -472,11 +471,9 @@
 
     var scaleX = rect.width / snapshot.width;
     var scaleY = rect.height / snapshot.height;
-    var hintIds = currentHierarchyHintIds.slice();
-    if (selectedHierarchyElementId && hintIds.indexOf(selectedHierarchyElementId) === -1) {
-      hintIds.push(selectedHierarchyElementId);
-    }
-    if (hoveredHierarchyElementId && hintIds.indexOf(hoveredHierarchyElementId) === -1) {
+    var hintIds = [];
+    if (selectedHierarchyElementId) hintIds.push(selectedHierarchyElementId);
+    if (hoveredHierarchyElementId && hoveredHierarchyElementId !== selectedHierarchyElementId) {
       hintIds.push(hoveredHierarchyElementId);
     }
 
@@ -504,29 +501,8 @@
     hintsLayer.innerHTML = hintsHtml.join('');
   }
 
-  function computeHierarchyHintIds(snapshot, options) {
-    if (!snapshot || !options || !options.length) return [];
-    var snapshotArea = Math.max(1, snapshot.width * snapshot.height);
-    var maxHintCount = 8;
-    var maxAreaRatio = 0.5;
-    var ids = [];
-    for (var i = 0; i < options.length; i += 1) {
-      var option = options[i];
-      if (!option || !option.id || option.width <= 0 || option.height <= 0) continue;
-      var areaRatio = Math.max(0, option.width * option.height) / snapshotArea;
-      if (areaRatio > maxAreaRatio) continue;
-      ids.push(option.id);
-      if (ids.length >= maxHintCount) break;
-    }
-    if (!ids.length && options[0] && options[0].id) {
-      ids.push(options[0].id);
-    }
-    return ids;
-  }
-
   function closeHierarchyMenu() {
     currentHierarchyCandidateIds = [];
-    currentHierarchyHintIds = [];
     selectedHierarchyElementId = null;
     if (hierarchyCandidateList) {
       hierarchyCandidateList.innerHTML = '';
@@ -562,7 +538,6 @@
     hierarchyCandidateEmpty.textContent = message || 'No elements at this point.';
     hierarchyCandidateEmpty.hidden = false;
     currentHierarchyCandidateIds = [];
-    currentHierarchyHintIds = [];
     selectedHierarchyElementId = null;
     hoveredHierarchyElementId = null;
     updateHierarchyHintOverlays(snapshot || null);
@@ -814,7 +789,6 @@
     setHierarchyPanelExpanded(true);
     var options = candidates.slice(0, 20);
     currentHierarchyCandidateIds = options.map(function(element) { return element.id; });
-    currentHierarchyHintIds = computeHierarchyHintIds(snapshot, options);
     selectedHierarchyElementId = options[0] ? options[0].id : null;
     hoveredHierarchyElementId = null;
     hierarchyCandidateList.innerHTML = options.map(function(element) {
@@ -850,7 +824,6 @@
         event.preventDefault();
         event.stopPropagation();
         selectedHierarchyElementId = elementId;
-        currentHierarchyHintIds = elementId ? [elementId] : [];
         hoveredHierarchyElementId = null;
         updateHierarchyCandidateSelectionState();
         updateHierarchyOverlay();
@@ -1253,8 +1226,23 @@
 
   function eventIndexForAbsoluteTime(absTime) {
     if (!events.length) return -1;
+    var epsilon = 0.05;
     var idx = 0;
-    while (idx + 1 < events.length && events[idx + 1].time <= absTime + 0.05) idx += 1;
+    for (var i = 0; i < events.length; i += 1) {
+      var event = events[i];
+      var startTime = Number(event.time || 0);
+      if (startTime > absTime + epsilon) break;
+
+      idx = i;
+      var endTime = Number(event.endTime);
+      if (!Number.isFinite(endTime)) endTime = startTime;
+      if (endTime < startTime) endTime = startTime;
+
+      // Range events (collapsed repeat groups) should remain active until their end.
+      if (endTime > startTime + 0.0001 && absTime <= endTime + epsilon) {
+        return i;
+      }
+    }
     return idx;
   }
 

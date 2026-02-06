@@ -300,6 +300,7 @@ extension XCTestReport {
         let id: String
         let title: String
         let time: Double
+        let endTime: Double
     }
 
     struct TimelineRunState: Codable {

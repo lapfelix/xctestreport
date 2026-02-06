@@ -79,10 +79,13 @@ extension XCTestReport {
             )
             let hierarchySnapshots = buildUIHierarchySnapshots(from: collapsedTimelineNodes)
             let events = timestampedNodes.map { node in
-                TimelineEventEntry(
+                let startTime = node.timestamp ?? timelineBaseTime
+                let endTime = max(startTime, node.endTimestamp ?? startTime)
+                return TimelineEventEntry(
                     id: node.id,
                     title: timelineDisplayTitle(node, baseTime: timelineBaseTime),
-                    time: node.timestamp ?? timelineBaseTime
+                    time: startTime,
+                    endTime: endTime
                 )
             }
             let initialFailureEventIndex = timestampedNodes.firstIndex { $0.failureAssociated } ?? -1

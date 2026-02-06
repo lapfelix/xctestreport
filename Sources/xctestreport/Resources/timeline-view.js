@@ -22,6 +22,7 @@
   var previewVideo = previewModal ? previewModal.querySelector('[data-attachment-video]') : null;
   var previewFrame = previewModal ? previewModal.querySelector('[data-attachment-frame]') : null;
   var previewEmpty = previewModal ? previewModal.querySelector('[data-attachment-empty]') : null;
+  var hierarchyOpenToggle = root.querySelector('[data-hierarchy-open]');
   var hierarchyPanel = root.querySelector('[data-hierarchy-panel]');
   var hierarchyToggle = hierarchyPanel ? hierarchyPanel.querySelector('[data-hierarchy-toggle]') : null;
   var hierarchyBody = hierarchyPanel ? hierarchyPanel.querySelector('[data-hierarchy-body]') : null;
@@ -385,8 +386,11 @@
     if (!hierarchyPanel || !hierarchyBody || !hierarchyToggle) return;
     var shouldExpand = !!expanded;
     hierarchyPanel.classList.toggle('is-collapsed', !shouldExpand);
-    hierarchyBody.hidden = !shouldExpand;
+    hierarchyBody.setAttribute('aria-hidden', shouldExpand ? 'false' : 'true');
     hierarchyToggle.setAttribute('aria-expanded', shouldExpand ? 'true' : 'false');
+    if (hierarchyOpenToggle) {
+      hierarchyOpenToggle.hidden = hierarchyPanel.hidden || shouldExpand;
+    }
     updateActiveMediaLayout();
     updateTouchOverlay();
     updateHierarchyOverlay();
@@ -396,6 +400,9 @@
     if (!hierarchyPanel) return;
     var hasHierarchyData = hierarchySnapshots.length > 0 && mediaMode !== 'none';
     hierarchyPanel.hidden = !hasHierarchyData;
+    if (hierarchyOpenToggle) {
+      hierarchyOpenToggle.hidden = !hasHierarchyData || (hierarchyToggle && hierarchyToggle.getAttribute('aria-expanded') === 'true');
+    }
     if (!hasHierarchyData) {
       setHierarchyPanelExpanded(false);
     }
@@ -1335,6 +1342,14 @@
       event.stopPropagation();
       var currentlyExpanded = hierarchyToggle && hierarchyToggle.getAttribute('aria-expanded') === 'true';
       setHierarchyPanelExpanded(!currentlyExpanded);
+      return;
+    }
+
+    var hierarchyOpenButton = event.target.closest('[data-hierarchy-open]');
+    if (hierarchyOpenButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      setHierarchyPanelExpanded(true);
       return;
     }
 

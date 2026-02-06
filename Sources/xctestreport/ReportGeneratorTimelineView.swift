@@ -240,13 +240,18 @@ extension XCTestReport {
                         \(videoSelector)
                         \(videoElements)
                     </div>
+                    <button type="button" class="hierarchy-open-toggle" data-hierarchy-open aria-label="Show hierarchy inspector" hidden>
+                        <svg class="hierarchy-open-toggle-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                            <path d="M7.4 4.6L12.8 10L7.4 15.4L8.8 16.8L15.6 10L8.8 3.2Z"></path>
+                        </svg>
+                    </button>
                     <aside class="hierarchy-side-panel is-collapsed" data-hierarchy-panel hidden>
                         <button type="button" class="hierarchy-side-toggle" data-hierarchy-toggle aria-expanded="false" aria-label="Toggle hierarchy inspector">
                             <svg class="hierarchy-side-toggle-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
                                 <path d="M12.6 4.6L7.2 10L12.6 15.4L11.2 16.8L4.4 10L11.2 3.2Z"></path>
                             </svg>
                         </button>
-                        <div class="hierarchy-side-body" data-hierarchy-body hidden>
+                        <div class="hierarchy-side-body" data-hierarchy-body aria-hidden="true">
                             <div class="hierarchy-side-title">Inspector</div>
                             <div class="hierarchy-toolbar" data-hierarchy-toolbar>
                                 <span class="hierarchy-toolbar-dot" aria-hidden="true"></span>

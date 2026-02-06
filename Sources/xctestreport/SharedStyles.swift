@@ -503,6 +503,7 @@ let sharedStyles = """
         grid-template-columns: minmax(0, 1fr) auto;
         align-items: stretch;
         gap: 8px;
+        position: relative;
     }
 
     .video-media-column {
@@ -1162,11 +1163,19 @@ let sharedStyles = """
         display: flex;
         align-items: stretch;
         gap: 8px;
+        opacity: 1;
+        transform: translateX(0);
+        transition: width 150ms ease, min-width 150ms ease, opacity 140ms ease, transform 140ms ease;
     }
 
     .hierarchy-side-panel.is-collapsed {
-        width: 32px;
-        min-width: 32px;
+        width: 0;
+        min-width: 0;
+        gap: 0;
+        opacity: 0;
+        transform: translateX(8px);
+        pointer-events: none;
+        overflow: hidden;
     }
 
     .hierarchy-side-panel[hidden] {
@@ -1200,14 +1209,6 @@ let sharedStyles = """
         transform: rotate(180deg);
     }
 
-    .hierarchy-side-panel.is-collapsed .hierarchy-side-toggle-icon {
-        transform: rotate(0deg);
-    }
-
-    .hierarchy-side-panel.is-collapsed .hierarchy-side-toggle {
-        width: 32px;
-    }
-
     .hierarchy-side-body {
         flex: 1;
         min-width: 0;
@@ -1219,6 +1220,55 @@ let sharedStyles = """
         grid-template-rows: auto auto auto minmax(0, 1fr);
         gap: 10px;
         overflow: hidden;
+        opacity: 1;
+        transform: translateX(0);
+        transition: opacity 140ms ease, transform 140ms ease;
+    }
+
+    .hierarchy-side-panel.is-collapsed .hierarchy-side-body {
+        width: 0;
+        min-width: 0;
+        padding: 0;
+        border-width: 0;
+        opacity: 0;
+        transform: translateX(6px);
+        pointer-events: none;
+    }
+
+    .hierarchy-open-toggle[hidden] {
+        display: none;
+    }
+
+    .hierarchy-open-toggle {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        width: 30px;
+        height: 30px;
+        border-radius: 8px;
+        border: 1px solid #CAD6E8;
+        background: #F6F9FF;
+        color: #2D4365;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        cursor: pointer;
+        z-index: 4;
+        box-shadow: 0 4px 14px rgba(17, 29, 45, 0.14);
+        transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease, opacity 140ms ease;
+    }
+
+    .hierarchy-open-toggle:hover {
+        background: #EDF3FF;
+        border-color: #B9C9E3;
+        box-shadow: 0 6px 18px rgba(17, 29, 45, 0.2);
+    }
+
+    .hierarchy-open-toggle-icon {
+        width: 14px;
+        height: 14px;
+        fill: currentColor;
     }
 
     .hierarchy-side-title {
@@ -2034,6 +2084,19 @@ let sharedStyles = """
 
         .hierarchy-side-toggle:hover {
             background: #2D3A4F;
+        }
+
+        .hierarchy-open-toggle {
+            background: #253043;
+            border-color: #4B5E80;
+            color: #DCE6F8;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+        }
+
+        .hierarchy-open-toggle:hover {
+            background: #2D3A4F;
+            border-color: #60779F;
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
         }
 
         .hierarchy-side-body {

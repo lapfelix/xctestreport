@@ -1,7 +1,119 @@
 import Dispatch
 import Foundation
 
+private struct CompactScreenshotSource: Encodable {
+    let value: XCTestReport.ScreenshotSource
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.unkeyedContainer()
+        try container.encode(value.label)
+        try container.encode(value.src)
+        try container.encode(value.time)
+        try container.encode(value.failureAssociated)
+    }
+}
+
+private struct CompactTouchGesturePoint: Encodable {
+    let value: XCTestReport.TouchGesturePoint
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.unkeyedContainer()
+        try container.encode(value.time)
+        try container.encode(value.x)
+        try container.encode(value.y)
+    }
+}
+
+private struct CompactTouchGestureOverlay: Encodable {
+    let value: XCTestReport.TouchGestureOverlay
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.unkeyedContainer()
+        try container.encode(value.startTime)
+        try container.encode(value.endTime)
+        try container.encode(value.width)
+        try container.encode(value.height)
+        try container.encode(value.points.map { CompactTouchGesturePoint(value: $0) })
+    }
+}
+
+private struct CompactUIHierarchyElement: Encodable {
+    let value: XCTestReport.UIHierarchyElement
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.unkeyedContainer()
+        try container.encode(value.id)
+        try container.encode(value.depth)
+        try container.encode(value.role)
+        try container.encode(value.name)
+        try container.encode(value.label)
+        try container.encode(value.identifier)
+        try container.encode(value.value)
+        try container.encode(value.x)
+        try container.encode(value.y)
+        try container.encode(value.width)
+        try container.encode(value.height)
+        try container.encode(value.properties)
+    }
+}
+
+private struct CompactUIHierarchySnapshot: Encodable {
+    let value: XCTestReport.UIHierarchySnapshot
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.unkeyedContainer()
+        try container.encode(value.id)
+        try container.encode(value.label)
+        try container.encode(value.time)
+        try container.encode(value.width)
+        try container.encode(value.height)
+        try container.encode(value.failureAssociated)
+        try container.encode(value.elements.map { CompactUIHierarchyElement(value: $0) })
+    }
+}
+
+private struct CompactTimelineEventEntry: Encodable {
+    let value: XCTestReport.TimelineEventEntry
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.unkeyedContainer()
+        try container.encode(value.id)
+        try container.encode(value.title)
+        try container.encode(value.time)
+        try container.encode(value.endTime)
+        try container.encode(value.kind.rawValue)
+    }
+}
+
+private struct CompactTimelineRunState: Encodable {
+    let value: XCTestReport.TimelineRunState
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.unkeyedContainer()
+        try container.encode(value.timelineBase)
+        try container.encode(value.firstEventLabel)
+        try container.encode(value.initialFailureEventIndex)
+        try container.encode(value.events.map { CompactTimelineEventEntry(value: $0) })
+        try container.encode(value.touchGestures.map { CompactTouchGestureOverlay(value: $0) })
+        try container.encode(value.hierarchySnapshots.map { CompactUIHierarchySnapshot(value: $0) })
+    }
+}
+
 extension XCTestReport {
+    private func encodeCompactRunStatesJSON(_ runStates: [TimelineRunState]) -> String {
+        let encoder = JSONEncoder()
+        let payload = runStates.map { CompactTimelineRunState(value: $0) }
+        guard let encoded = try? encoder.encode(payload) else { return "[]" }
+        return String(data: encoded, encoding: .utf8) ?? "[]"
+    }
+
+    private func encodeCompactScreenshotsJSON(_ screenshotSources: [ScreenshotSource]) -> String {
+        let encoder = JSONEncoder()
+        let payload = screenshotSources.map { CompactScreenshotSource(value: $0) }
+        guard let encoded = try? encoder.encode(payload) else { return "[]" }
+        return String(data: encoded, encoding: .utf8) ?? "[]"
+    }
+
     func renderTimelineVideoSection(
         for testIdentifier: String?, activities: TestActivities?,
         attachmentsByTestIdentifier: [String: [AttachmentManifestItem]],
@@ -33,8 +145,7 @@ extension XCTestReport {
 
         let screenshotJSON: String = {
             guard !screenshotSources.isEmpty else { return "[]" }
-            guard let encoded = try? JSONEncoder().encode(screenshotSources) else { return "[]" }
-            return String(data: encoded, encoding: .utf8) ?? "[]"
+            return encodeCompactScreenshotsJSON(screenshotSources)
         }()
         let includeManifestTouchFallback = runActivityLists.count <= 1
         var runStates = [TimelineRunState]()
@@ -145,8 +256,7 @@ extension XCTestReport {
         }
 
         let runStatesJSON: String = {
-            guard let encoded = try? JSONEncoder().encode(runStates) else { return "[]" }
-            return String(data: encoded, encoding: .utf8) ?? "[]"
+            return encodeCompactRunStatesJSON(runStates)
         }()
         let runSelectorHTML: String = {
             guard runStates.count > 1 else { return "" }

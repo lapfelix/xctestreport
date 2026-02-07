@@ -3,6 +3,12 @@ import Foundation
 private let templatePlaceholderRegex = try! NSRegularExpression(
     pattern: #"\{\{([a-zA-Z0-9_]+)\}\}"#
 )
+private let htmlInterTagWhitespaceRegex = try! NSRegularExpression(
+    pattern: #">\s+<"#
+)
+private let htmlMinifyProtectedBlockRegex = try! NSRegularExpression(
+    pattern: #"(?is)<(script|style|pre|textarea)\b[^>]*>.*?</\1>"#
+)
 
 extension XCTestReport {
     struct WebTemplates {
@@ -52,6 +58,41 @@ extension XCTestReport {
         return json
             .replacingOccurrences(of: "</script", with: "<\\/script")
             .replacingOccurrences(of: "<!--", with: "<\\!--")
+    }
+
+    func minifyHTMLInterTagWhitespace(_ html: String) -> String {
+        let fullRange = NSRange(html.startIndex..<html.endIndex, in: html)
+        let protectedMatches = htmlMinifyProtectedBlockRegex.matches(
+            in: html, options: [], range: fullRange)
+        guard !protectedMatches.isEmpty else {
+            return minifyInterTagWhitespaceSegment(html)
+        }
+
+        var output = String()
+        var currentIndex = html.startIndex
+
+        for match in protectedMatches {
+            guard let protectedRange = Range(match.range, in: html) else { continue }
+            let prefixSegment = String(html[currentIndex..<protectedRange.lowerBound])
+            output += minifyInterTagWhitespaceSegment(prefixSegment)
+            output += String(html[protectedRange])
+            currentIndex = protectedRange.upperBound
+        }
+
+        if currentIndex < html.endIndex {
+            output += minifyInterTagWhitespaceSegment(String(html[currentIndex...]))
+        }
+        return output
+    }
+
+    private func minifyInterTagWhitespaceSegment(_ segment: String) -> String {
+        let segmentRange = NSRange(segment.startIndex..<segment.endIndex, in: segment)
+        return htmlInterTagWhitespaceRegex.stringByReplacingMatches(
+            in: segment,
+            options: [],
+            range: segmentRange,
+            withTemplate: "><"
+        )
     }
 
     private func templatePlaceholders(in template: String) -> [String] {

@@ -14,6 +14,205 @@
     }
   }
 
+  function asNumber(value, fallback) {
+    var number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+  }
+
+  function asString(value, fallback) {
+    return value == null ? fallback : String(value);
+  }
+
+  function asBoolean(value) {
+    return value === true || value === 1 || value === '1';
+  }
+
+  function objectOrEmpty(value) {
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  }
+
+  function decodeTimelineEvent(raw) {
+    if (Array.isArray(raw)) {
+      var compactTime = asNumber(raw[2], 0);
+      return {
+        id: asString(raw[0], ''),
+        title: asString(raw[1], 'Timeline event'),
+        time: compactTime,
+        endTime: asNumber(raw[3], compactTime),
+        kind: asString(raw[4], 'event')
+      };
+    }
+
+    var source = objectOrEmpty(raw);
+    var time = asNumber(source.time != null ? source.time : source.s, 0);
+    return {
+      id: asString(source.id != null ? source.id : source.i, ''),
+      title: asString(source.title != null ? source.title : source.t, 'Timeline event'),
+      time: time,
+      endTime: asNumber(source.endTime != null ? source.endTime : source.e, time),
+      kind: asString(source.kind != null ? source.kind : source.k, 'event')
+    };
+  }
+
+  function decodeTouchPoint(raw) {
+    if (Array.isArray(raw)) {
+      return {
+        time: asNumber(raw[0], 0),
+        x: asNumber(raw[1], 0),
+        y: asNumber(raw[2], 0)
+      };
+    }
+
+    var source = objectOrEmpty(raw);
+    return {
+      time: asNumber(source.time != null ? source.time : source.t, 0),
+      x: asNumber(source.x, 0),
+      y: asNumber(source.y, 0)
+    };
+  }
+
+  function decodeTouchGesture(raw) {
+    if (Array.isArray(raw)) {
+      return {
+        startTime: asNumber(raw[0], 0),
+        endTime: asNumber(raw[1], 0),
+        width: asNumber(raw[2], 0),
+        height: asNumber(raw[3], 0),
+        points: (Array.isArray(raw[4]) ? raw[4] : []).map(decodeTouchPoint)
+      };
+    }
+
+    var source = objectOrEmpty(raw);
+    return {
+      startTime: asNumber(source.startTime != null ? source.startTime : source.s, 0),
+      endTime: asNumber(source.endTime != null ? source.endTime : source.e, 0),
+      width: asNumber(source.width != null ? source.width : source.w, 0),
+      height: asNumber(source.height != null ? source.height : source.h, 0),
+      points: (Array.isArray(source.points || source.p) ? (source.points || source.p) : []).map(decodeTouchPoint)
+    };
+  }
+
+  function decodeHierarchyElement(raw) {
+    if (Array.isArray(raw)) {
+      return {
+        id: asString(raw[0], ''),
+        depth: asNumber(raw[1], 0),
+        role: asString(raw[2], ''),
+        name: raw[3] == null ? null : String(raw[3]),
+        label: raw[4] == null ? null : String(raw[4]),
+        identifier: raw[5] == null ? null : String(raw[5]),
+        value: raw[6] == null ? null : String(raw[6]),
+        x: asNumber(raw[7], 0),
+        y: asNumber(raw[8], 0),
+        width: asNumber(raw[9], 0),
+        height: asNumber(raw[10], 0),
+        properties: objectOrEmpty(raw[11])
+      };
+    }
+
+    var source = objectOrEmpty(raw);
+    return {
+      id: asString(source.id != null ? source.id : source.i, ''),
+      depth: asNumber(source.depth != null ? source.depth : source.d, 0),
+      role: asString(source.role != null ? source.role : source.r, ''),
+      name: source.name != null ? source.name : (source.n != null ? source.n : null),
+      label: source.label != null ? source.label : (source.l != null ? source.l : null),
+      identifier: source.identifier != null ? source.identifier : (source.q != null ? source.q : null),
+      value: source.value != null ? source.value : (source.v != null ? source.v : null),
+      x: asNumber(source.x, 0),
+      y: asNumber(source.y, 0),
+      width: asNumber(source.width != null ? source.width : source.w, 0),
+      height: asNumber(source.height != null ? source.height : source.h, 0),
+      properties: objectOrEmpty(source.properties != null ? source.properties : source.p)
+    };
+  }
+
+  function decodeHierarchySnapshot(raw) {
+    if (Array.isArray(raw)) {
+      return {
+        id: asString(raw[0], ''),
+        label: asString(raw[1], ''),
+        time: asNumber(raw[2], 0),
+        width: asNumber(raw[3], 0),
+        height: asNumber(raw[4], 0),
+        failureAssociated: asBoolean(raw[5]),
+        elements: (Array.isArray(raw[6]) ? raw[6] : []).map(decodeHierarchyElement)
+      };
+    }
+
+    var source = objectOrEmpty(raw);
+    var elements = source.elements != null ? source.elements : source.e;
+    return {
+      id: asString(source.id != null ? source.id : source.i, ''),
+      label: asString(source.label != null ? source.label : source.l, ''),
+      time: asNumber(source.time != null ? source.time : source.t, 0),
+      width: asNumber(source.width != null ? source.width : source.w, 0),
+      height: asNumber(source.height != null ? source.height : source.h, 0),
+      failureAssociated: asBoolean(source.failureAssociated != null ? source.failureAssociated : source.f),
+      elements: (Array.isArray(elements) ? elements : []).map(decodeHierarchyElement)
+    };
+  }
+
+  function normalizeRunStates(rawStates) {
+    if (!Array.isArray(rawStates)) return [];
+    return rawStates.map(function(rawState, index) {
+      if (Array.isArray(rawState)) {
+        return {
+          index: index,
+          label: 'Run ' + (index + 1),
+          timelineBase: asNumber(rawState[0], 0),
+          firstEventLabel: asString(rawState[1], 'No event selected'),
+          initialFailureEventIndex: asNumber(rawState[2], -1),
+          events: (Array.isArray(rawState[3]) ? rawState[3] : []).map(decodeTimelineEvent),
+          touchGestures: (Array.isArray(rawState[4]) ? rawState[4] : []).map(decodeTouchGesture),
+          hierarchySnapshots: (Array.isArray(rawState[5]) ? rawState[5] : []).map(decodeHierarchySnapshot)
+        };
+      }
+
+      var source = objectOrEmpty(rawState);
+      return {
+        index: asNumber(source.index != null ? source.index : source.i, index),
+        label: asString(source.label != null ? source.label : source.l, 'Run ' + (index + 1)),
+        timelineBase: asNumber(source.timelineBase != null ? source.timelineBase : source.b, 0),
+        firstEventLabel: asString(source.firstEventLabel != null ? source.firstEventLabel : source.f, 'No event selected'),
+        initialFailureEventIndex: asNumber(source.initialFailureEventIndex != null ? source.initialFailureEventIndex : source.x, -1),
+        events: (Array.isArray(source.events != null ? source.events : source.e)
+          ? (source.events != null ? source.events : source.e)
+          : []).map(decodeTimelineEvent),
+        touchGestures: (Array.isArray(source.touchGestures != null ? source.touchGestures : source.t)
+          ? (source.touchGestures != null ? source.touchGestures : source.t)
+          : []).map(decodeTouchGesture),
+        hierarchySnapshots: (Array.isArray(source.hierarchySnapshots != null ? source.hierarchySnapshots : source.h)
+          ? (source.hierarchySnapshots != null ? source.hierarchySnapshots : source.h)
+          : []).map(decodeHierarchySnapshot)
+      };
+    });
+  }
+
+  function decodeScreenshot(raw) {
+    if (Array.isArray(raw)) {
+      return {
+        label: asString(raw[0], ''),
+        src: asString(raw[1], ''),
+        time: asNumber(raw[2], 0),
+        failureAssociated: asBoolean(raw[3])
+      };
+    }
+
+    var source = objectOrEmpty(raw);
+    return {
+      label: asString(source.label != null ? source.label : source.l, ''),
+      src: asString(source.src != null ? source.src : source.s, ''),
+      time: asNumber(source.time != null ? source.time : source.t, 0),
+      failureAssociated: asBoolean(source.failureAssociated != null ? source.failureAssociated : source.f)
+    };
+  }
+
+  function normalizeScreenshots(rawScreenshots) {
+    if (!Array.isArray(rawScreenshots)) return [];
+    return rawScreenshots.map(decodeScreenshot);
+  }
+
   var controls = document.querySelector('[data-timeline-controls]');
   var scrubber = controls.querySelector('[data-scrubber]');
   var scrubberMarkerLane = controls.querySelector('[data-scrubber-markers]');
@@ -54,13 +253,13 @@
   var hierarchyProperties = hierarchyInspector ? hierarchyInspector.querySelector('[data-hierarchy-properties]') : null;
   var selector = root.querySelector('[data-video-selector]');
   var cards = Array.prototype.slice.call(root.querySelectorAll('[data-video-index]'));
-  var runStates = parseJSONScript('[data-timeline-run-states]');
+  var runStates = normalizeRunStates(parseJSONScript('[data-timeline-run-states]'));
   var activeRunIndex = 0;
   var events = [];
   var initialFailureEventIndex = -1;
   var mediaMode = root.dataset.mediaMode || 'video';
   var touchGestures = [];
-  var screenshots = parseJSONScript('[data-timeline-screenshots]');
+  var screenshots = normalizeScreenshots(parseJSONScript('[data-timeline-screenshots]'));
   var hierarchySnapshots = [];
   var timelineBase = 0;
   var fallbackVideoBase = parseFloat(root.dataset.videoBase || '0');

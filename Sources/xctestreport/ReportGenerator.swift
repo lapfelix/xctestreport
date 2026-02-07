@@ -326,7 +326,8 @@ extension XCTestReport {
                         continue
                     }
                     let testPagePath = (outputDir as NSString).appendingPathComponent(testPageName)
-                    try? testDetailHTML.write(
+                    let minimizedTestDetailHTML = minifyHTMLInterTagWhitespace(testDetailHTML)
+                    try? minimizedTestDetailHTML.write(
                         toFile: testPagePath, atomically: true, encoding: .utf8)
 
                     processedTestsQueue.sync {
@@ -614,7 +615,8 @@ extension XCTestReport {
             templateName: "index.html")
 
         let indexPath = (outputDir as NSString).appendingPathComponent("index.html")
-        try indexHTML.write(toFile: indexPath, atomically: true, encoding: .utf8)
+        let minimizedIndexHTML = minifyHTMLInterTagWhitespace(indexHTML)
+        try minimizedIndexHTML.write(toFile: indexPath, atomically: true, encoding: .utf8)
 
         print("HTML report generated at \(indexPath)")
     }

@@ -297,7 +297,7 @@
   var activeEventIndex = -1;
   var eventByIdMap = Object.create(null);
   var eventIndexByIdMap = Object.create(null);
-  var eventStartTimes = [];
+  var eventTimeLookup = [];
   var eventNodeById = Object.create(null);
   var activeRenderedNode = null;
   var activeProxyNode = null;
@@ -305,6 +305,7 @@
   var scrubberMarkers = [];
   var activeScrubberMarkerIndex = -1;
   var pendingSeekTime = null;
+  var pendingVideoSeekTime = null;
   var virtualCurrentTime = 0;
   var virtualDuration = 0;
   var virtualPlaying = false;
@@ -313,6 +314,9 @@
   var videoTimeUpdateFrame = 0;
   var hierarchyOverlayFrame = 0;
   var pendingHierarchyOverlayForce = false;
+  var scrubDragging = false;
+  var scrubPreviewActive = false;
+  var scrubPreviewTime = 0;
   var touchMarker = null;
   var touchAnimationFrame = 0;
   var TOUCH_RELEASE_DURATION = 0.18;
@@ -331,8 +335,6 @@
   var hierarchyHighlightRenderKey = '';
   var hierarchyInspectorRenderKey = '';
   var hierarchyCandidateSelectionKey = '';
-  var timelineStructureVersion = 0;
-  var activeEventRenderStructureVersion = -1;
   var suppressTimelineToggleRefresh = false;
   var PLAY_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 6V18L18 12Z"></path></svg>';
   var PAUSE_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="6" width="4" height="12" rx="1"></rect><rect x="13" y="6" width="4" height="12" rx="1"></rect></svg>';
@@ -411,14 +413,30 @@
   function rebuildEventDataIndexes() {
     eventByIdMap = Object.create(null);
     eventIndexByIdMap = Object.create(null);
-    eventStartTimes = new Array(events.length);
+    eventTimeLookup = [];
     for (var i = 0; i < events.length; i += 1) {
       var event = events[i];
       if (!event || !event.id) continue;
       eventByIdMap[event.id] = event;
       eventIndexByIdMap[event.id] = i;
-      eventStartTimes[i] = asNumber(event.time, 0);
+      var startTime = Number(event.time);
+      if (!Number.isFinite(startTime)) continue;
+      var endTime = Number(event.endTime);
+      if (!Number.isFinite(endTime) || endTime < startTime) {
+        endTime = startTime;
+      }
+      eventTimeLookup.push({
+        index: i,
+        start: startTime,
+        end: endTime
+      });
     }
+    eventTimeLookup.sort(function(a, b) {
+      if (a.start === b.start) {
+        return a.index - b.index;
+      }
+      return a.start - b.start;
+    });
   }
 
   function clearHierarchyRenderCaches() {
@@ -494,7 +512,6 @@
       });
       activeContextNodes = [];
     }
-    activeEventRenderStructureVersion = -1;
   }
 
   function recalculateVirtualDuration() {
@@ -511,12 +528,13 @@
 
   function applyRunState(nextRunIndex, preserveAbsoluteTime) {
     if (!runStates.length) {
+      clearScrubPreview();
+      pendingVideoSeekTime = null;
       events = [];
       touchGestures = [];
       hierarchySnapshots = [];
       timelineBase = fallbackVideoBase || 0;
       initialFailureEventIndex = -1;
-      timelineStructureVersion += 1;
       rebuildEventDataIndexes();
       rebuildHierarchySnapshotIndexes();
       rebuildEventNodeIndex();
@@ -538,6 +556,8 @@
       panel.style.display = panelIndex === activeRunIndex ? '' : 'none';
       clearRunPanelState(panel);
     });
+    clearScrubPreview();
+    pendingVideoSeekTime = null;
 
     var runState = runStates[activeRunIndex] || runStates[0];
     events = runState.events || [];
@@ -549,9 +569,7 @@
 
     activeEventId = null;
     activeEventIndex = -1;
-    activeEventRenderStructureVersion = -1;
     clearActiveEventVisualState();
-    timelineStructureVersion += 1;
     currentHierarchySnapshotId = null;
     selectedHierarchyElementId = null;
     hoveredHierarchyElementId = null;
@@ -742,7 +760,10 @@
 
   function currentAbsoluteTime() {
     var video = getActiveVideo();
-    if (video) return activeMediaStartTime() + (video.currentTime || 0);
+    if (video) {
+      var offset = scrubPreviewActive ? scrubPreviewTime : (video.currentTime || 0);
+      return activeMediaStartTime() + offset;
+    }
     return (timelineBase || 0) + (virtualCurrentTime || 0);
   }
 
@@ -1560,11 +1581,9 @@
     var video = getActiveVideo();
     if (video) {
       var target = Math.max(0, absoluteTime - activeMediaStartTime());
-      if (video.readyState < 1) {
-        pendingSeekTime = target;
-      } else {
-        video.currentTime = target;
-      }
+      scrubPreviewActive = true;
+      scrubPreviewTime = target;
+      requestVideoSeek(target);
       return;
     }
 
@@ -1820,18 +1839,6 @@
     var idx = eventIndexById(eventId);
     if (idx >= 0) activeEventIndex = idx;
 
-    if (
-      activeEventId === eventId
-      && !shouldReveal
-      && !scrollBehavior
-      && activeEventRenderStructureVersion === timelineStructureVersion
-      && activeRenderedNode
-      && activeRenderedNode.isConnected
-    ) {
-      updateScrubberMarkerActiveState();
-      return;
-    }
-
     var preciseNode = eventNodeForId(eventId);
     if (preciseNode && shouldReveal) {
       expandAncestorDetails(preciseNode);
@@ -1866,7 +1873,6 @@
     }
 
     activeEventId = eventId;
-    activeEventRenderStructureVersion = timelineStructureVersion;
     updateScrubberMarkerActiveState();
   }
 
@@ -1881,16 +1887,15 @@
   }
 
   function eventIndexForAbsoluteTime(absTime) {
-    if (!events.length) return -1;
+    if (!eventTimeLookup.length) return -1;
     var epsilon = 0.05;
     var targetTime = absTime + epsilon;
     var low = 0;
-    var high = events.length - 1;
+    var high = eventTimeLookup.length - 1;
     var best = -1;
     while (low <= high) {
       var mid = (low + high) >> 1;
-      var midTime = eventStartTimes[mid];
-      if (!Number.isFinite(midTime)) midTime = asNumber(events[mid].time, 0);
+      var midTime = eventTimeLookup[mid].start;
       if (midTime <= targetTime) {
         best = mid;
         low = mid + 1;
@@ -1898,28 +1903,19 @@
         high = mid - 1;
       }
     }
-    if (best < 0) return 0;
+    if (best < 0) return eventTimeLookup[0].index;
 
-    var bestEvent = events[best];
-    var bestStart = Number(bestEvent.time || 0);
-    var bestEnd = Number(bestEvent.endTime);
-    if (!Number.isFinite(bestEnd)) bestEnd = bestStart;
-    if (bestEnd < bestStart) bestEnd = bestStart;
-
-    if (bestEnd > bestStart + 0.0001 && absTime > bestEnd + epsilon) {
+    var chosen = eventTimeLookup[best];
+    if (chosen.end > chosen.start + 0.0001 && absTime > chosen.end + epsilon) {
       for (var i = best - 1; i >= 0; i -= 1) {
-        var event = events[i];
-        var startTime = Number(event.time || 0);
-        var endTime = Number(event.endTime);
-        if (!Number.isFinite(endTime)) endTime = startTime;
-        if (endTime < startTime) endTime = startTime;
-        if (endTime > startTime + 0.0001 && absTime <= endTime + epsilon) {
-          return i;
+        var candidate = eventTimeLookup[i];
+        if (candidate.end > candidate.start + 0.0001 && absTime <= candidate.end + epsilon) {
+          return candidate.index;
         }
       }
     }
 
-    return best;
+    return chosen.index;
   }
 
   function currentEventIndexForNavigation() {
@@ -1977,6 +1973,45 @@
     });
   }
 
+  function clearScrubPreview() {
+    scrubDragging = false;
+    scrubPreviewActive = false;
+    scrubPreviewTime = 0;
+  }
+
+  function applyPendingVideoSeek() {
+    if (pendingVideoSeekTime == null) return;
+
+    var video = getActiveVideo();
+    if (!video) {
+      pendingVideoSeekTime = null;
+      return;
+    }
+
+    var target = pendingVideoSeekTime;
+    pendingVideoSeekTime = null;
+    var hasMetadata = video.readyState >= 1 && Number.isFinite(video.duration);
+    if (hasMetadata) {
+      target = Math.max(0, Math.min(video.duration, target));
+    } else {
+      target = Math.max(0, target);
+    }
+    try {
+      if (!hasMetadata) {
+        pendingSeekTime = target;
+      } else {
+        video.currentTime = target;
+      }
+    } catch (error) {
+      pendingSeekTime = target;
+    }
+  }
+
+  function requestVideoSeek(timeValue) {
+    pendingVideoSeekTime = timeValue;
+    applyPendingVideoSeek();
+  }
+
   function scheduleHierarchyOverlayUpdate(force) {
     if (force) pendingHierarchyOverlayForce = true;
     if (hierarchyOverlayFrame) return;
@@ -1994,19 +2029,28 @@
   function updateFromVideoTime() {
     var video = getActiveVideo();
     var absoluteTime = 0;
+    var usingScrubPreview = !!(video && scrubPreviewActive);
+    var displayOffset = 0;
     if (video) {
-      scrubber.value = video.currentTime || 0;
-      absoluteTime = activeMediaStartTime() + (video.currentTime || 0);
+      var videoTime = Number(video.currentTime || 0);
+      if (!scrubDragging && scrubPreviewActive && Math.abs(videoTime - scrubPreviewTime) <= 0.06) {
+        scrubPreviewActive = false;
+      }
+      usingScrubPreview = !!scrubPreviewActive;
+      displayOffset = usingScrubPreview ? scrubPreviewTime : videoTime;
+      scrubber.value = displayOffset;
+      absoluteTime = activeMediaStartTime() + displayOffset;
     } else {
-      scrubber.value = virtualCurrentTime || 0;
-      absoluteTime = (timelineBase || 0) + (virtualCurrentTime || 0);
+      displayOffset = virtualCurrentTime || 0;
+      scrubber.value = displayOffset;
+      absoluteTime = (timelineBase || 0) + displayOffset;
       updateStillFrameForTime(absoluteTime);
     }
     var idx = eventIndexForAbsoluteTime(absoluteTime);
-    if (video && pendingSeekTime != null && activeEventIndex >= 0 && activeEventIndex < events.length) {
+    if (video && !usingScrubPreview && pendingSeekTime != null && activeEventIndex >= 0 && activeEventIndex < events.length) {
       idx = activeEventIndex;
     }
-    if (video && video.paused && activeEventIndex >= 0 && activeEventIndex < events.length) {
+    if (video && !usingScrubPreview && video.paused && activeEventIndex >= 0 && activeEventIndex < events.length) {
       var selected = events[activeEventIndex];
       if (Math.abs((selected.time || 0) - absoluteTime) <= 0.06) {
         idx = activeEventIndex;
@@ -2018,12 +2062,16 @@
     } else {
       updateScrubberMarkerActiveState();
     }
-    var currentOffset = video ? (video.currentTime || 0) : (virtualCurrentTime || 0);
+    var currentOffset = video ? displayOffset : (virtualCurrentTime || 0);
     timeLabel.textContent = formatSeconds(currentOffset);
     var duration = video ? (Number.isFinite(video.duration) ? video.duration : 0) : virtualDuration;
     if (totalTimeLabel) totalTimeLabel.textContent = formatSeconds(duration);
     setPlayButtonIcon(video ? !video.paused : virtualPlaying);
     updateDownloadVideoButton();
+    if (video && scrubDragging) {
+      hideTouchMarker();
+      return;
+    }
     updateTouchOverlay();
     scheduleHierarchyOverlayUpdate(false);
   }
@@ -2054,6 +2102,7 @@
     });
     video.addEventListener('timeupdate', scheduleUpdateFromVideoTime);
     video.addEventListener('play', function() {
+      clearScrubPreview();
       updateFromVideoTime();
       startTouchAnimation();
     });
@@ -2062,7 +2111,12 @@
       updateFromVideoTime();
     });
     video.addEventListener('seeking', scheduleUpdateFromVideoTime);
-    video.addEventListener('seeked', scheduleUpdateFromVideoTime);
+    video.addEventListener('seeked', function() {
+      if (!scrubDragging && scrubPreviewActive && Math.abs((video.currentTime || 0) - scrubPreviewTime) <= 0.06) {
+        scrubPreviewActive = false;
+      }
+      scheduleUpdateFromVideoTime();
+    });
   }
 
   cards.forEach(function(card) {
@@ -2095,7 +2149,6 @@
       } finally {
         suppressTimelineToggleRefresh = false;
       }
-      timelineStructureVersion += 1;
       if (activeEventId) {
         setActiveEvent(activeEventId, false, null, true);
       } else {
@@ -2181,7 +2234,6 @@
     var details = event.target;
     if (!details || details.tagName !== 'DETAILS') return;
     if (!details.closest('.timeline-tree')) return;
-    timelineStructureVersion += 1;
     if (activeEventId) {
       setActiveEvent(activeEventId, false, null, true);
     }
@@ -2210,22 +2262,67 @@
     togglePlayback();
   });
 
+  function finishScrubDrag() {
+    if (!scrubDragging) return;
+    scrubDragging = false;
+    var video = getActiveVideo();
+    if (video) {
+      requestVideoSeek(scrubPreviewTime);
+      scheduleUpdateFromVideoTime();
+    }
+  }
+
+  scrubber.addEventListener('pointerdown', function() {
+    if (getActiveVideo()) {
+      scrubDragging = true;
+      scrubPreviewActive = true;
+      scrubPreviewTime = parseFloat(scrubber.value || '0') || 0;
+    }
+  });
+
   scrubber.addEventListener('input', function() {
     var video = getActiveVideo();
     var value = parseFloat(scrubber.value || '0');
+    if (!Number.isFinite(value)) value = 0;
     if (video) {
-      video.currentTime = value;
+      var duration = Number.isFinite(video.duration) ? video.duration : Number(scrubber.max || 0);
+      var clampedValue = Math.max(0, Math.min(Number.isFinite(duration) ? duration : value, value));
+      scrubPreviewActive = true;
+      scrubPreviewTime = clampedValue;
+      if (scrubDragging) {
+        // Keep drag previews responsive; commit the actual video seek on release.
+      } else {
+        requestVideoSeek(clampedValue);
+      }
     } else {
       virtualCurrentTime = Math.max(0, Math.min(virtualDuration, value));
     }
     scheduleUpdateFromVideoTime();
   });
 
+  scrubber.addEventListener('change', function() {
+    var video = getActiveVideo();
+    if (!video) return;
+    scrubDragging = false;
+    var value = parseFloat(scrubber.value || '0');
+    if (!Number.isFinite(value)) value = 0;
+    var target = Math.max(0, value);
+    scrubPreviewActive = true;
+    scrubPreviewTime = target;
+    requestVideoSeek(target);
+    scheduleUpdateFromVideoTime();
+  });
+
+  window.addEventListener('pointerup', finishScrubDrag, true);
+  window.addEventListener('pointercancel', finishScrubDrag, true);
+
   if (selector) {
     selector.addEventListener('change', function() {
       stopTouchAnimation();
       stopVirtualPlayback();
       closeHierarchyMenu();
+      clearScrubPreview();
+      pendingVideoSeekTime = null;
       activeIndex = parseInt(selector.value, 10) || 0;
       cards.forEach(function(card, idx) {
         var video = card.querySelector('video');

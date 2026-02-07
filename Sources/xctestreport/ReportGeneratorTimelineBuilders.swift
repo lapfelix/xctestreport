@@ -70,7 +70,10 @@ extension XCTestReport {
         let fileName = relativePath
             .replacingOccurrences(of: "attachments/", with: "")
             .removingPercentEncoding ?? relativePath
-        return URL(fileURLWithPath: fileName).pathExtension.lowercased()
+        let extensionValue = URL(fileURLWithPath: fileName).pathExtension.lowercased()
+        guard extensionValue == "gz" else { return extensionValue }
+        let uncompressedFileName = (fileName as NSString).deletingPathExtension
+        return URL(fileURLWithPath: uncompressedFileName).pathExtension.lowercased()
     }
 
     func attachmentPreviewKind(name: String, relativePath: String?) -> String {

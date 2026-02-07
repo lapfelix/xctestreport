@@ -320,6 +320,9 @@ extension XCTestReport {
                     contentsOf: entry.attachments)
             }
 
+            compressBinaryPlistAttachmentsForWebPreviewIfPossible(
+                attachmentsByTestIdentifier: &attachmentsByTest)
+
             let totalAttachmentCount = attachmentsByTest.values.reduce(0) { $0 + $1.count }
             let totalVideoCount = attachmentsByTest.values.reduce(0) { partialResult, attachments in
                 partialResult + attachments.filter { isVideoAttachment($0) }.count
@@ -335,7 +338,9 @@ extension XCTestReport {
         }
     }
 
-    func compressBinaryPlistAttachmentsForWebPreviewIfPossible() {
+    func compressBinaryPlistAttachmentsForWebPreviewIfPossible(
+        attachmentsByTestIdentifier: inout [String: [AttachmentManifestItem]]
+    ) {
         let attachmentsDir = (outputDir as NSString).appendingPathComponent("attachments")
         guard FileManager.default.fileExists(atPath: attachmentsDir) else {
             return
@@ -353,14 +358,14 @@ extension XCTestReport {
         var failedCount = 0
         var originalBytesTotal: UInt64 = 0
         var compressedBytesTotal: UInt64 = 0
+        var renamedFiles = [String: String]()
 
-        guard let entries = try? fileManager.contentsOfDirectory(atPath: attachmentsDir) else {
-            print("Binary plist compression skipped: unable to read attachments directory.")
-            return
-        }
-
-        let candidateFiles = entries.sorted().compactMap { exportedFileName -> (String, String)? in
-            guard exportedFileName != "manifest.json" else { return nil }
+        let exportedFileNames = Set(
+            attachmentsByTestIdentifier
+                .values
+                .flatMap { $0.map(\.exportedFileName) }
+        )
+        let candidateFiles = exportedFileNames.sorted().compactMap { exportedFileName -> (String, String)? in
             let inputPath = (attachmentsDir as NSString).appendingPathComponent(exportedFileName)
             var isDirectory: ObjCBool = false
             guard fileManager.fileExists(atPath: inputPath, isDirectory: &isDirectory),
@@ -444,13 +449,18 @@ extension XCTestReport {
                     return
                 }
 
+                let compressedFileName = exportedFileName + ".gz"
+                let destinationPath = (attachmentsDir as NSString).appendingPathComponent(
+                    compressedFileName)
                 do {
+                    try? localFileManager.removeItem(atPath: destinationPath)
                     try localFileManager.removeItem(atPath: inputPath)
-                    try localFileManager.moveItem(atPath: tempCompressedPath, toPath: inputPath)
+                    try localFileManager.moveItem(atPath: tempCompressedPath, toPath: destinationPath)
                     statsLock.lock()
                     compressedCount += 1
                     originalBytesTotal += originalSize
                     compressedBytesTotal += compressedSize
+                    renamedFiles[exportedFileName] = compressedFileName
                     statsLock.unlock()
                 } catch {
                     statsLock.lock()
@@ -469,6 +479,18 @@ extension XCTestReport {
             ratioText = String(format: "%.2fx", ratio)
         } else {
             ratioText = "n/a"
+        }
+
+        if !renamedFiles.isEmpty {
+            for testIdentifier in attachmentsByTestIdentifier.keys {
+                guard var items = attachmentsByTestIdentifier[testIdentifier] else { continue }
+                for index in items.indices {
+                    if let compressedFileName = renamedFiles[items[index].exportedFileName] {
+                        items[index].exportedFileName = compressedFileName
+                    }
+                }
+                attachmentsByTestIdentifier[testIdentifier] = items
+            }
         }
 
         print(

@@ -616,10 +616,6 @@ extension XCTestReport {
         let indexPath = (outputDir as NSString).appendingPathComponent("index.html")
         try indexHTML.write(toFile: indexPath, atomically: true, encoding: .utf8)
 
-        // Store large binary plist attachments as gzip-compressed textual previews
-        // after timeline extraction is complete.
-        compressBinaryPlistAttachmentsForWebPreviewIfPossible()
-
         print("HTML report generated at \(indexPath)")
     }
 }

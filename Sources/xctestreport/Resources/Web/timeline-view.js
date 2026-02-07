@@ -1,17 +1,46 @@
 (function() {
   var root = document.querySelector('[data-timeline-root]');
   if (!root) return;
+  var externalJSONPayloads = Object.create(null);
+  var externalJSONLoaders = [];
 
   function parseJSONScript(selector) {
     var node = document.querySelector(selector);
     if (!node) return [];
+    var inlineArray = [];
     try {
       var value = JSON.parse(node.textContent || '[]');
-      return Array.isArray(value) ? value : [];
+      inlineArray = Array.isArray(value) ? value : [];
     } catch (error) {
       console.warn('Failed to parse timeline JSON payload for selector:', selector, error);
-      return [];
+      inlineArray = [];
     }
+
+    var src = node.getAttribute('data-src');
+    if (src) {
+      externalJSONLoaders.push(
+        fetch(src)
+          .then(function(response) {
+            if (!response.ok) {
+              throw new Error('HTTP ' + response.status);
+            }
+            return response.arrayBuffer();
+          })
+          .then(function(buffer) {
+            return maybeDecompressGzipBuffer(buffer);
+          })
+          .then(function(buffer) {
+            var decoded = new TextDecoder('utf-8').decode(new Uint8Array(buffer));
+            var parsed = JSON.parse(decoded || '[]');
+            externalJSONPayloads[selector] = Array.isArray(parsed) ? parsed : [];
+          })
+          .catch(function(error) {
+            console.warn('Failed to load external timeline payload for', selector, src, error);
+          })
+      );
+    }
+
+    return inlineArray;
   }
 
   function asNumber(value, fallback) {
@@ -1981,40 +2010,63 @@
     }
   });
 
-  var initialRunIndex = 0;
-  for (var i = 0; i < runStates.length; i += 1) {
-    if ((runStates[i] && Number(runStates[i].initialFailureEventIndex) >= 0)) {
-      initialRunIndex = i;
-      break;
+  function initializeTimelineFromCurrentData() {
+    var initialRunIndex = 0;
+    for (var i = 0; i < runStates.length; i += 1) {
+      if ((runStates[i] && Number(runStates[i].initialFailureEventIndex) >= 0)) {
+        initialRunIndex = i;
+        break;
+      }
     }
-  }
-  applyRunState(initialRunIndex, false);
-  if (runSelector) {
-    runSelector.value = String(initialRunIndex);
+    applyRunState(initialRunIndex, false);
+    if (runSelector) {
+      runSelector.value = String(initialRunIndex);
+    }
+
+    setPlayButtonIcon(false);
+    var startingVideo = getActiveVideo();
+    var didFocusFailureOnLoad = false;
+    if (initialFailureEventIndex >= 0 && events.length) {
+      var focusIndex = Math.min(events.length - 1, initialFailureEventIndex);
+      jumpToEventByIndex(focusIndex, true);
+      didFocusFailureOnLoad = true;
+    }
+    if (startingVideo) {
+      updateActiveMediaAspect();
+      clampScrubber(startingVideo);
+      if (!didFocusFailureOnLoad || pendingSeekTime == null) {
+        updateFromVideoTime();
+      }
+      if (!startingVideo.paused) {
+        startTouchAnimation();
+      }
+    } else {
+      updateActiveMediaAspect();
+      clampScrubber(null);
+      if (!didFocusFailureOnLoad) {
+        updateFromVideoTime();
+      }
+    }
   }
 
-  setPlayButtonIcon(false);
-  var startingVideo = getActiveVideo();
-  var didFocusFailureOnLoad = false;
-  if (initialFailureEventIndex >= 0 && events.length) {
-    var focusIndex = Math.min(events.length - 1, initialFailureEventIndex);
-    jumpToEventByIndex(focusIndex, true);
-    didFocusFailureOnLoad = true;
+  function applyExternalPayloadOverrides() {
+    if (Object.prototype.hasOwnProperty.call(externalJSONPayloads, '[data-timeline-run-states]')) {
+      runStates = normalizeRunStates(externalJSONPayloads['[data-timeline-run-states]']);
+    }
+    if (Object.prototype.hasOwnProperty.call(externalJSONPayloads, '[data-timeline-screenshots]')) {
+      screenshots = normalizeScreenshots(externalJSONPayloads['[data-timeline-screenshots]']);
+    }
   }
-  if (startingVideo) {
-    updateActiveMediaAspect();
-    clampScrubber(startingVideo);
-    if (!didFocusFailureOnLoad || pendingSeekTime == null) {
-      updateFromVideoTime();
-    }
-    if (!startingVideo.paused) {
-      startTouchAnimation();
-    }
+
+  if (externalJSONLoaders.length) {
+    Promise.all(externalJSONLoaders)
+      .then(function() {
+        applyExternalPayloadOverrides();
+      })
+      .finally(function() {
+        initializeTimelineFromCurrentData();
+      });
   } else {
-    updateActiveMediaAspect();
-    clampScrubber(null);
-    if (!didFocusFailureOnLoad) {
-      updateFromVideoTime();
-    }
+    initializeTimelineFromCurrentData();
   }
 })();

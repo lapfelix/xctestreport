@@ -100,6 +100,77 @@ private struct CompactTimelineRunState: Encodable {
 }
 
 extension XCTestReport {
+    private func gzipCompressData(_ data: Data) -> Data? {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        task.arguments = ["gzip", "-9", "-c"]
+
+        let inputPipe = Pipe()
+        let outputPipe = Pipe()
+        let errorPipe = Pipe()
+        task.standardInput = inputPipe
+        task.standardOutput = outputPipe
+        task.standardError = errorPipe
+
+        do {
+            try task.run()
+        } catch {
+            return nil
+        }
+
+        inputPipe.fileHandleForWriting.write(data)
+        try? inputPipe.fileHandleForWriting.close()
+
+        let compressedData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+        _ = errorPipe.fileHandleForReading.readDataToEndOfFile()
+        task.waitUntilExit()
+
+        guard task.terminationStatus == 0, !compressedData.isEmpty else {
+            return nil
+        }
+        return compressedData
+    }
+
+    private func writeCompressedTimelinePayloads(
+        runStatesJSON: String,
+        screenshotJSON: String,
+        payloadBaseName: String
+    ) -> (runStatesSrc: String, screenshotSrc: String)? {
+        guard let runStatesData = runStatesJSON.data(using: .utf8),
+            let screenshotData = screenshotJSON.data(using: .utf8),
+            let compressedRunStates = gzipCompressData(runStatesData),
+            let compressedScreenshots = gzipCompressData(screenshotData)
+        else {
+            return nil
+        }
+
+        let payloadDir = (outputDir as NSString).appendingPathComponent("timeline_payloads")
+        do {
+            try FileManager.default.createDirectory(
+                atPath: payloadDir, withIntermediateDirectories: true)
+        } catch {
+            return nil
+        }
+
+        let runStatesFileName = payloadBaseName + ".runstates.bin"
+        let screenshotFileName = payloadBaseName + ".screenshots.bin"
+        let runStatesPath = (payloadDir as NSString).appendingPathComponent(runStatesFileName)
+        let screenshotPath = (payloadDir as NSString).appendingPathComponent(screenshotFileName)
+
+        do {
+            try compressedRunStates.write(to: URL(fileURLWithPath: runStatesPath), options: .atomic)
+            try compressedScreenshots.write(
+                to: URL(fileURLWithPath: screenshotPath), options: .atomic)
+        } catch {
+            return nil
+        }
+
+        return (
+            "timeline_payloads/\(urlEncodePath(runStatesFileName))",
+            "timeline_payloads/\(urlEncodePath(screenshotFileName))"
+        )
+    }
+
     private func encodeCompactRunStatesJSON(_ runStates: [TimelineRunState]) -> String {
         let encoder = JSONEncoder()
         let payload = runStates.map { CompactTimelineRunState(value: $0) }
@@ -118,7 +189,8 @@ extension XCTestReport {
         for testIdentifier: String?, activities: TestActivities?,
         attachmentsByTestIdentifier: [String: [AttachmentManifestItem]],
         sourceLocationBySymbol: [String: SourceLocation] = [:],
-        template: String
+        template: String,
+        payloadBaseName: String?
     ) -> String {
         guard let testIdentifier else { return "" }
 
@@ -258,6 +330,23 @@ extension XCTestReport {
         let runStatesJSON: String = {
             return encodeCompactRunStatesJSON(runStates)
         }()
+        var runStatesInlineJSON = runStatesJSON
+        var screenshotInlineJSON = screenshotJSON
+        var runStatesSrc = ""
+        var screenshotSrc = ""
+
+        if let payloadBaseName, !payloadBaseName.isEmpty,
+            let payloadPaths = writeCompressedTimelinePayloads(
+                runStatesJSON: runStatesJSON,
+                screenshotJSON: screenshotJSON,
+                payloadBaseName: payloadBaseName)
+        {
+            runStatesSrc = payloadPaths.runStatesSrc
+            screenshotSrc = payloadPaths.screenshotSrc
+            runStatesInlineJSON = "[]"
+            screenshotInlineJSON = "[]"
+        }
+
         let runSelectorHTML: String = {
             guard runStates.count > 1 else { return "" }
             let options = runStates.map { runState in
@@ -387,8 +476,10 @@ extension XCTestReport {
                     "run_selector_html": runSelectorHTML,
                     "run_panels_html": runPanelsHTML.joined(separator: ""),
                     "video_panel_html": videoPanelHtml,
-                    "run_states_json": jsonForScriptTag(runStatesJSON),
-                    "screenshot_json": jsonForScriptTag(screenshotJSON),
+                    "run_states_json": jsonForScriptTag(runStatesInlineJSON),
+                    "screenshot_json": jsonForScriptTag(screenshotInlineJSON),
+                    "run_states_src": htmlEscape(runStatesSrc),
+                    "screenshot_src": htmlEscape(screenshotSrc),
                 ],
                 templateName: "timeline-section.html")
         } catch {

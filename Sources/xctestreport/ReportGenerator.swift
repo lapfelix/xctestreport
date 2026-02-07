@@ -286,7 +286,8 @@ extension XCTestReport {
                         activities: testActivities,
                         attachmentsByTestIdentifier: attachmentsByTestIdentifier,
                         sourceLocationBySymbol: timelineSourceLocationMap,
-                        template: timelineTemplate
+                        template: timelineTemplate,
+                        payloadBaseName: (testPageName as NSString).deletingPathExtension
                     )
 
                     let detailsPanelHtml: String

@@ -303,12 +303,16 @@
   var activeProxyNode = null;
   var activeContextNodes = [];
   var scrubberMarkers = [];
+  var activeScrubberMarkerIndex = -1;
   var pendingSeekTime = null;
   var virtualCurrentTime = 0;
   var virtualDuration = 0;
   var virtualPlaying = false;
   var virtualAnimationFrame = 0;
   var virtualLastTick = 0;
+  var videoTimeUpdateFrame = 0;
+  var hierarchyOverlayFrame = 0;
+  var pendingHierarchyOverlayForce = false;
   var touchMarker = null;
   var touchAnimationFrame = 0;
   var TOUCH_RELEASE_DURATION = 0.18;
@@ -320,6 +324,16 @@
   var hoveredHierarchyElementId = null;
   var currentHierarchyCandidateIds = [];
   var hierarchyParentMapCache = Object.create(null);
+  var hierarchyElementMapCache = Object.create(null);
+  var hierarchySnapshotByIdMap = Object.create(null);
+  var hierarchySnapshotTimeIndex = [];
+  var hierarchyHintRenderKey = '';
+  var hierarchyHighlightRenderKey = '';
+  var hierarchyInspectorRenderKey = '';
+  var hierarchyCandidateSelectionKey = '';
+  var timelineStructureVersion = 0;
+  var activeEventRenderStructureVersion = -1;
+  var suppressTimelineToggleRefresh = false;
   var PLAY_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 6V18L18 12Z"></path></svg>';
   var PAUSE_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="6" width="4" height="12" rx="1"></rect><rect x="13" y="6" width="4" height="12" rx="1"></rect></svg>';
 
@@ -407,6 +421,48 @@
     }
   }
 
+  function clearHierarchyRenderCaches() {
+    hierarchyHintRenderKey = '';
+    hierarchyHighlightRenderKey = '';
+    hierarchyInspectorRenderKey = '';
+    hierarchyCandidateSelectionKey = '';
+  }
+
+  function rebuildHierarchySnapshotIndexes() {
+    hierarchySnapshotByIdMap = Object.create(null);
+    hierarchySnapshotTimeIndex = [];
+    hierarchyParentMapCache = Object.create(null);
+    hierarchyElementMapCache = Object.create(null);
+    for (var i = 0; i < hierarchySnapshots.length; i += 1) {
+      var snapshot = hierarchySnapshots[i];
+      if (!snapshot) continue;
+      if (snapshot.id) {
+        hierarchySnapshotByIdMap[snapshot.id] = snapshot;
+      }
+      hierarchySnapshotTimeIndex.push({
+        time: asNumber(snapshot.time, 0),
+        snapshot: snapshot
+      });
+    }
+    hierarchySnapshotTimeIndex.sort(function(a, b) {
+      return a.time - b.time;
+    });
+  }
+
+  function lowerBoundSnapshotTime(target) {
+    var low = 0;
+    var high = hierarchySnapshotTimeIndex.length;
+    while (low < high) {
+      var mid = (low + high) >> 1;
+      if (hierarchySnapshotTimeIndex[mid].time < target) {
+        low = mid + 1;
+      } else {
+        high = mid;
+      }
+    }
+    return low;
+  }
+
   function rebuildEventNodeIndex() {
     eventNodeById = Object.create(null);
     var panel = currentRunPanel();
@@ -438,6 +494,7 @@
       });
       activeContextNodes = [];
     }
+    activeEventRenderStructureVersion = -1;
   }
 
   function recalculateVirtualDuration() {
@@ -459,10 +516,13 @@
       hierarchySnapshots = [];
       timelineBase = fallbackVideoBase || 0;
       initialFailureEventIndex = -1;
+      timelineStructureVersion += 1;
       rebuildEventDataIndexes();
+      rebuildHierarchySnapshotIndexes();
       rebuildEventNodeIndex();
       clearActiveEventVisualState();
       closeHierarchyMenu();
+      clearHierarchyRenderCaches();
       refreshRunScopedBindings();
       refreshHierarchyPanelVisibility();
       updateDownloadVideoButton();
@@ -483,17 +543,20 @@
     events = runState.events || [];
     touchGestures = runState.touchGestures || [];
     hierarchySnapshots = runState.hierarchySnapshots || [];
-    hierarchyParentMapCache = Object.create(null);
+    rebuildHierarchySnapshotIndexes();
     timelineBase = Number.isFinite(runState.timelineBase) ? runState.timelineBase : (fallbackVideoBase || 0);
     initialFailureEventIndex = Number.isFinite(runState.initialFailureEventIndex) ? runState.initialFailureEventIndex : -1;
 
     activeEventId = null;
     activeEventIndex = -1;
+    activeEventRenderStructureVersion = -1;
     clearActiveEventVisualState();
+    timelineStructureVersion += 1;
     currentHierarchySnapshotId = null;
     selectedHierarchyElementId = null;
     hoveredHierarchyElementId = null;
     closeHierarchyMenu();
+    clearHierarchyRenderCaches();
     hideTouchMarker();
     refreshRunScopedBindings();
     rebuildEventDataIndexes();
@@ -709,19 +772,32 @@
   }
 
   function updateScrubberMarkerActiveState() {
-    if (!scrubberMarkers.length) return;
+    if (!scrubberMarkers.length) {
+      activeScrubberMarkerIndex = -1;
+      return;
+    }
     var markerIndex = (activeEventIndex >= 0 && activeEventIndex < events.length)
       ? activeEventIndex
       : eventIndexForAbsoluteTime(currentAbsoluteTime());
-    scrubberMarkers.forEach(function(marker, index) {
-      marker.classList.toggle('is-active', index === markerIndex);
-    });
+    if (!Number.isFinite(markerIndex) || markerIndex < 0 || markerIndex >= scrubberMarkers.length) {
+      markerIndex = -1;
+    }
+    if (markerIndex === activeScrubberMarkerIndex) return;
+
+    if (activeScrubberMarkerIndex >= 0 && activeScrubberMarkerIndex < scrubberMarkers.length) {
+      scrubberMarkers[activeScrubberMarkerIndex].classList.remove('is-active');
+    }
+    if (markerIndex >= 0 && markerIndex < scrubberMarkers.length) {
+      scrubberMarkers[markerIndex].classList.add('is-active');
+    }
+    activeScrubberMarkerIndex = markerIndex;
   }
 
   function renderScrubberMarkers() {
     if (!scrubberMarkerLane) return;
     scrubberMarkerLane.innerHTML = '';
     scrubberMarkers = [];
+    activeScrubberMarkerIndex = -1;
     if (!events.length) return;
 
     var duration = Number(scrubber.max || 0);
@@ -907,6 +983,7 @@
     }
     updateActiveMediaLayout();
     updateTouchOverlay();
+    clearHierarchyRenderCaches();
     updateHierarchyOverlay();
   }
 
@@ -920,11 +997,15 @@
     if (!hasHierarchyData) {
       setHierarchyPanelExpanded(false);
     }
+    clearHierarchyRenderCaches();
     updateActiveMediaLayout();
   }
 
   function updateHierarchyCandidateSelectionState() {
     if (!hierarchyCandidateList) return;
+    var selectionKey = (selectedHierarchyElementId || '') + '|' + (hoveredHierarchyElementId || '');
+    if (selectionKey === hierarchyCandidateSelectionKey) return;
+    hierarchyCandidateSelectionKey = selectionKey;
     Array.prototype.forEach.call(hierarchyCandidateList.querySelectorAll('.hierarchy-candidate-item'), function(button) {
       var elementId = button.getAttribute('data-hierarchy-element-id');
       button.classList.toggle('is-selected', !!selectedHierarchyElementId && elementId === selectedHierarchyElementId);
@@ -936,13 +1017,19 @@
     var hintsLayer = getActiveHierarchyHintsLayer();
     var media = getActiveMediaElement();
     if (!hintsLayer || !media || !snapshot || snapshot.width <= 0 || snapshot.height <= 0) {
-      if (hintsLayer) hintsLayer.innerHTML = '';
+      if (hintsLayer && hierarchyHintRenderKey !== 'none') {
+        hintsLayer.innerHTML = '';
+      }
+      hierarchyHintRenderKey = 'none';
       return;
     }
 
     var rect = getDisplayedMediaRect(media);
     if (rect.width <= 0 || rect.height <= 0) {
-      hintsLayer.innerHTML = '';
+      if (hierarchyHintRenderKey !== 'none') {
+        hintsLayer.innerHTML = '';
+      }
+      hierarchyHintRenderKey = 'none';
       return;
     }
 
@@ -955,9 +1042,23 @@
     }
 
     if (!hintIds.length) {
-      hintsLayer.innerHTML = '';
+      if (hierarchyHintRenderKey !== 'none') {
+        hintsLayer.innerHTML = '';
+      }
+      hierarchyHintRenderKey = 'none';
       return;
     }
+
+    var hintRenderKey = [
+      snapshot.id || '',
+      selectedHierarchyElementId || '',
+      hoveredHierarchyElementId || '',
+      rect.x.toFixed(2),
+      rect.y.toFixed(2),
+      rect.width.toFixed(2),
+      rect.height.toFixed(2)
+    ].join('|');
+    if (hintRenderKey === hierarchyHintRenderKey) return;
 
     var hintsHtml = [];
     for (var i = 0; i < hintIds.length; i += 1) {
@@ -976,11 +1077,13 @@
       hintsHtml.push('<div class="' + hintClasses + '" style="left:' + left + 'px;top:' + top + 'px;width:' + width + 'px;height:' + height + 'px;"></div>');
     }
     hintsLayer.innerHTML = hintsHtml.join('');
+    hierarchyHintRenderKey = hintRenderKey;
   }
 
   function closeHierarchyMenu() {
     currentHierarchyCandidateIds = [];
     selectedHierarchyElementId = null;
+    hierarchyCandidateSelectionKey = '';
     if (hierarchyCandidateList) {
       hierarchyCandidateList.innerHTML = '';
     }
@@ -1017,42 +1120,59 @@
     currentHierarchyCandidateIds = [];
     selectedHierarchyElementId = null;
     hoveredHierarchyElementId = null;
+    hierarchyCandidateSelectionKey = '';
     updateHierarchyHintOverlays(snapshot || null);
     flashHierarchyCandidatePanel();
   }
 
   function hierarchySnapshotById(snapshotId) {
     if (!snapshotId) return null;
-    for (var i = 0; i < hierarchySnapshots.length; i += 1) {
-      if (hierarchySnapshots[i].id === snapshotId) return hierarchySnapshots[i];
-    }
-    return null;
+    return hierarchySnapshotByIdMap[snapshotId] || null;
   }
 
   function hierarchySnapshotForAbsoluteTime(absoluteTime) {
-    if (!hierarchySnapshots.length) return null;
+    if (!hierarchySnapshotTimeIndex.length) return null;
+    var lowerTime = absoluteTime - HIERARCHY_MATCH_WINDOW;
+    var upperTime = absoluteTime + HIERARCHY_MATCH_WINDOW;
+    var start = lowerBoundSnapshotTime(lowerTime);
     var best = null;
     var bestDelta = HIERARCHY_MATCH_WINDOW + 1;
-    for (var i = 0; i < hierarchySnapshots.length; i += 1) {
-      var snapshot = hierarchySnapshots[i];
-      var delta = Math.abs((snapshot.time || 0) - absoluteTime);
+    for (var i = start; i < hierarchySnapshotTimeIndex.length; i += 1) {
+      var entry = hierarchySnapshotTimeIndex[i];
+      if (!entry || !entry.snapshot) continue;
+      if (entry.time > upperTime + 0.0001) break;
+      var snapshot = entry.snapshot;
+      var delta = Math.abs(entry.time - absoluteTime);
       if (delta > HIERARCHY_MATCH_WINDOW) continue;
       if (delta < bestDelta - 0.0001) {
         best = snapshot;
         bestDelta = delta;
-      } else if (Math.abs(delta - bestDelta) <= 0.0001 && best && (snapshot.time || 0) > (best.time || 0)) {
+      } else if (Math.abs(delta - bestDelta) <= 0.0001 && best && entry.time > (best.time || 0)) {
         best = snapshot;
       }
     }
     return best;
   }
 
-  function hierarchyElementById(snapshot, elementId) {
-    if (!snapshot || !elementId || !snapshot.elements) return null;
+  function hierarchyElementMap(snapshot) {
+    if (!snapshot || !snapshot.id || !snapshot.elements) return Object.create(null);
+    if (hierarchyElementMapCache[snapshot.id]) return hierarchyElementMapCache[snapshot.id];
+    var mapping = Object.create(null);
     for (var i = 0; i < snapshot.elements.length; i += 1) {
-      if (snapshot.elements[i].id === elementId) return snapshot.elements[i];
+      var element = snapshot.elements[i];
+      if (!element || !element.id) continue;
+      if (!Object.prototype.hasOwnProperty.call(mapping, element.id)) {
+        mapping[element.id] = element;
+      }
     }
-    return null;
+    hierarchyElementMapCache[snapshot.id] = mapping;
+    return mapping;
+  }
+
+  function hierarchyElementById(snapshot, elementId) {
+    if (!snapshot || !elementId) return null;
+    var mapping = hierarchyElementMap(snapshot);
+    return mapping[elementId] || null;
   }
 
   function hierarchyParentMap(snapshot) {
@@ -1120,12 +1240,14 @@
     var media = getActiveMediaElement();
     if (!highlight || !media || !snapshot || !element || element.width <= 0 || element.height <= 0 || snapshot.width <= 0 || snapshot.height <= 0) {
       if (highlight) highlight.hidden = true;
+      hierarchyHighlightRenderKey = 'none';
       return;
     }
 
     var rect = getDisplayedMediaRect(media);
     if (rect.width <= 0 || rect.height <= 0) {
       highlight.hidden = true;
+      hierarchyHighlightRenderKey = 'none';
       return;
     }
 
@@ -1136,16 +1258,32 @@
     var width = Math.max(2, element.width * scaleX);
     var height = Math.max(2, element.height * scaleY);
 
+    var highlightKey = [
+      snapshot.id || '',
+      element.id || '',
+      left.toFixed(2),
+      top.toFixed(2),
+      width.toFixed(2),
+      height.toFixed(2)
+    ].join('|');
+    if (highlightKey === hierarchyHighlightRenderKey) return;
+
     highlight.style.left = left + 'px';
     highlight.style.top = top + 'px';
     highlight.style.width = width + 'px';
     highlight.style.height = height + 'px';
     highlight.hidden = false;
+    hierarchyHighlightRenderKey = highlightKey;
   }
 
   function updateHierarchyInspector(snapshot, element) {
     if (!hierarchyPanel || !hierarchyToolbar || !hierarchyStatus || !hierarchyInspector || !hierarchySelectedTitle || !hierarchySelectedSubtitle || !hierarchyProperties) return;
     refreshHierarchyPanelVisibility();
+    var inspectorKey = hierarchyPanel.hidden
+      ? 'hidden'
+      : ((snapshot ? (snapshot.id || 'snapshot') : 'none') + '|' + (element ? (element.id || 'selected') : 'none'));
+    if (inspectorKey === hierarchyInspectorRenderKey) return;
+    hierarchyInspectorRenderKey = inspectorKey;
     if (hierarchyPanel.hidden) {
       hierarchyProperties.innerHTML = '';
       return;
@@ -1268,6 +1406,7 @@
     currentHierarchyCandidateIds = options.map(function(element) { return element.id; });
     selectedHierarchyElementId = options[0] ? options[0].id : null;
     hoveredHierarchyElementId = null;
+    hierarchyCandidateSelectionKey = '';
     hierarchyCandidateList.innerHTML = options.map(function(element) {
       return '<button type="button" class="hierarchy-candidate-item" data-hierarchy-element-id="' + escapeHTML(element.id) + '">'
         + '<span class="hierarchy-candidate-title">' + escapeHTML(hierarchyElementTitle(element)) + '</span>'
@@ -1383,17 +1522,20 @@
       closeHierarchyMenu();
     }
 
-    var highlightedElement = hierarchyElementById(snapshot, hoveredHierarchyElementId)
-      || hierarchyElementById(snapshot, selectedHierarchyElementId);
-    if (selectedHierarchyElementId && !hierarchyElementById(snapshot, selectedHierarchyElementId)) {
+    var selectedElement = hierarchyElementById(snapshot, selectedHierarchyElementId);
+    var hoveredElement = hierarchyElementById(snapshot, hoveredHierarchyElementId);
+    if (selectedHierarchyElementId && !selectedElement) {
       selectedHierarchyElementId = null;
+      selectedElement = null;
     }
-    if (hoveredHierarchyElementId && !hierarchyElementById(snapshot, hoveredHierarchyElementId)) {
+    if (hoveredHierarchyElementId && !hoveredElement) {
       hoveredHierarchyElementId = null;
+      hoveredElement = null;
     }
+    var highlightedElement = hoveredElement || selectedElement;
     updateHierarchyHintOverlays(snapshot);
     setHierarchyHighlight(snapshot, highlightedElement);
-    updateHierarchyInspector(snapshot, hierarchyElementById(snapshot, selectedHierarchyElementId));
+    updateHierarchyInspector(snapshot, selectedElement);
     updateHierarchyCandidateSelectionState();
   }
 
@@ -1627,23 +1769,40 @@
     return null;
   }
 
-  function updateContextHighlight(node) {
-    if (activeContextNodes.length) {
-      activeContextNodes.forEach(function(el) { el.classList.remove('timeline-context-active'); });
-      activeContextNodes = [];
+  function sameNodeSequence(a, b) {
+    if (a === b) return true;
+    if (!a || !b || a.length !== b.length) return false;
+    for (var i = 0; i < a.length; i += 1) {
+      if (a[i] !== b[i]) return false;
     }
+    return true;
+  }
+
+  function contextNodesFor(node) {
+    var nodes = [];
     var details = node ? node.closest('details') : null;
     while (details) {
       var summary = details.firstElementChild;
       var summaryEvent = summary ? summary.querySelector('.timeline-event') : null;
       if (summaryEvent && summaryEvent !== node) {
-        summaryEvent.classList.add('timeline-context-active');
-        if (activeContextNodes.indexOf(summaryEvent) < 0) {
-          activeContextNodes.push(summaryEvent);
+        if (nodes.indexOf(summaryEvent) < 0) {
+          nodes.push(summaryEvent);
         }
       }
       details = details.parentElement ? details.parentElement.closest('details') : null;
     }
+    return nodes;
+  }
+
+  function updateContextHighlight(node) {
+    var nextContextNodes = contextNodesFor(node);
+    if (sameNodeSequence(activeContextNodes, nextContextNodes)) return;
+
+    if (activeContextNodes.length) {
+      activeContextNodes.forEach(function(el) { el.classList.remove('timeline-context-active'); });
+    }
+    nextContextNodes.forEach(function(el) { el.classList.add('timeline-context-active'); });
+    activeContextNodes = nextContextNodes;
   }
 
   function setCollapsedProxyActive(node) {
@@ -1660,6 +1819,18 @@
     if (!eventId) return;
     var idx = eventIndexById(eventId);
     if (idx >= 0) activeEventIndex = idx;
+
+    if (
+      activeEventId === eventId
+      && !shouldReveal
+      && !scrollBehavior
+      && activeEventRenderStructureVersion === timelineStructureVersion
+      && activeRenderedNode
+      && activeRenderedNode.isConnected
+    ) {
+      updateScrubberMarkerActiveState();
+      return;
+    }
 
     var preciseNode = eventNodeForId(eventId);
     if (preciseNode && shouldReveal) {
@@ -1695,6 +1866,7 @@
     }
 
     activeEventId = eventId;
+    activeEventRenderStructureVersion = timelineStructureVersion;
     updateScrubberMarkerActiveState();
   }
 
@@ -1797,6 +1969,28 @@
     return true;
   }
 
+  function scheduleUpdateFromVideoTime() {
+    if (videoTimeUpdateFrame) return;
+    videoTimeUpdateFrame = requestAnimationFrame(function() {
+      videoTimeUpdateFrame = 0;
+      updateFromVideoTime();
+    });
+  }
+
+  function scheduleHierarchyOverlayUpdate(force) {
+    if (force) pendingHierarchyOverlayForce = true;
+    if (hierarchyOverlayFrame) return;
+    hierarchyOverlayFrame = requestAnimationFrame(function() {
+      hierarchyOverlayFrame = 0;
+      var forceUpdate = pendingHierarchyOverlayForce;
+      pendingHierarchyOverlayForce = false;
+      if (forceUpdate) {
+        clearHierarchyRenderCaches();
+      }
+      updateHierarchyOverlay();
+    });
+  }
+
   function updateFromVideoTime() {
     var video = getActiveVideo();
     var absoluteTime = 0;
@@ -1831,7 +2025,7 @@
     setPlayButtonIcon(video ? !video.paused : virtualPlaying);
     updateDownloadVideoButton();
     updateTouchOverlay();
-    updateHierarchyOverlay();
+    scheduleHierarchyOverlayUpdate(false);
   }
 
   function clampScrubber(video) {
@@ -1858,7 +2052,7 @@
       updateActiveMediaAspect();
       clampScrubber(video);
     });
-    video.addEventListener('timeupdate', updateFromVideoTime);
+    video.addEventListener('timeupdate', scheduleUpdateFromVideoTime);
     video.addEventListener('play', function() {
       updateFromVideoTime();
       startTouchAnimation();
@@ -1867,8 +2061,8 @@
       stopTouchAnimation();
       updateFromVideoTime();
     });
-    video.addEventListener('seeking', updateFromVideoTime);
-    video.addEventListener('seeked', updateFromVideoTime);
+    video.addEventListener('seeking', scheduleUpdateFromVideoTime);
+    video.addEventListener('seeked', scheduleUpdateFromVideoTime);
   }
 
   cards.forEach(function(card) {
@@ -1879,7 +2073,7 @@
       still.addEventListener('load', function() {
         updateActiveMediaAspect();
         updateTouchOverlay();
-        updateHierarchyOverlay();
+        scheduleHierarchyOverlayUpdate(true);
       });
       if (still.complete) {
         updateActiveMediaAspect();
@@ -1893,9 +2087,20 @@
       var tree = timelineTree;
       if (!tree) return;
       var shouldExpand = treeAction.getAttribute('data-tree-action') === 'expand';
-      Array.prototype.forEach.call(tree.querySelectorAll('details'), function(detail) {
-        detail.open = shouldExpand;
-      });
+      suppressTimelineToggleRefresh = true;
+      try {
+        Array.prototype.forEach.call(tree.querySelectorAll('details'), function(detail) {
+          detail.open = shouldExpand;
+        });
+      } finally {
+        suppressTimelineToggleRefresh = false;
+      }
+      timelineStructureVersion += 1;
+      if (activeEventId) {
+        setActiveEvent(activeEventId, false, null, true);
+      } else {
+        updateScrubberMarkerActiveState();
+      }
       return;
     }
 
@@ -1971,6 +2176,17 @@
     updateFromVideoTime();
   });
 
+  root.addEventListener('toggle', function(event) {
+    if (suppressTimelineToggleRefresh) return;
+    var details = event.target;
+    if (!details || details.tagName !== 'DETAILS') return;
+    if (!details.closest('.timeline-tree')) return;
+    timelineStructureVersion += 1;
+    if (activeEventId) {
+      setActiveEvent(activeEventId, false, null, true);
+    }
+  }, true);
+
   if (previewModal) {
     Array.prototype.forEach.call(
       previewModal.querySelectorAll('[data-attachment-close]'),
@@ -2002,7 +2218,7 @@
     } else {
       virtualCurrentTime = Math.max(0, Math.min(virtualDuration, value));
     }
-    updateFromVideoTime();
+    scheduleUpdateFromVideoTime();
   });
 
   if (selector) {
@@ -2046,7 +2262,7 @@
   window.addEventListener('resize', function() {
     updateActiveMediaLayout();
     updateTouchOverlay();
-    updateHierarchyOverlay();
+    scheduleHierarchyOverlayUpdate(true);
   });
 
   window.addEventListener('keydown', function(event) {

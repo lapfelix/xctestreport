@@ -2000,12 +2000,10 @@
       activeRenderedNode.classList.add('timeline-active');
     }
 
-    var proxyNode =
-      (preciseNode && activeRenderedNode && preciseNode !== activeRenderedNode)
-      ? preciseNode
-      : null;
-    setCollapsedProxyActive(proxyNode);
-    updateContextHighlight(preciseNode || activeRenderedNode);
+    setCollapsedProxyActive(null);
+    // Keep a single visible highlight target: either the precise node or
+    // the collapsed summary proxy when the precise node is hidden.
+    updateContextHighlight(null);
 
     if (activeRenderedNode && (shouldReveal || scrollBehavior)) {
       var shouldScrollNode = shouldReveal || activeRenderedNode !== previousRenderedNode;

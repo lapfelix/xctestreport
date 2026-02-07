@@ -306,6 +306,8 @@
   var activeScrubberMarkerIndex = -1;
   var pendingSeekTime = null;
   var pendingVideoSeekTime = null;
+  var dragSeekAnimationFrame = 0;
+  var dragSeekRequestedTime = null;
   var virtualCurrentTime = 0;
   var virtualDuration = 0;
   var virtualPlaying = false;
@@ -338,6 +340,100 @@
   var suppressTimelineToggleRefresh = false;
   var PLAY_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 6V18L18 12Z"></path></svg>';
   var PAUSE_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="6" width="4" height="12" rx="1"></rect><rect x="13" y="6" width="4" height="12" rx="1"></rect></svg>';
+
+  function fallbackEventKindFromNode(node) {
+    if (!node || !node.classList) return 'event';
+    if (node.classList.contains('timeline-failure')) return 'error';
+    if (node.classList.contains('timeline-touch')) return 'tap';
+    if (node.classList.contains('timeline-hierarchy')) return 'hierarchy';
+    return 'event';
+  }
+
+  function fallbackRunLabel(index) {
+    if (runSelector && runSelector.options && runSelector.options[index]) {
+      var label = asString(runSelector.options[index].textContent, '').trim();
+      if (label) return label;
+    }
+    return 'Run ' + (index + 1);
+  }
+
+  function buildFallbackRunStatesFromDOM() {
+    var panelNodes = Array.prototype.slice.call(root.querySelectorAll('[data-run-panel]'));
+    if (!panelNodes.length) return [];
+
+    var defaultTimelineBase = asNumber(root.dataset.timelineBase, asNumber(root.dataset.videoBase, 0));
+    return panelNodes.map(function(panel, panelIndex) {
+      var eventNodes = Array.prototype.slice.call(
+        panel.querySelectorAll('.timeline-event[data-event-id][data-event-time]')
+      );
+      var dedup = Object.create(null);
+      var parsedEvents = [];
+
+      eventNodes.forEach(function(node) {
+        var rawTime = node.getAttribute('data-event-time');
+        if (!rawTime) return;
+        var eventTime = parseFloat(rawTime);
+        if (!Number.isFinite(eventTime)) return;
+
+        var eventId = asString(node.getAttribute('data-event-id'), '').trim();
+        if (!eventId) {
+          eventId = 'dom-event-' + panelIndex + '-' + parsedEvents.length;
+        }
+        if (dedup[eventId]) return;
+        dedup[eventId] = true;
+
+        var titleNode = node.querySelector('.timeline-title');
+        var title = asString(titleNode ? titleNode.textContent : '', 'Timeline event').trim();
+        if (!title) title = 'Timeline event';
+
+        var kind = fallbackEventKindFromNode(node);
+        parsedEvents.push({
+          id: eventId,
+          title: title,
+          time: eventTime,
+          endTime: eventTime,
+          kind: kind,
+          failureAssociated: kind === 'error'
+        });
+      });
+
+      parsedEvents.sort(function(a, b) {
+        if (a.time === b.time) {
+          if (a.id < b.id) return -1;
+          if (a.id > b.id) return 1;
+          return 0;
+        }
+        return a.time - b.time;
+      });
+
+      var initialFailureEventIndex = -1;
+      for (var i = 0; i < parsedEvents.length; i += 1) {
+        if (parsedEvents[i].kind === 'error' || parsedEvents[i].failureAssociated) {
+          initialFailureEventIndex = i;
+          break;
+        }
+      }
+
+      return {
+        index: panelIndex,
+        label: fallbackRunLabel(panelIndex),
+        timelineBase: parsedEvents.length ? parsedEvents[0].time : defaultTimelineBase,
+        firstEventLabel: parsedEvents.length ? parsedEvents[0].title : 'No event selected',
+        initialFailureEventIndex: initialFailureEventIndex,
+        events: parsedEvents,
+        touchGestures: [],
+        hierarchySnapshots: []
+      };
+    });
+  }
+
+  function ensureRunStatesFallback() {
+    if (Array.isArray(runStates) && runStates.length) return;
+    var fallbackStates = buildFallbackRunStatesFromDOM();
+    if (fallbackStates.length) {
+      runStates = fallbackStates;
+    }
+  }
 
   function formatSeconds(seconds) {
     var safe = Math.max(0, Math.floor(seconds));
@@ -1977,6 +2073,11 @@
     scrubDragging = false;
     scrubPreviewActive = false;
     scrubPreviewTime = 0;
+    if (dragSeekAnimationFrame) {
+      cancelAnimationFrame(dragSeekAnimationFrame);
+      dragSeekAnimationFrame = 0;
+    }
+    dragSeekRequestedTime = null;
   }
 
   function applyPendingVideoSeek() {
@@ -2010,6 +2111,17 @@
   function requestVideoSeek(timeValue) {
     pendingVideoSeekTime = timeValue;
     applyPendingVideoSeek();
+  }
+
+  function scheduleDragVideoSeek(timeValue) {
+    dragSeekRequestedTime = timeValue;
+    if (dragSeekAnimationFrame) return;
+    dragSeekAnimationFrame = requestAnimationFrame(function() {
+      dragSeekAnimationFrame = 0;
+      if (dragSeekRequestedTime == null) return;
+      requestVideoSeek(dragSeekRequestedTime);
+      dragSeekRequestedTime = null;
+    });
   }
 
   function scheduleHierarchyOverlayUpdate(force) {
@@ -2223,7 +2335,26 @@
     if (!Number.isFinite(absoluteTime)) return;
     setAbsoluteTime(absoluteTime);
     var clickedSummary = !!event.target.closest('summary');
-    setActiveEvent(node.getAttribute('data-event-id'), !clickedSummary, clickedSummary ? 'auto' : null, true);
+    if (clickedSummary && !event.target.closest('.timeline-disclosure')) {
+      event.preventDefault();
+    }
+    setActiveEvent(node.getAttribute('data-event-id'), false, clickedSummary ? 'auto' : null, true);
+    var matched = eventByIdMap[node.getAttribute('data-event-id')] || null;
+    if (matched && eventLabel) eventLabel.textContent = matched.title;
+    updateFromVideoTime();
+  });
+
+  root.addEventListener('dblclick', function(event) {
+    var node = event.target.closest('.timeline-event[data-event-time]');
+    if (!node) return;
+    if (event.target.closest('.timeline-disclosure')) return;
+    var raw = node.getAttribute('data-event-time');
+    if (!raw) return;
+    var absoluteTime = parseFloat(raw);
+    if (!Number.isFinite(absoluteTime)) return;
+    event.preventDefault();
+    setAbsoluteTime(absoluteTime);
+    setActiveEvent(node.getAttribute('data-event-id'), true, 'auto', false);
     var matched = eventByIdMap[node.getAttribute('data-event-id')] || null;
     if (matched && eventLabel) eventLabel.textContent = matched.title;
     updateFromVideoTime();
@@ -2267,6 +2398,14 @@
     scrubDragging = false;
     var video = getActiveVideo();
     if (video) {
+      if (dragSeekAnimationFrame) {
+        cancelAnimationFrame(dragSeekAnimationFrame);
+        dragSeekAnimationFrame = 0;
+      }
+      if (dragSeekRequestedTime != null) {
+        requestVideoSeek(dragSeekRequestedTime);
+        dragSeekRequestedTime = null;
+      }
       requestVideoSeek(scrubPreviewTime);
       scheduleUpdateFromVideoTime();
     }
@@ -2290,7 +2429,7 @@
       scrubPreviewActive = true;
       scrubPreviewTime = clampedValue;
       if (scrubDragging) {
-        // Keep drag previews responsive; commit the actual video seek on release.
+        scheduleDragVideoSeek(clampedValue);
       } else {
         requestVideoSeek(clampedValue);
       }
@@ -2444,6 +2583,7 @@
     if (Object.prototype.hasOwnProperty.call(externalJSONPayloads, '[data-timeline-screenshots]')) {
       screenshots = normalizeScreenshots(externalJSONPayloads['[data-timeline-screenshots]']);
     }
+    ensureRunStatesFallback();
   }
 
   if (externalJSONLoaders.length) {
@@ -2452,9 +2592,11 @@
         applyExternalPayloadOverrides();
       })
       .finally(function() {
+        ensureRunStatesFallback();
         initializeTimelineFromCurrentData();
       });
   } else {
+    ensureRunStatesFallback();
     initializeTimelineFromCurrentData();
   }
 })();

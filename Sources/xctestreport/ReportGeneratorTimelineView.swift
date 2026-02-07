@@ -101,16 +101,47 @@ private struct CompactTimelineRunState: Encodable {
 
 extension XCTestReport {
     private func gzipCompressData(_ data: Data) -> Data? {
+        let fileManager = FileManager.default
+        let tempDirectoryURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("xctestreport-gzip-\(UUID().uuidString)", isDirectory: true)
+        let inputURL = tempDirectoryURL.appendingPathComponent("payload.json")
+        let outputURL = tempDirectoryURL.appendingPathComponent("payload.json.gz")
+
+        do {
+            try fileManager.createDirectory(
+                at: tempDirectoryURL,
+                withIntermediateDirectories: true
+            )
+            try data.write(to: inputURL, options: .atomic)
+            guard fileManager.createFile(atPath: outputURL.path, contents: nil) else {
+                return nil
+            }
+        } catch {
+            return nil
+        }
+
+        defer {
+            try? fileManager.removeItem(at: tempDirectoryURL)
+        }
+
+        guard let outputHandle = FileHandle(forWritingAtPath: outputURL.path) else {
+            return nil
+        }
+        defer {
+            try? outputHandle.close()
+        }
+
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        task.arguments = ["gzip", "-9", "-c"]
-
-        let inputPipe = Pipe()
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-        task.standardInput = inputPipe
-        task.standardOutput = outputPipe
-        task.standardError = errorPipe
+        task.arguments = ["gzip", "-9", "-c", inputURL.path]
+        task.standardOutput = outputHandle
+        let errorHandle = FileHandle(forWritingAtPath: "/dev/null")
+        defer {
+            try? errorHandle?.close()
+        }
+        if let errorHandle {
+            task.standardError = errorHandle
+        }
 
         do {
             try task.run()
@@ -118,14 +149,12 @@ extension XCTestReport {
             return nil
         }
 
-        inputPipe.fileHandleForWriting.write(data)
-        try? inputPipe.fileHandleForWriting.close()
-
-        let compressedData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-        _ = errorPipe.fileHandleForReading.readDataToEndOfFile()
         task.waitUntilExit()
+        guard task.terminationStatus == 0 else {
+            return nil
+        }
 
-        guard task.terminationStatus == 0, !compressedData.isEmpty else {
+        guard let compressedData = try? Data(contentsOf: outputURL), !compressedData.isEmpty else {
             return nil
         }
         return compressedData

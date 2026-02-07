@@ -295,6 +295,13 @@
   var activeIndex = 0;
   var activeEventId = null;
   var activeEventIndex = -1;
+  var eventByIdMap = Object.create(null);
+  var eventIndexByIdMap = Object.create(null);
+  var eventStartTimes = [];
+  var eventNodeById = Object.create(null);
+  var activeRenderedNode = null;
+  var activeProxyNode = null;
+  var activeContextNodes = [];
   var scrubberMarkers = [];
   var pendingSeekTime = null;
   var virtualCurrentTime = 0;
@@ -387,6 +394,52 @@
     expandAllButton = panel ? panel.querySelector('[data-tree-action=\"expand\"]') : null;
   }
 
+  function rebuildEventDataIndexes() {
+    eventByIdMap = Object.create(null);
+    eventIndexByIdMap = Object.create(null);
+    eventStartTimes = new Array(events.length);
+    for (var i = 0; i < events.length; i += 1) {
+      var event = events[i];
+      if (!event || !event.id) continue;
+      eventByIdMap[event.id] = event;
+      eventIndexByIdMap[event.id] = i;
+      eventStartTimes[i] = asNumber(event.time, 0);
+    }
+  }
+
+  function rebuildEventNodeIndex() {
+    eventNodeById = Object.create(null);
+    var panel = currentRunPanel();
+    if (!panel) return;
+    Array.prototype.forEach.call(
+      panel.querySelectorAll('.timeline-event[data-event-id]'),
+      function(node) {
+        var eventId = node.getAttribute('data-event-id');
+        if (!eventId) return;
+        if (!Object.prototype.hasOwnProperty.call(eventNodeById, eventId)) {
+          eventNodeById[eventId] = node;
+        }
+      }
+    );
+  }
+
+  function clearActiveEventVisualState() {
+    if (activeRenderedNode) {
+      activeRenderedNode.classList.remove('timeline-active');
+      activeRenderedNode = null;
+    }
+    if (activeProxyNode) {
+      activeProxyNode.classList.remove('timeline-active-proxy');
+      activeProxyNode = null;
+    }
+    if (activeContextNodes.length) {
+      activeContextNodes.forEach(function(node) {
+        node.classList.remove('timeline-context-active');
+      });
+      activeContextNodes = [];
+    }
+  }
+
   function recalculateVirtualDuration() {
     var lastEventTime = events.length ? events[events.length - 1].time : (timelineBase || 0);
     var lastScreenshotTime = screenshots.length ? screenshots[screenshots.length - 1].time : (timelineBase || 0);
@@ -406,6 +459,9 @@
       hierarchySnapshots = [];
       timelineBase = fallbackVideoBase || 0;
       initialFailureEventIndex = -1;
+      rebuildEventDataIndexes();
+      rebuildEventNodeIndex();
+      clearActiveEventVisualState();
       closeHierarchyMenu();
       refreshRunScopedBindings();
       refreshHierarchyPanelVisibility();
@@ -433,12 +489,15 @@
 
     activeEventId = null;
     activeEventIndex = -1;
+    clearActiveEventVisualState();
     currentHierarchySnapshotId = null;
     selectedHierarchyElementId = null;
     hoveredHierarchyElementId = null;
     closeHierarchyMenu();
     hideTouchMarker();
     refreshRunScopedBindings();
+    rebuildEventDataIndexes();
+    rebuildEventNodeIndex();
     refreshHierarchyPanelVisibility();
     updateDownloadVideoButton();
     if (eventLabel) {
@@ -1538,10 +1597,13 @@
 
   function eventIndexById(eventId) {
     if (!eventId) return -1;
-    for (var i = 0; i < events.length; i += 1) {
-      if (events[i].id === eventId) return i;
-    }
-    return -1;
+    var mappedIndex = eventIndexByIdMap[eventId];
+    return Number.isFinite(mappedIndex) ? mappedIndex : -1;
+  }
+
+  function eventNodeForId(eventId) {
+    if (!eventId) return null;
+    return eventNodeById[eventId] || null;
   }
 
   function expandAncestorDetails(node) {
@@ -1566,70 +1628,72 @@
   }
 
   function updateContextHighlight(node) {
-    var panel = currentRunPanel() || root;
-    Array.prototype.forEach.call(
-      panel.querySelectorAll('.timeline-event.timeline-context-active'),
-      function(el) { el.classList.remove('timeline-context-active'); }
-    );
+    if (activeContextNodes.length) {
+      activeContextNodes.forEach(function(el) { el.classList.remove('timeline-context-active'); });
+      activeContextNodes = [];
+    }
     var details = node ? node.closest('details') : null;
     while (details) {
       var summary = details.firstElementChild;
       var summaryEvent = summary ? summary.querySelector('.timeline-event') : null;
       if (summaryEvent && summaryEvent !== node) {
         summaryEvent.classList.add('timeline-context-active');
+        if (activeContextNodes.indexOf(summaryEvent) < 0) {
+          activeContextNodes.push(summaryEvent);
+        }
       }
       details = details.parentElement ? details.parentElement.closest('details') : null;
     }
   }
 
   function setCollapsedProxyActive(node) {
-    var panel = currentRunPanel() || root;
-    Array.prototype.forEach.call(
-      panel.querySelectorAll('.timeline-event.timeline-active-proxy'),
-      function(el) { el.classList.remove('timeline-active-proxy'); }
-    );
-    if (node) {
-      node.classList.add('timeline-active-proxy');
+    if (activeProxyNode && activeProxyNode !== node) {
+      activeProxyNode.classList.remove('timeline-active-proxy');
+    }
+    activeProxyNode = node || null;
+    if (activeProxyNode) {
+      activeProxyNode.classList.add('timeline-active-proxy');
     }
   }
 
   function setActiveEvent(eventId, shouldReveal, scrollBehavior, scrollWhenCollapsed) {
     if (!eventId) return;
-    var panel = currentRunPanel() || root;
     var idx = eventIndexById(eventId);
     if (idx >= 0) activeEventIndex = idx;
-    var next = panel.querySelector('.timeline-event[data-event-id=\"' + eventId + '\"]');
-    if (next) {
-      updateContextHighlight(next);
+
+    var preciseNode = eventNodeForId(eventId);
+    if (preciseNode && shouldReveal) {
+      expandAncestorDetails(preciseNode);
     }
 
-    var collapsedSummary = (!shouldReveal && scrollWhenCollapsed) ? collapsedAncestorSummaryEvent(next) : null;
-    var proxyNode = (collapsedSummary && collapsedSummary !== next) ? collapsedSummary : null;
-    var scrollTarget = collapsedSummary || next;
+    var visibleNode = preciseNode;
+    if (preciseNode && !shouldReveal && scrollWhenCollapsed) {
+      var collapsedSummary = collapsedAncestorSummaryEvent(preciseNode);
+      if (collapsedSummary) {
+        visibleNode = collapsedSummary;
+      }
+    }
 
-    if (eventId === activeEventId) {
-      if (next && shouldReveal) {
-        expandAncestorDetails(next);
-      }
-      setCollapsedProxyActive(proxyNode);
-      if (scrollTarget && scrollBehavior) {
-        scrollTarget.scrollIntoView({ block: 'nearest', behavior: scrollBehavior });
-      }
-      updateScrubberMarkerActiveState();
-      return;
+    var renderNode = visibleNode || preciseNode;
+    if (activeRenderedNode && activeRenderedNode !== renderNode) {
+      activeRenderedNode.classList.remove('timeline-active');
     }
-    var oldActive = panel.querySelector('.timeline-event.timeline-active');
-    if (oldActive) oldActive.classList.remove('timeline-active');
-    if (next) {
-      if (shouldReveal) {
-        expandAncestorDetails(next);
-      }
-      next.classList.add('timeline-active');
+    activeRenderedNode = renderNode || null;
+    if (activeRenderedNode) {
+      activeRenderedNode.classList.add('timeline-active');
     }
+
+    var proxyNode =
+      (preciseNode && activeRenderedNode && preciseNode !== activeRenderedNode)
+      ? preciseNode
+      : null;
     setCollapsedProxyActive(proxyNode);
-    if (scrollTarget && (shouldReveal || scrollBehavior)) {
-      scrollTarget.scrollIntoView({ block: 'nearest', behavior: scrollBehavior || 'smooth' });
+    updateContextHighlight(preciseNode || activeRenderedNode);
+
+    if (activeRenderedNode && (shouldReveal || scrollBehavior)) {
+      activeRenderedNode.scrollIntoView({ block: 'nearest', behavior: scrollBehavior || 'smooth' });
     }
+
     activeEventId = eventId;
     updateScrubberMarkerActiveState();
   }
@@ -1647,23 +1711,43 @@
   function eventIndexForAbsoluteTime(absTime) {
     if (!events.length) return -1;
     var epsilon = 0.05;
-    var idx = 0;
-    for (var i = 0; i < events.length; i += 1) {
-      var event = events[i];
-      var startTime = Number(event.time || 0);
-      if (startTime > absTime + epsilon) break;
-
-      idx = i;
-      var endTime = Number(event.endTime);
-      if (!Number.isFinite(endTime)) endTime = startTime;
-      if (endTime < startTime) endTime = startTime;
-
-      // Range events (collapsed repeat groups) should remain active until their end.
-      if (endTime > startTime + 0.0001 && absTime <= endTime + epsilon) {
-        return i;
+    var targetTime = absTime + epsilon;
+    var low = 0;
+    var high = events.length - 1;
+    var best = -1;
+    while (low <= high) {
+      var mid = (low + high) >> 1;
+      var midTime = eventStartTimes[mid];
+      if (!Number.isFinite(midTime)) midTime = asNumber(events[mid].time, 0);
+      if (midTime <= targetTime) {
+        best = mid;
+        low = mid + 1;
+      } else {
+        high = mid - 1;
       }
     }
-    return idx;
+    if (best < 0) return 0;
+
+    var bestEvent = events[best];
+    var bestStart = Number(bestEvent.time || 0);
+    var bestEnd = Number(bestEvent.endTime);
+    if (!Number.isFinite(bestEnd)) bestEnd = bestStart;
+    if (bestEnd < bestStart) bestEnd = bestStart;
+
+    if (bestEnd > bestStart + 0.0001 && absTime > bestEnd + epsilon) {
+      for (var i = best - 1; i >= 0; i -= 1) {
+        var event = events[i];
+        var startTime = Number(event.time || 0);
+        var endTime = Number(event.endTime);
+        if (!Number.isFinite(endTime)) endTime = startTime;
+        if (endTime < startTime) endTime = startTime;
+        if (endTime > startTime + 0.0001 && absTime <= endTime + epsilon) {
+          return i;
+        }
+      }
+    }
+
+    return best;
   }
 
   function currentEventIndexForNavigation() {
@@ -1737,6 +1821,8 @@
     if (idx >= 0) {
       setActiveEvent(events[idx].id, false, null, true);
       if (eventLabel) eventLabel.textContent = events[idx].title;
+    } else {
+      updateScrubberMarkerActiveState();
     }
     var currentOffset = video ? (video.currentTime || 0) : (virtualCurrentTime || 0);
     timeLabel.textContent = formatSeconds(currentOffset);
@@ -1744,7 +1830,6 @@
     if (totalTimeLabel) totalTimeLabel.textContent = formatSeconds(duration);
     setPlayButtonIcon(video ? !video.paused : virtualPlaying);
     updateDownloadVideoButton();
-    updateScrubberMarkerActiveState();
     updateTouchOverlay();
     updateHierarchyOverlay();
   }
@@ -1864,7 +1949,7 @@
       if (!Number.isFinite(disclosureTime)) return;
       setAbsoluteTime(disclosureTime);
       setActiveEvent(disclosureNode.getAttribute('data-event-id'), false, 'auto', true);
-      var disclosureMatched = events.find(function(item) { return item.id === disclosureNode.getAttribute('data-event-id'); });
+      var disclosureMatched = eventByIdMap[disclosureNode.getAttribute('data-event-id')] || null;
       if (disclosureMatched && eventLabel) eventLabel.textContent = disclosureMatched.title;
       updateFromVideoTime();
       return;
@@ -1881,7 +1966,7 @@
     setAbsoluteTime(absoluteTime);
     var clickedSummary = !!event.target.closest('summary');
     setActiveEvent(node.getAttribute('data-event-id'), !clickedSummary, clickedSummary ? 'auto' : null, true);
-    var matched = events.find(function(item) { return item.id === node.getAttribute('data-event-id'); });
+    var matched = eventByIdMap[node.getAttribute('data-event-id')] || null;
     if (matched && eventLabel) eventLabel.textContent = matched.title;
     updateFromVideoTime();
   });
@@ -1917,16 +2002,6 @@
     } else {
       virtualCurrentTime = Math.max(0, Math.min(virtualDuration, value));
     }
-    var absoluteTime = video ? (activeMediaStartTime() + value) : ((timelineBase || 0) + virtualCurrentTime);
-    var idx = eventIndexForAbsoluteTime(absoluteTime);
-    if (idx >= 0) {
-      setActiveEvent(events[idx].id, false, 'auto', true);
-      if (eventLabel) eventLabel.textContent = events[idx].title;
-    }
-    if (!video) {
-      updateStillFrameForTime(absoluteTime);
-    }
-    updateTouchOverlay();
     updateFromVideoTime();
   });
 

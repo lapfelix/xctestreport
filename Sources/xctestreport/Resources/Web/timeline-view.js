@@ -305,6 +305,9 @@
   var totalTimeLabel = controls.querySelector('[data-total-time]');
   var runSelector = root.querySelector('[data-run-selector]');
   var runPanels = Array.prototype.slice.call(root.querySelectorAll('[data-run-panel]'));
+  var layoutPanelStack = root.querySelector('.timeline-panel-stack');
+  var layoutVideoPanel = root.querySelector('.video-panel');
+  var layoutSplitter = root.querySelector('[data-layout-splitter]');
   var eventLabel = null;
   var timelineTree = null;
   var playButton = controls.querySelector('[data-nav=\"play\"]');
@@ -378,6 +381,10 @@
   var scrubInteractionDeadline = 0;
   var touchMarker = null;
   var touchAnimationFrame = 0;
+  var layoutSplitDragPointerId = null;
+  var layoutSplitDragActive = false;
+  var LAYOUT_SPLIT_MIN_LEFT = 320;
+  var LAYOUT_SPLIT_MIN_RIGHT = 360;
   var TOUCH_RELEASE_DURATION = 0.18;
   var TOUCH_PLAYBACK_LEAD_WINDOW = 0.06;
   var SCRUB_PREVIEW_WINDOW = 0.22;
@@ -1254,6 +1261,86 @@
 
     if (cardPosition < 0 || !Number.isFinite(targetWidth)) return;
     card.style.width = targetWidth + 'px';
+  }
+
+  function supportsDesktopSplitResize() {
+    if (!layoutSplitter || !layoutPanelStack || !layoutVideoPanel) return false;
+    if (mediaMode === 'none') return false;
+    if (root.classList.contains('timeline-layout-single')) return false;
+    return window.innerWidth > 980;
+  }
+
+  function layoutSplitBounds() {
+    if (!supportsDesktopSplitResize()) return null;
+    var rootRect = root.getBoundingClientRect();
+    if (!rootRect.width) return null;
+    var splitterWidth = layoutSplitter.getBoundingClientRect().width || 14;
+    var maxLeft = rootRect.width - LAYOUT_SPLIT_MIN_RIGHT - splitterWidth;
+    var minLeft = Math.min(LAYOUT_SPLIT_MIN_LEFT, Math.max(220, maxLeft));
+    if (maxLeft <= minLeft) return null;
+    return {
+      rootRect: rootRect,
+      splitterWidth: splitterWidth,
+      minLeft: minLeft,
+      maxLeft: maxLeft
+    };
+  }
+
+  function currentLeftPanelWidth() {
+    if (!layoutPanelStack) return 0;
+    var explicit = parseFloat(root.style.getPropertyValue('--timeline-left-panel-width') || '');
+    if (Number.isFinite(explicit) && explicit > 0) return explicit;
+    var width = layoutPanelStack.getBoundingClientRect().width;
+    return Number.isFinite(width) ? width : 0;
+  }
+
+  function updateLayoutSplitterAria(leftWidth, bounds) {
+    if (!layoutSplitter || !bounds) return;
+    var percent = (leftWidth / bounds.rootRect.width) * 100;
+    var clampedPercent = Math.max(0, Math.min(100, percent));
+    layoutSplitter.setAttribute('aria-valuemin', '0');
+    layoutSplitter.setAttribute('aria-valuemax', '100');
+    layoutSplitter.setAttribute('aria-valuenow', clampedPercent.toFixed(0));
+    layoutSplitter.setAttribute('aria-valuetext', clampedPercent.toFixed(0) + '% timeline width');
+  }
+
+  function applyLeftPanelWidth(nextWidth, forceOverlayRefresh) {
+    var bounds = layoutSplitBounds();
+    if (!bounds) return;
+    var clamped = Math.max(bounds.minLeft, Math.min(bounds.maxLeft, nextWidth));
+    root.style.setProperty('--timeline-left-panel-width', clamped.toFixed(1) + 'px');
+    updateLayoutSplitterAria(clamped, bounds);
+    updateActiveMediaLayout();
+    updateTouchOverlay();
+    scheduleHierarchyOverlayUpdate(!!forceOverlayRefresh);
+  }
+
+  function setSplitForClientX(clientX) {
+    var bounds = layoutSplitBounds();
+    if (!bounds) return;
+    var target = clientX - bounds.rootRect.left - (bounds.splitterWidth / 2);
+    applyLeftPanelWidth(target, true);
+  }
+
+  function finishLayoutSplitDrag(pointerId) {
+    if (!layoutSplitDragActive) return;
+    if (pointerId != null && layoutSplitDragPointerId != null && pointerId !== layoutSplitDragPointerId) return;
+    layoutSplitDragActive = false;
+    layoutSplitDragPointerId = null;
+    root.classList.remove('is-resizing');
+  }
+
+  function refreshLayoutSplitterState() {
+    if (!layoutSplitter) return;
+    var enabled = supportsDesktopSplitResize();
+    layoutSplitter.hidden = !enabled;
+    layoutSplitter.tabIndex = enabled ? 0 : -1;
+    layoutSplitter.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+    if (!enabled) {
+      finishLayoutSplitDrag();
+      return;
+    }
+    updateLayoutSplitterAria(currentLeftPanelWidth(), layoutSplitBounds());
   }
 
   function escapeHTML(value) {
@@ -2715,6 +2802,61 @@
   window.addEventListener('pointerup', finishScrubDrag, true);
   window.addEventListener('pointercancel', finishScrubDrag, true);
 
+  if (layoutSplitter) {
+    layoutSplitter.addEventListener('pointerdown', function(event) {
+      if (!supportsDesktopSplitResize()) return;
+      if (event.button != null && event.button !== 0) return;
+      if (!event.isPrimary) return;
+      event.preventDefault();
+      layoutSplitDragActive = true;
+      layoutSplitDragPointerId = event.pointerId;
+      root.classList.add('is-resizing');
+      if (typeof layoutSplitter.setPointerCapture === 'function') {
+        try { layoutSplitter.setPointerCapture(event.pointerId); } catch (error) {}
+      }
+      setSplitForClientX(event.clientX);
+    });
+
+    layoutSplitter.addEventListener('pointermove', function(event) {
+      if (!layoutSplitDragActive) return;
+      if (!event.isPrimary) return;
+      if (layoutSplitDragPointerId != null && event.pointerId !== layoutSplitDragPointerId) return;
+      event.preventDefault();
+      setSplitForClientX(event.clientX);
+    });
+
+    layoutSplitter.addEventListener('pointerup', function(event) {
+      finishLayoutSplitDrag(event.pointerId);
+    });
+    layoutSplitter.addEventListener('pointercancel', function(event) {
+      finishLayoutSplitDrag(event.pointerId);
+    });
+    layoutSplitter.addEventListener('lostpointercapture', function(event) {
+      finishLayoutSplitDrag(event.pointerId);
+    });
+
+    layoutSplitter.addEventListener('keydown', function(event) {
+      if (!supportsDesktopSplitResize()) return;
+      var bounds = layoutSplitBounds();
+      if (!bounds) return;
+      var step = event.shiftKey ? 48 : 18;
+      var current = currentLeftPanelWidth();
+      var next = null;
+      if (event.key === 'ArrowLeft') {
+        next = current - step;
+      } else if (event.key === 'ArrowRight') {
+        next = current + step;
+      } else if (event.key === 'Home') {
+        next = bounds.minLeft;
+      } else if (event.key === 'End') {
+        next = bounds.maxLeft;
+      }
+      if (next == null) return;
+      event.preventDefault();
+      applyLeftPanelWidth(next, true);
+    });
+  }
+
   if (selector) {
     selector.addEventListener('change', function() {
       stopTouchAnimation();
@@ -2756,6 +2898,7 @@
   }
 
   window.addEventListener('resize', function() {
+    refreshLayoutSplitterState();
     updateActiveMediaLayout();
     updateTouchOverlay();
     scheduleHierarchyOverlayUpdate(true);
@@ -2859,4 +3002,6 @@
     ensureRunStatesFallback();
     initializeTimelineFromCurrentData();
   }
+
+  refreshLayoutSplitterState();
 })();

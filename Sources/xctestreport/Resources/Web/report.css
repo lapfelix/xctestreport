@@ -1114,27 +1114,26 @@ tr.failed {
     position: absolute;
     left: calc(var(--timeline-thumb-size, 15px) / 2);
     right: calc(var(--timeline-thumb-size, 15px) / 2);
-    top: calc(50% + 2px);
+    top: calc(50% + 3px);
     transform: translateY(-50%);
-    height: 20px;
-    overflow: hidden;
+    height: 24px;
+    overflow: visible;
     pointer-events: none;
     z-index: 3;
 }
 
 .timeline-scrubber-marker {
-    --timeline-marker-shift: -50%;
     --timeline-marker-y-shift: calc(-50% + 2px);
     position: absolute;
     top: 50%;
-    transform: translate(var(--timeline-marker-shift), var(--timeline-marker-y-shift));
-    width: 5px;
-    height: 10px;
+    transform: translate(-50%, var(--timeline-marker-y-shift));
+    width: 2px;
+    height: 8px;
     border-radius: 999px;
-    border: 1px solid rgba(47, 59, 79, 0.44);
-    background: #70809A;
-    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.58);
-    opacity: 0.9;
+    border: 0;
+    background: #72819B;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.45);
+    opacity: 0.95;
     pointer-events: auto;
     cursor: pointer;
     padding: 0;
@@ -1143,49 +1142,38 @@ tr.failed {
     appearance: none;
 }
 
-.timeline-scrubber-marker.is-edge-left {
-    --timeline-marker-shift: 0%;
-}
-
-.timeline-scrubber-marker.is-edge-right {
-    --timeline-marker-shift: -100%;
-}
-
 .timeline-scrubber-marker.is-event {
     background: #72819B;
 }
 
 .timeline-scrubber-marker.is-tap {
-    width: 6px;
-    height: 12px;
+    width: 2px;
+    height: 10px;
     background: #347FE8;
-    border-color: rgba(29, 86, 169, 0.72);
-    box-shadow: 0 0 0 1px rgba(196, 223, 255, 0.75);
+    box-shadow: 0 0 0 1px rgba(196, 223, 255, 0.75), 0 0 6px rgba(52, 127, 232, 0.26);
 }
 
 .timeline-scrubber-marker.is-hierarchy {
-    width: 6px;
-    height: 12px;
+    width: 2px;
+    height: 10px;
     background: #AF52DE;
-    border-color: rgba(115, 52, 148, 0.74);
-    box-shadow: 0 0 0 1px rgba(233, 206, 250, 0.7);
+    box-shadow: 0 0 0 1px rgba(233, 206, 250, 0.7), 0 0 6px rgba(175, 82, 222, 0.24);
 }
 
 .timeline-scrubber-marker.is-error {
-    width: 10px;
-    height: 16px;
+    width: 3px;
+    height: 12px;
     background: #DA112E;
-    border-color: rgba(126, 11, 23, 0.88);
-    box-shadow: 0 0 0 2px rgba(218, 17, 46, 0.28), 0 0 10px rgba(179, 12, 35, 0.34);
+    box-shadow: 0 0 0 1px rgba(255, 214, 221, 0.72), 0 0 10px rgba(179, 12, 35, 0.34);
 }
 
 .timeline-scrubber-marker.is-active {
-    transform: translate(var(--timeline-marker-shift), var(--timeline-marker-y-shift)) scale(1.18);
+    transform: translate(-50%, var(--timeline-marker-y-shift)) scale(1.18);
     z-index: 2;
 }
 
 .timeline-scrubber-marker.is-active.is-error {
-    transform: translate(var(--timeline-marker-shift), var(--timeline-marker-y-shift)) scale(1.1);
+    transform: translate(-50%, var(--timeline-marker-y-shift)) scale(1.1);
 }
 
 .timeline-marker-legend {
@@ -1857,7 +1845,7 @@ button#toggle-all {
     width: 100%;
 }
 
-[title] {
+[title]:not(.timeline-scrubber-marker) {
     position: relative;
     cursor: help;
 }

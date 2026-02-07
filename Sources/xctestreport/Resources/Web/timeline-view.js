@@ -1123,8 +1123,6 @@
     }
     var durationForRatio = duration > 0.0001 ? duration : 1;
     var hasBoundedDuration = duration > 0.0001;
-    var laneWidth = scrubberMarkerLane.clientWidth || 0;
-
     events.forEach(function(event, index) {
       var markerKind = scrubberMarkerKindForEvent(event);
       var markerTime = scrubberMarkerAnchorTimeForEvent(event, markerKind);
@@ -1147,16 +1145,6 @@
       marker.setAttribute('data-marker-time', Number.isFinite(markerTime) ? String(markerTime) : '');
       marker.setAttribute('aria-label', (event.title || 'Timeline event') + ' at ' + formatSeconds(clampedOffset));
       marker.title = event.title || 'Timeline event';
-
-      if (laneWidth > 0) {
-        var markerHalfWidth = markerKind === 'error' ? 5 : (markerKind === 'tap' || markerKind === 'hierarchy' ? 3 : 2.5);
-        var edgeRatio = Math.min(0.08, markerHalfWidth / laneWidth);
-        if (ratio <= edgeRatio) {
-          marker.classList.add('is-edge-left');
-        } else if (ratio >= (1 - edgeRatio)) {
-          marker.classList.add('is-edge-right');
-        }
-      }
 
       marker.addEventListener('click', function(clickEvent) {
         clickEvent.preventDefault();

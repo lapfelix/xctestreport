@@ -319,6 +319,7 @@
   var scrubDragging = false;
   var scrubPreviewActive = false;
   var scrubPreviewTime = 0;
+  var scrubInteractionDeadline = 0;
   var touchMarker = null;
   var touchAnimationFrame = 0;
   var TOUCH_RELEASE_DURATION = 0.18;
@@ -1940,10 +1941,42 @@
     }
   }
 
+  function scrollTimelineNodeIntoView(node, scrollBehavior) {
+    if (!node) return;
+    var behavior = scrollBehavior || 'auto';
+    var tree = timelineTree || node.closest('.timeline-tree');
+    if (!tree || tree.scrollHeight <= tree.clientHeight + 1) {
+      node.scrollIntoView({ block: 'nearest', behavior: behavior });
+      return;
+    }
+
+    var treeRect = tree.getBoundingClientRect();
+    var nodeRect = node.getBoundingClientRect();
+    var padding = 10;
+    var topLimit = treeRect.top + padding;
+    var bottomLimit = treeRect.bottom - padding;
+
+    var delta = 0;
+    if (nodeRect.top < topLimit) {
+      delta = nodeRect.top - topLimit;
+    } else if (nodeRect.bottom > bottomLimit) {
+      delta = nodeRect.bottom - bottomLimit;
+    }
+    if (Math.abs(delta) < 0.5) return;
+
+    var targetTop = tree.scrollTop + delta;
+    if (typeof tree.scrollTo === 'function') {
+      tree.scrollTo({ top: targetTop, behavior: behavior });
+    } else {
+      tree.scrollTop = targetTop;
+    }
+  }
+
   function setActiveEvent(eventId, shouldReveal, scrollBehavior, scrollWhenCollapsed) {
     if (!eventId) return;
     var idx = eventIndexById(eventId);
     if (idx >= 0) activeEventIndex = idx;
+    var previousRenderedNode = activeRenderedNode;
 
     var preciseNode = eventNodeForId(eventId);
     if (preciseNode && shouldReveal) {
@@ -1975,7 +2008,10 @@
     updateContextHighlight(preciseNode || activeRenderedNode);
 
     if (activeRenderedNode && (shouldReveal || scrollBehavior)) {
-      activeRenderedNode.scrollIntoView({ block: 'nearest', behavior: scrollBehavior || 'smooth' });
+      var shouldScrollNode = shouldReveal || activeRenderedNode !== previousRenderedNode;
+      if (shouldScrollNode) {
+        scrollTimelineNodeIntoView(activeRenderedNode, scrollBehavior || 'smooth');
+      }
     }
 
     activeEventId = eventId;
@@ -2085,11 +2121,16 @@
     scrubDragging = false;
     scrubPreviewActive = false;
     scrubPreviewTime = 0;
+    scrubInteractionDeadline = 0;
     if (dragSeekAnimationFrame) {
       cancelAnimationFrame(dragSeekAnimationFrame);
       dragSeekAnimationFrame = 0;
     }
     dragSeekRequestedTime = null;
+  }
+
+  function markScrubInteraction() {
+    scrubInteractionDeadline = Date.now() + 500;
   }
 
   function applyPendingVideoSeek() {
@@ -2181,7 +2222,11 @@
       }
     }
     if (idx >= 0) {
-      setActiveEvent(events[idx].id, false, null, true);
+      var followDuringScrub =
+        scrubDragging
+        || scrubPreviewActive
+        || Date.now() <= scrubInteractionDeadline;
+      setActiveEvent(events[idx].id, false, followDuringScrub ? 'auto' : null, true);
       if (eventLabel) eventLabel.textContent = events[idx].title;
     } else {
       updateScrubberMarkerActiveState();
@@ -2424,6 +2469,7 @@
   }
 
   scrubber.addEventListener('pointerdown', function() {
+    markScrubInteraction();
     if (getActiveVideo()) {
       scrubDragging = true;
       scrubPreviewActive = true;
@@ -2432,6 +2478,7 @@
   });
 
   scrubber.addEventListener('input', function() {
+    markScrubInteraction();
     var video = getActiveVideo();
     var value = parseFloat(scrubber.value || '0');
     if (!Number.isFinite(value)) value = 0;
@@ -2452,6 +2499,7 @@
   });
 
   scrubber.addEventListener('change', function() {
+    markScrubInteraction();
     var video = getActiveVideo();
     if (!video) return;
     scrubDragging = false;

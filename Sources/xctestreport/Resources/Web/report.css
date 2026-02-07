@@ -455,6 +455,12 @@ tr.failed {
     min-height: 0;
     display: flex;
     flex-direction: column;
+    flex: 1;
+}
+
+.test-detail-page .timeline-panel-stack {
+    min-height: 0;
+    height: 100%;
 }
 
 .test-detail-page .video-panel {
@@ -2069,6 +2075,10 @@ button#toggle-all {
 
     .timeline-tree,
     .timeline-video-frame {
+        max-height: 45vh;
+    }
+
+    .test-detail-page .timeline-tree {
         max-height: 45vh;
     }
 

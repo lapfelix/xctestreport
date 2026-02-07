@@ -1089,9 +1089,19 @@
     return layer ? layer.querySelector('[data-hierarchy-hints]') : null;
   }
 
+  function isHierarchyPanelExpanded() {
+    return !!(hierarchyToggle && hierarchyToggle.getAttribute('aria-expanded') === 'true');
+  }
+
   function setHierarchyPanelExpanded(expanded) {
     if (!hierarchyPanel || !hierarchyBody || !hierarchyToggle) return;
     var shouldExpand = !!expanded;
+    var currentlyExpanded = isHierarchyPanelExpanded();
+    var desiredOpenToggleHidden = hierarchyPanel.hidden || shouldExpand;
+    var openToggleNeedsUpdate = !!(hierarchyOpenToggle && hierarchyOpenToggle.hidden !== desiredOpenToggleHidden);
+    if (currentlyExpanded === shouldExpand && !openToggleNeedsUpdate) {
+      return;
+    }
     hierarchyPanel.classList.toggle('is-collapsed', !shouldExpand);
     hierarchyBody.setAttribute('aria-hidden', shouldExpand ? 'false' : 'true');
     hierarchyToggle.setAttribute('aria-expanded', shouldExpand ? 'true' : 'false');
@@ -1111,7 +1121,7 @@
     if (hierarchyOpenToggle) {
       hierarchyOpenToggle.hidden = !hasHierarchyData || (hierarchyToggle && hierarchyToggle.getAttribute('aria-expanded') === 'true');
     }
-    if (!hasHierarchyData) {
+    if (!hasHierarchyData && isHierarchyPanelExpanded()) {
       setHierarchyPanelExpanded(false);
     }
     clearHierarchyRenderCaches();
@@ -1979,6 +1989,8 @@
     setActiveEvent(event.id, shouldReveal);
     if (eventLabel) eventLabel.textContent = event.title;
     setAbsoluteTime(event.time);
+    // Preserve explicit prev/next/marker selection when multiple events share a timestamp.
+    scrubPreviewActive = false;
     updateFromVideoTime();
   }
 

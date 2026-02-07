@@ -639,7 +639,7 @@ extension XCTestReport {
             "-pix_fmt",
             "yuv420p",
             "-q:v",
-            "50",
+            "45",
             "-allow_sw",
             "1",
             "-movflags",

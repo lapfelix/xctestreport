@@ -63,6 +63,7 @@ swift run xctestreport /path/to/results.xcresult /tmp/xctestreport-output --comp
 ```
 
 If `--compress-video` is set but `ffmpeg` is not installed, compression is skipped and report generation continues.
+The default VideoToolbox setting uses `-q:v 45`, tuned for faster export and smaller files on Apple Silicon while preserving readable UI detail.
 
 If plist attachment payloads are compressed, preview requires browser `DecompressionStream` support.
 

@@ -378,7 +378,7 @@ extension XCTestReport {
 
         // `plutil -p` output is large for UI snapshots. Keep worker count bounded,
         // but allow enough parallelism to reduce end-of-run latency.
-        let compressionWorkers = max(1, min(4, ProcessInfo.processInfo.activeProcessorCount))
+        let compressionWorkers = max(1, min(8, ProcessInfo.processInfo.activeProcessorCount))
         let limiter = DispatchSemaphore(value: compressionWorkers)
         let statsLock = NSLock()
         let group = DispatchGroup()
@@ -509,7 +509,7 @@ extension XCTestReport {
         )
 
         let sortedVideoFileNames = videoFileNames.sorted()
-        let compressionWorkers = max(1, min(3, ProcessInfo.processInfo.activeProcessorCount))
+        let compressionWorkers = max(1, min(8, ProcessInfo.processInfo.activeProcessorCount))
         print("Video compression workers: \(compressionWorkers)")
 
         var compressedCount = 0

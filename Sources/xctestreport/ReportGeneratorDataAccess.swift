@@ -365,7 +365,18 @@ extension XCTestReport {
                 .values
                 .flatMap { $0.map(\.exportedFileName) }
         )
+        let synthesizedEventFileNames = Set(
+            attachmentsByTestIdentifier
+                .values
+                .flatMap { $0 }
+                .filter {
+                    ($0.suggestedHumanReadableName ?? "").localizedCaseInsensitiveContains(
+                        "synthesized event")
+                }
+                .map(\.exportedFileName)
+        )
         let candidateFiles = exportedFileNames.sorted().compactMap { exportedFileName -> (String, String)? in
+            guard !synthesizedEventFileNames.contains(exportedFileName) else { return nil }
             let inputPath = (attachmentsDir as NSString).appendingPathComponent(exportedFileName)
             var isDirectory: ObjCBool = false
             guard fileManager.fileExists(atPath: inputPath, isDirectory: &isDirectory),

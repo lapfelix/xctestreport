@@ -994,7 +994,7 @@ tr.failed {
     position: relative;
     display: flex;
     align-items: center;
-    min-height: 24px;
+    min-height: 30px;
 }
 
 .timeline-buttons {
@@ -1050,7 +1050,9 @@ tr.failed {
 .timeline-scrubber {
     --timeline-track-height: 9px;
     --timeline-thumb-size: 15px;
+    --timeline-hit-height: 28px;
     width: 100%;
+    height: var(--timeline-hit-height);
     margin: 0;
     border: 0;
     padding: 0;
@@ -1112,7 +1114,7 @@ tr.failed {
     position: absolute;
     left: calc(var(--timeline-thumb-size, 15px) / 2);
     right: calc(var(--timeline-thumb-size, 15px) / 2);
-    top: 50%;
+    top: calc(50% + 2px);
     transform: translateY(-50%);
     height: 20px;
     overflow: hidden;
@@ -1122,9 +1124,10 @@ tr.failed {
 
 .timeline-scrubber-marker {
     --timeline-marker-shift: -50%;
+    --timeline-marker-y-shift: calc(-50% + 2px);
     position: absolute;
     top: 50%;
-    transform: translate(var(--timeline-marker-shift), -50%);
+    transform: translate(var(--timeline-marker-shift), var(--timeline-marker-y-shift));
     width: 5px;
     height: 10px;
     border-radius: 999px;
@@ -1177,12 +1180,12 @@ tr.failed {
 }
 
 .timeline-scrubber-marker.is-active {
-    transform: translate(var(--timeline-marker-shift), -50%) scale(1.18);
+    transform: translate(var(--timeline-marker-shift), var(--timeline-marker-y-shift)) scale(1.18);
     z-index: 2;
 }
 
 .timeline-scrubber-marker.is-active.is-error {
-    transform: translate(var(--timeline-marker-shift), -50%) scale(1.1);
+    transform: translate(var(--timeline-marker-shift), var(--timeline-marker-y-shift)) scale(1.1);
 }
 
 .timeline-marker-legend {
@@ -2006,7 +2009,7 @@ button#toggle-all {
     }
 
     .test-detail-page .timeline-scrubber-wrap {
-        min-height: 22px;
+        min-height: 30px;
     }
 
     .test-detail-page .timeline-marker-legend {

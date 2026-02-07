@@ -4,6 +4,68 @@
   var externalJSONPayloads = Object.create(null);
   var externalJSONLoaders = [];
 
+  function decodeBase64Payload(base64Value) {
+    if (!base64Value || typeof base64Value !== 'string') return null;
+    if (typeof atob !== 'function') return null;
+    try {
+      var binary = atob(base64Value);
+      var length = binary.length;
+      var bytes = new Uint8Array(length);
+      for (var index = 0; index < length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+      }
+      return bytes.buffer;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function resolveInlineBinaryPayload(src) {
+    var key = src == null ? '' : String(src);
+    if (!key) return null;
+    var store = window.__xctestreportTimelinePayloads;
+    if (!store || typeof store !== 'object') return null;
+
+    if (typeof store[key] === 'string') return store[key];
+
+    try {
+      var absoluteKey = new URL(key, window.location.href).href;
+      if (typeof store[absoluteKey] === 'string') return store[absoluteKey];
+    } catch (error) {}
+
+    try {
+      var decodedKey = decodeURIComponent(key);
+      if (decodedKey !== key && typeof store[decodedKey] === 'string') return store[decodedKey];
+    } catch (error) {}
+
+    return null;
+  }
+
+  function loadExternalPayloadBuffer(src) {
+    var inlinePayload = resolveInlineBinaryPayload(src);
+    if (window.location.protocol === 'file:') {
+      var decodedInlinePayload = decodeBase64Payload(inlinePayload);
+      if (decodedInlinePayload) {
+        return Promise.resolve(decodedInlinePayload);
+      }
+    }
+
+    return fetch(src)
+      .then(function(response) {
+        if (!response.ok) {
+          throw new Error('HTTP ' + response.status);
+        }
+        return response.arrayBuffer();
+      })
+      .catch(function(fetchError) {
+        var decodedPayload = decodeBase64Payload(inlinePayload);
+        if (!decodedPayload) {
+          throw fetchError;
+        }
+        return decodedPayload;
+      });
+  }
+
   function parseJSONScript(selector) {
     var node = document.querySelector(selector);
     if (!node) return [];
@@ -19,13 +81,7 @@
     var src = node.getAttribute('data-src');
     if (src) {
       externalJSONLoaders.push(
-        fetch(src)
-          .then(function(response) {
-            if (!response.ok) {
-              throw new Error('HTTP ' + response.status);
-            }
-            return response.arrayBuffer();
-          })
+        loadExternalPayloadBuffer(src)
           .then(function(buffer) {
             return maybeDecompressGzipBuffer(buffer);
           })
@@ -326,6 +382,9 @@
   var TOUCH_PLAYBACK_LEAD_WINDOW = 0.06;
   var SCRUB_PREVIEW_WINDOW = 0.22;
   var HIERARCHY_MATCH_WINDOW = 0.30;
+  var SCRUBBER_MARKER_RANGE_TOLERANCE = 0.35;
+  var SCRUBBER_TAP_MATCH_TOLERANCE = 0.35;
+  var SCRUBBER_HIERARCHY_MATCH_TOLERANCE = 0.35;
   var currentHierarchySnapshotId = null;
   var selectedHierarchyElementId = null;
   var hoveredHierarchyElementId = null;
@@ -881,12 +940,141 @@
     return 'event';
   }
 
-  function timelineOffsetForEvent(event) {
+  function distanceToTimeRange(value, start, end) {
+    if (!Number.isFinite(value) || !Number.isFinite(start) || !Number.isFinite(end)) {
+      return Number.POSITIVE_INFINITY;
+    }
+    if (value < start) return start - value;
+    if (value > end) return value - end;
+    return 0;
+  }
+
+  function nearestTouchGestureForTime(absoluteTime, maxDistance) {
+    if (!touchGestures.length || !Number.isFinite(absoluteTime)) return null;
+    var bestMatch = null;
+    for (var index = 0; index < touchGestures.length; index += 1) {
+      var gesture = touchGestures[index];
+      if (!gesture) continue;
+      var start = Number(gesture.startTime);
+      var end = Number(gesture.endTime);
+      if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+      var rangeStart = Math.min(start, end);
+      var rangeEnd = Math.max(start, end);
+      var distance = distanceToTimeRange(absoluteTime, rangeStart, rangeEnd);
+      if (!bestMatch || distance < bestMatch.distance) {
+        bestMatch = {
+          gesture: gesture,
+          start: rangeStart,
+          end: rangeEnd,
+          distance: distance
+        };
+      }
+    }
+    if (!bestMatch) return null;
+    if (Number.isFinite(maxDistance) && bestMatch.distance > maxDistance) return null;
+    return bestMatch;
+  }
+
+  function nearestHierarchySnapshotForTime(absoluteTime, maxDistance) {
+    if (!hierarchySnapshotTimeIndex.length || !Number.isFinite(absoluteTime)) return null;
+
+    var low = 0;
+    var high = hierarchySnapshotTimeIndex.length;
+    while (low < high) {
+      var mid = (low + high) >> 1;
+      if (hierarchySnapshotTimeIndex[mid].time < absoluteTime) {
+        low = mid + 1;
+      } else {
+        high = mid;
+      }
+    }
+
+    var bestEntry = null;
+    var bestDistance = Number.POSITIVE_INFINITY;
+
+    function consider(index) {
+      if (index < 0 || index >= hierarchySnapshotTimeIndex.length) return;
+      var entry = hierarchySnapshotTimeIndex[index];
+      if (!entry || !Number.isFinite(entry.time)) return;
+      var distance = Math.abs(entry.time - absoluteTime);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestEntry = entry;
+      }
+    }
+
+    consider(low);
+    consider(low - 1);
+
+    if (!bestEntry) return null;
+    if (Number.isFinite(maxDistance) && bestDistance > maxDistance) return null;
+    return bestEntry.snapshot || null;
+  }
+
+  function hasTouchGestureNearTime(absoluteTime) {
+    return !!nearestTouchGestureForTime(absoluteTime, SCRUBBER_TAP_MATCH_TOLERANCE);
+  }
+
+  function hasHierarchySnapshotNearTime(absoluteTime) {
+    return !!nearestHierarchySnapshotForTime(absoluteTime, SCRUBBER_HIERARCHY_MATCH_TOLERANCE);
+  }
+
+  function scrubberMarkerKindForEvent(event) {
+    var baseKind = normalizeTimelineEventKind(event);
+    if (baseKind === 'error') return 'error';
+
+    var eventTime = Number(event && event.time);
+    if (!Number.isFinite(eventTime)) return baseKind;
+
+    var nearTouch = hasTouchGestureNearTime(eventTime);
+    var nearHierarchy = hasHierarchySnapshotNearTime(eventTime);
+
+    if (baseKind === 'tap') {
+      if (nearTouch) return 'tap';
+      if (nearHierarchy) return 'hierarchy';
+      return 'event';
+    }
+
+    if (baseKind === 'hierarchy') {
+      if (nearHierarchy) return 'hierarchy';
+      if (nearTouch) return 'tap';
+      return 'event';
+    }
+
+    return baseKind;
+  }
+
+  function scrubberMarkerAnchorTimeForEvent(event, markerKind) {
     if (!event) return null;
     var eventTime = Number(event.time);
     if (!Number.isFinite(eventTime)) return null;
+
+    if (markerKind === 'tap') {
+      var touchMatch = nearestTouchGestureForTime(eventTime, SCRUBBER_TAP_MATCH_TOLERANCE);
+      if (touchMatch) {
+        return Math.max(touchMatch.start, Math.min(touchMatch.end, eventTime));
+      }
+    } else if (markerKind === 'hierarchy') {
+      var snapshot = nearestHierarchySnapshotForTime(eventTime, SCRUBBER_HIERARCHY_MATCH_TOLERANCE);
+      var snapshotTime = Number(snapshot && snapshot.time);
+      if (Number.isFinite(snapshotTime)) {
+        return snapshotTime;
+      }
+    }
+
+    return eventTime;
+  }
+
+  function timelineOffsetForAbsoluteTime(absoluteTime) {
+    if (!Number.isFinite(absoluteTime)) return null;
     var base = getActiveVideo() ? activeMediaStartTime() : (timelineBase || 0);
-    return eventTime - base;
+    return absoluteTime - base;
+  }
+
+  function timelineOffsetForEvent(event) {
+    if (!event) return null;
+    var eventTime = Number(event.time);
+    return timelineOffsetForAbsoluteTime(eventTime);
   }
 
   function updateScrubberMarkerActiveState() {
@@ -903,10 +1091,16 @@
     if (markerIndex === activeScrubberMarkerIndex) return;
 
     if (activeScrubberMarkerIndex >= 0 && activeScrubberMarkerIndex < scrubberMarkers.length) {
-      scrubberMarkers[activeScrubberMarkerIndex].classList.remove('is-active');
+      var previousMarker = scrubberMarkers[activeScrubberMarkerIndex];
+      if (previousMarker) previousMarker.classList.remove('is-active');
     }
     if (markerIndex >= 0 && markerIndex < scrubberMarkers.length) {
-      scrubberMarkers[markerIndex].classList.add('is-active');
+      var nextMarker = scrubberMarkers[markerIndex];
+      if (nextMarker) {
+        nextMarker.classList.add('is-active');
+      } else {
+        markerIndex = -1;
+      }
     }
     activeScrubberMarkerIndex = markerIndex;
   }
@@ -928,14 +1122,21 @@
       }, 0);
     }
     var durationForRatio = duration > 0.0001 ? duration : 1;
+    var hasBoundedDuration = duration > 0.0001;
     var laneWidth = scrubberMarkerLane.clientWidth || 0;
 
     events.forEach(function(event, index) {
-      var offset = timelineOffsetForEvent(event);
+      var markerKind = scrubberMarkerKindForEvent(event);
+      var markerTime = scrubberMarkerAnchorTimeForEvent(event, markerKind);
+      var offset = timelineOffsetForAbsoluteTime(markerTime);
       if (offset == null) return;
+      if (hasBoundedDuration) {
+        if (offset < -SCRUBBER_MARKER_RANGE_TOLERANCE || offset > duration + SCRUBBER_MARKER_RANGE_TOLERANCE) {
+          return;
+        }
+      }
       var clampedOffset = Math.max(0, Math.min(durationForRatio, offset));
       var ratio = duration > 0 ? (clampedOffset / durationForRatio) : 0;
-      var markerKind = normalizeTimelineEventKind(event);
 
       var marker = document.createElement('button');
       marker.type = 'button';
@@ -943,6 +1144,7 @@
       marker.style.left = (ratio * 100).toFixed(4) + '%';
       marker.setAttribute('data-event-index', String(index));
       marker.setAttribute('data-event-id', event.id || '');
+      marker.setAttribute('data-marker-time', Number.isFinite(markerTime) ? String(markerTime) : '');
       marker.setAttribute('aria-label', (event.title || 'Timeline event') + ' at ' + formatSeconds(clampedOffset));
       marker.title = event.title || 'Timeline event';
 
@@ -958,7 +1160,7 @@
 
       marker.addEventListener('click', function(clickEvent) {
         clickEvent.preventDefault();
-        jumpToEventByIndex(index, true);
+        jumpToEventByIndex(index, true, markerTime);
       });
 
       scrubberMarkerLane.appendChild(marker);
@@ -1884,15 +2086,20 @@
 
   function collapsedAncestorSummaryEvent(node) {
     var details = node ? node.closest('details') : null;
+    var visibleCollapsedSummary = null;
     while (details) {
       if (!details.open) {
         var summary = details.firstElementChild;
         var summaryEvent = summary ? summary.querySelector('.timeline-event') : null;
-        if (summaryEvent) return summaryEvent;
+        if (summaryEvent) {
+          // Prefer the outermost collapsed ancestor. Inner collapsed summaries can be
+          // hidden when an outer ancestor is also collapsed, which breaks auto-follow.
+          visibleCollapsedSummary = summaryEvent;
+        }
       }
       details = details.parentElement ? details.parentElement.closest('details') : null;
     }
-    return null;
+    return visibleCollapsedSummary;
   }
 
   function sameNodeSequence(a, b) {
@@ -2016,13 +2223,20 @@
     updateScrubberMarkerActiveState();
   }
 
-  function jumpToEventByIndex(index, shouldReveal) {
+  function jumpToEventByIndex(index, shouldReveal, seekAbsoluteTime) {
     if (!events.length) return;
     if (index < 0 || index >= events.length) return;
     var event = events[index];
     setActiveEvent(event.id, shouldReveal);
     if (eventLabel) eventLabel.textContent = event.title;
-    setAbsoluteTime(event.time);
+    var targetTime = Number(seekAbsoluteTime);
+    if (!Number.isFinite(targetTime)) {
+      targetTime = Number(event.time);
+    }
+    if (!Number.isFinite(targetTime)) {
+      targetTime = currentAbsoluteTime();
+    }
+    setAbsoluteTime(targetTime);
     // Preserve explicit prev/next/marker selection when multiple events share a timestamp.
     scrubPreviewActive = false;
     updateFromVideoTime();

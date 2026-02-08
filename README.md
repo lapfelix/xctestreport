@@ -76,11 +76,12 @@ Typical output directory:
 - `tests_full.json`
 - `tests_grouped.json`
 - `test_details/*.json`
-- `report.css`, `index-page.js`, `timeline-view.js`, `plist-preview.js`
+- `report.css`, `vue.global.prod.js`, `index-page.js`, `timeline-view.js`, `plist-preview.js`
 
 ## Web Assets (for edits)
 - Templates: `Sources/xctestreport/Resources/Web/templates/`
 - CSS: `Sources/xctestreport/Resources/Web/report.css`
+- JS vendor: `Sources/xctestreport/Resources/Web/vue.global.prod.js`
 - JS: `Sources/xctestreport/Resources/Web/index-page.js`
 - JS: `Sources/xctestreport/Resources/Web/timeline-view.js`
 - JS: `Sources/xctestreport/Resources/Web/plist-preview.js`

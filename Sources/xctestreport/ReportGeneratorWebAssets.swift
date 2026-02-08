@@ -32,6 +32,8 @@ extension XCTestReport {
         try copyWebAsset(
             named: "report", withExtension: "css", subdirectory: "Web", to: directory)
         try copyWebAsset(
+            named: "vue.global.prod", withExtension: "js", subdirectory: "Web", to: directory)
+        try copyWebAsset(
             named: "index-page", withExtension: "js", subdirectory: "Web", to: directory)
         try copyWebAsset(
             named: "plist-preview", withExtension: "js", subdirectory: "Web", to: directory)

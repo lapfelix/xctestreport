@@ -245,6 +245,30 @@ body.test-detail-page {
     gap: 20px;
 }
 
+.build-results-line {
+    margin: 10px 0 0;
+    color: #3b414b;
+}
+
+.report-empty,
+.report-error {
+    margin: 12px 0;
+    padding: 10px 12px;
+    border-radius: 8px;
+}
+
+.report-empty {
+    border: 1px solid #cfd8e4;
+    background: #f5f7fb;
+    color: #425168;
+}
+
+.report-error {
+    border: 1px solid #efc6cc;
+    background: #fff1f3;
+    color: #8f1f30;
+}
+
 .stat-number {
     font-size: 1.3em;
     font-weight: 600;
@@ -1230,6 +1254,14 @@ tr.failed {
     transform: translate(-50%, var(--timeline-marker-y-shift)) scale(1.1);
 }
 
+/* Preserve marker click targets on desktop, but keep touch scrubbing unobstructed. */
+@media (hover: none), (pointer: coarse) {
+    .timeline-scrubber-markers,
+    .timeline-scrubber-marker {
+        pointer-events: none;
+    }
+}
+
 .timeline-marker-legend {
     display: flex;
     align-items: center;
@@ -1897,6 +1929,11 @@ button#toggle-all {
     user-select: none;
     transition: all 0.2s ease;
     width: 100%;
+}
+
+button#toggle-all:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
 }
 
 [title]:not(.timeline-scrubber-marker) {

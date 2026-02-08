@@ -143,6 +143,30 @@ extension XCTestReport {
                 Array(tests[$0..<min($0 + chunkSize, tests.count)])
             }
         }
+
+        func formatDurationText(_ duration: TimeInterval) -> String {
+            if duration >= 3600 {
+                let hours = floor(duration / 3600)
+                let minutes = floor((duration.truncatingRemainder(dividingBy: 3600)) / 60)
+                let seconds = duration.truncatingRemainder(dividingBy: 60)
+                if seconds > 0 {
+                    return String(format: "%.0f hr %.0f min %.0f sec", hours, minutes, seconds)
+                }
+                if minutes > 0 {
+                    return String(format: "%.0f hr %.0f min", hours, minutes)
+                }
+                return String(format: "%.0f hr", hours)
+            }
+            if duration >= 60 {
+                let minutes = floor(duration / 60)
+                let seconds = duration.truncatingRemainder(dividingBy: 60)
+                if seconds > 0 {
+                    return String(format: "%.0f min %.0f sec", minutes, seconds)
+                }
+                return String(format: "%.0f min", minutes)
+            }
+            return String(format: "%.1f sec", duration)
+        }
         let preprocessingChunks = chunkTests(allTests, workerCount: preprocessingWorkers)
         let suiteChunks = chunkTests(allTests, workerCount: suiteWorkers)
 
@@ -355,53 +379,51 @@ extension XCTestReport {
 
         let suiteHTMLQueue = DispatchQueue(label: "suiteHTML")
         var suiteSections = [String: [String]](minimumCapacity: groupedTests.count)
+        var suiteExportTestsByName = [String: [TestExportItem]](minimumCapacity: groupedTests.count)
+        var suiteIndexMetadataByName = [String: (
+            totalTests: Int,
+            passedTests: Int,
+            failedTests: Int,
+            skippedTests: Int,
+            passPercentage: Double,
+            durationText: String
+        )](minimumCapacity: groupedTests.count)
         var processedSuiteTests = 0
 
         // Initialize suite sections with headers
         for (suite, tests) in groupedTests {
-            let succeeded = tests.filter { $0.result == "Passed" }.count
+            let passedTests = tests.filter { $0.result == "Passed" }.count
+            let failedTests = tests.filter { $0.result == "Failed" }.count
+            let skippedTests = tests.filter { $0.result == "Skipped" }.count
             let total = tests.count
-            let percentagePassed = Double(succeeded) / Double(total) * 100.0
+            let percentagePassed = total > 0 ? (Double(passedTests) / Double(total) * 100.0) : 0
 
             // Calculate total duration for the suite
             let totalDuration = tests.compactMap { test -> TimeInterval? in
                 guard let durationStr = test.duration else { return nil }
                 return parseDuration(durationStr)
             }.reduce(0, +)
+            let durationText = formatDurationText(totalDuration)
+            let escapedSuiteName = htmlEscape(suite)
 
-            let durationText: String
-            if totalDuration >= 3600 {
-                let hours = floor(totalDuration / 3600)
-                let minutes = floor((totalDuration.truncatingRemainder(dividingBy: 3600)) / 60)
-                let seconds = totalDuration.truncatingRemainder(dividingBy: 60)
-                if seconds > 0 {
-                    durationText = String(
-                        format: "%.0f hr %.0f min %.0f sec", hours, minutes, seconds)
-                } else if minutes > 0 {
-                    durationText = String(format: "%.0f hr %.0f min", hours, minutes)
-                } else {
-                    durationText = String(format: "%.0f hr", hours)
-                }
-            } else if totalDuration >= 60 {
-                let minutes = floor(totalDuration / 60)
-                let seconds = totalDuration.truncatingRemainder(dividingBy: 60)
-                if seconds > 0 {
-                    durationText = String(format: "%.0f min %.0f sec", minutes, seconds)
-                } else {
-                    durationText = String(format: "%.0f min", minutes)
-                }
-            } else {
-                durationText = String(format: "%.1f sec", totalDuration)
-            }
+            suiteExportTestsByName[suite] = []
+            suiteIndexMetadataByName[suite] = (
+                totalTests: total,
+                passedTests: passedTests,
+                failedTests: failedTests,
+                skippedTests: skippedTests,
+                passPercentage: percentagePassed,
+                durationText: durationText
+            )
 
             suiteHTMLQueue.sync {
                 suiteSections[suite] = []
                 suiteSections[suite]?.append(
                     """
                     <div class="suite"><h2 class="collapsible">
-                        <span class="suite-name">\(suite)</span>
+                        <span class="suite-name">\(escapedSuiteName)</span>
                         <span class="suite-stats">
-                            <span class="stats-number">\(succeeded)/\(total)</span> Passed
+                            <span class="stats-number">\(passedTests)/\(total)</span> Passed
                             <span class="stats-percent">(\(String(format: "%.1f", percentagePassed))%)</span>
                             <span class="suite-duration">\(durationText)</span>
                         </span>
@@ -424,7 +446,14 @@ extension XCTestReport {
                     let testPageName = "test_\(test.nodeIdentifier ?? test.name).html"
                         .replacingOccurrences(of: "/", with: "_")
                     let result = test.result ?? "Unknown"
-                    let statusClass = result == "Passed" ? "passed" : "failed"
+                    let statusClass: String
+                    if result == "Passed" {
+                        statusClass = "passed"
+                    } else if result == "Failed" {
+                        statusClass = "failed"
+                    } else {
+                        statusClass = ""
+                    }
                     let duration = test.duration ?? "0s"
                     let rowClass = result == "Passed" ? "" : " class=\"failed\""
                     let escapedResult = htmlEscape(result)
@@ -432,7 +461,8 @@ extension XCTestReport {
                     let escapedTestName = htmlEscape(test.name)
                     let escapedPageName = htmlEscape(testPageName)
 
-                    var statusEmoji = ""
+                    var statusEmojiParts = [String]()
+                    var statusIndicators = [StatusIndicatorExportItem]()
                     if let previousResults = previousResults,
                         let testId = test.nodeIdentifier,
                         let previousResult = previousResults.results[testId]
@@ -442,14 +472,20 @@ extension XCTestReport {
                         )
                         if result == "Failed" && previousResult.status == "Passed" {
                             print("Found newly failed test: \(test.name)")
-                            statusEmoji = """
+                            statusEmojiParts.append("""
                                  <span class="emoji-status" title="Newly failed test">⭕️</span>
-                                """
+                                """)
+                            statusIndicators.append(
+                                StatusIndicatorExportItem(
+                                    symbol: "⭕️", title: "Newly failed test"))
                         } else if result == "Passed" && previousResult.status == "Failed" {
                             print("Found fixed test: \(test.name)")
-                            statusEmoji = """
+                            statusEmojiParts.append("""
                                  <span class="emoji-status" title="Fixed test">✨</span>
-                                """
+                                """)
+                            statusIndicators.append(
+                                StatusIndicatorExportItem(
+                                    symbol: "✨", title: "Fixed test"))
                         }
                     }
 
@@ -463,16 +499,31 @@ extension XCTestReport {
                         let firstRunResult = firstRun.result,
                         firstRunResult != "Passed"
                     {
-                        statusEmoji += """
+                        let flakyTitle =
+                            "Failed first attempt, succeeded on run #\(testRuns.count)"
+                        statusEmojiParts.append("""
                              <span class="emoji-status" title="Failed first attempt, succeeded on run #\(testRuns.count)">⚠️</span>
-                            """
+                            """)
+                        statusIndicators.append(
+                            StatusIndicatorExportItem(symbol: "⚠️", title: flakyTitle))
                     }
 
+                    let statusEmoji = statusEmojiParts.joined()
                     let testRow =
                         "<tr\(rowClass)><td data-label=\"Test Name\"><a href=\"\(escapedPageName)\">\(escapedTestName)</a></td><td data-label=\"Status\" class=\"\(statusClass)\">\(escapedResult)\(statusEmoji)</td><td data-label=\"Duration\">\(escapedDuration)</td></tr>"
+                    let testExportItem = TestExportItem(
+                        name: test.name,
+                        result: result,
+                        duration: test.duration,
+                        nodeIdentifier: test.nodeIdentifier,
+                        details: test.details,
+                        pageName: testPageName,
+                        statusIndicators: statusIndicators.isEmpty ? nil : statusIndicators
+                    )
 
                     suiteHTMLQueue.sync {
                         suiteSections[suite]?.append(testRow)
+                        suiteExportTestsByName[suite, default: []].append(testExportItem)
                     }
 
                     processedTestsQueue.sync {
@@ -496,38 +547,52 @@ extension XCTestReport {
         print("Exporting grouped tests to JSON...")
 
         var suiteExports = [SuiteExportItem]()
-        for (suiteName, tests) in groupedTests {
-            let passedTests = tests.filter { $0.result == "Passed" }.count
-            let failedTests = tests.filter { $0.result == "Failed" }.count
-            let skippedTests = tests.filter { $0.result == "Skipped" }.count
+        var indexSuiteExports = [IndexSuiteSummaryExport]()
+        let sortedSuiteNames = groupedTests.keys.sorted()
+        for suiteName in sortedSuiteNames {
+            guard let tests = groupedTests[suiteName],
+                let suiteMetadata = suiteIndexMetadataByName[suiteName]
+            else {
+                continue
+            }
 
-            // Calculate total duration for the suite
+            // Keep numeric duration in grouped export while reusing display-friendly text for index payload.
             let totalDuration = tests.compactMap { test -> TimeInterval? in
                 guard let durationStr = test.duration else { return nil }
                 return parseDuration(durationStr)
             }.reduce(0, +)
-
-            let testItems = tests.map { test -> TestExportItem in
-                return TestExportItem(
-                    name: test.name,
-                    result: test.result ?? "Unknown",
-                    duration: test.duration,
-                    nodeIdentifier: test.nodeIdentifier,
-                    details: test.details
+            let testItems = suiteExportTestsByName[suiteName] ?? []
+            let indexTestItems = testItems.map { testItem in
+                IndexTestExportItem(
+                    name: testItem.name,
+                    result: testItem.result,
+                    duration: testItem.duration,
+                    pageName: testItem.pageName,
+                    statusIndicators: testItem.statusIndicators
                 )
             }
 
-            let suiteItem = SuiteExportItem(
-                name: suiteName,
-                totalTests: tests.count,
-                passedTests: passedTests,
-                failedTests: failedTests,
-                skippedTests: skippedTests,
-                duration: totalDuration,
-                tests: testItems
-            )
-
-            suiteExports.append(suiteItem)
+            suiteExports.append(
+                SuiteExportItem(
+                    name: suiteName,
+                    totalTests: suiteMetadata.totalTests,
+                    passedTests: suiteMetadata.passedTests,
+                    failedTests: suiteMetadata.failedTests,
+                    skippedTests: suiteMetadata.skippedTests,
+                    duration: totalDuration,
+                    tests: testItems
+                ))
+            indexSuiteExports.append(
+                IndexSuiteSummaryExport(
+                    name: suiteName,
+                    totalTests: suiteMetadata.totalTests,
+                    passedTests: suiteMetadata.passedTests,
+                    failedTests: suiteMetadata.failedTests,
+                    skippedTests: suiteMetadata.skippedTests,
+                    passPercentage: suiteMetadata.passPercentage,
+                    durationText: suiteMetadata.durationText,
+                    tests: indexTestItems
+                ))
         }
 
         let exportSummary = ExportSummary(
@@ -563,6 +628,7 @@ extension XCTestReport {
         }
 
         var buildResultsHTML = ""
+        var indexBuildResults: IndexBuildResultsExport?
 
         let buildResultsCmd = [
             "xcrun", "xcresulttool", "get", "build-results", "--path", xcresultPath, "--format",
@@ -576,10 +642,15 @@ extension XCTestReport {
             if let buildResults = buildResults {
                 buildResultsHTML =
                     "<p>🛑 Errors: \(buildResults.errorCount) &nbsp; ⚠️ Warnings: \(buildResults.warningCount)</p>"
+                indexBuildResults = IndexBuildResultsExport(
+                    errorCount: buildResults.errorCount,
+                    warningCount: buildResults.warningCount
+                )
             }
         }
 
         var comparisonInfoHTML = ""
+        var comparisonInfoText: String?
         if let previousResults = previousResults {
             let dateFormatter = DateFormatter()
             dateFormatter.dateStyle = .medium
@@ -587,18 +658,39 @@ extension XCTestReport {
             dateFormatter.timeZone = TimeZone.current
             dateFormatter.locale = Locale(identifier: "en_US")
             let dateString = dateFormatter.string(from: previousResults.date)
-                .replacingOccurrences(of: ":", with: "&#58;")
-                .replacingOccurrences(of: " ", with: "&#32;")
-            comparisonInfoHTML =
-                "<p class=\"comparison-info\">Compared with previous run from: \(dateString)</p>"
+            let comparisonText = "Compared with previous run from: \(dateString)"
+            comparisonInfoText = comparisonText
+            comparisonInfoHTML = "<p class=\"comparison-info\">\(htmlEscape(comparisonText))</p>"
         }
 
         // Add suite sections to HTML in sorted order
         var suiteSectionsHTML = ""
-        for suite in groupedTests.keys.sorted() {
+        for suite in sortedSuiteNames {
             if let section = suiteSections[suite] {
                 suiteSectionsHTML += section.joined()
             }
+        }
+
+        let indexPayload = IndexPagePayload(
+            summary: IndexSummaryExport(
+                reportTitle: summary.title,
+                totalTests: summary.totalTestCount,
+                passedTests: summary.passedTests,
+                failedTests: summary.failedTests,
+                skippedTests: summary.skippedTests
+            ),
+            buildResults: indexBuildResults,
+            comparisonInfo: comparisonInfoText,
+            suites: indexSuiteExports
+        )
+        var indexPayloadJSON = "{}"
+        do {
+            let payloadEncoder = JSONEncoder()
+            payloadEncoder.outputFormatting = [.sortedKeys]
+            let payloadData = try payloadEncoder.encode(indexPayload)
+            indexPayloadJSON = String(data: payloadData, encoding: .utf8) ?? "{}"
+        } catch {
+            print("Error encoding inline index payload: \(error)")
         }
 
         let indexHTML = try renderTemplate(
@@ -612,6 +704,7 @@ extension XCTestReport {
                 "build_results_html": buildResultsHTML,
                 "comparison_info_html": comparisonInfoHTML,
                 "suite_sections_html": suiteSectionsHTML,
+                "index_page_payload_json": jsonForScriptTag(indexPayloadJSON),
             ],
             templateName: "index.html")
 

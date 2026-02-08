@@ -16,5 +16,14 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '22'
     - name: Build
       run: swift build -v
+    - name: Install UI Test Dependencies
+      run: npm --prefix ui-tests ci
+    - name: Install Playwright Browser
+      run: npx --prefix ui-tests playwright install chromium
+    - name: Run UI Integration Tests
+      run: npm --prefix ui-tests test

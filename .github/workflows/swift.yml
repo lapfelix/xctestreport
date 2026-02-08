@@ -22,11 +22,11 @@ jobs:
     - name: Build
       run: swift build -v
     - name: Install UI Test Dependencies
-      if: ${{ hashFiles('ui-tests/package-lock.json') != '' }}
+      if: ${{ hashFiles('ui-tests/package-lock.json') }}
       run: npm --prefix ui-tests ci
     - name: Install Playwright Browser
-      if: ${{ hashFiles('ui-tests/package-lock.json') != '' }}
+      if: ${{ hashFiles('ui-tests/package-lock.json') }}
       run: npx --prefix ui-tests playwright install chromium
     - name: Run UI Integration Tests
-      if: ${{ hashFiles('ui-tests/package-lock.json') != '' }}
+      if: ${{ hashFiles('ui-tests/package-lock.json') }}
       run: npm --prefix ui-tests test

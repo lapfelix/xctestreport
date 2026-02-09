@@ -1057,7 +1057,7 @@ extension XCTestReport {
             "-preset",
             "veryfast",
             "-crf",
-            "32",
+            "28",
             "-pix_fmt",
             "yuv420p",
             "-movflags",

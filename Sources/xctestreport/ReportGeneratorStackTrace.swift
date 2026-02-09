@@ -4,6 +4,8 @@ import Foundation
 private let sourceReferenceCacheLock = NSLock()
 private var sourceReferenceResolvedCache = [String: XCTestReport.SourceLocation]()
 private var sourceReferenceMissingCache = Set<String>()
+private let sourceSearchRootsLock = NSLock()
+private var sourceSearchRootsCache = [String: [String]]()
 
 extension XCTestReport {
     func htmlEscape(_ input: String) -> String {
@@ -256,6 +258,14 @@ extension XCTestReport {
     }
 
     private func sourceSearchRoots(projectHint: String?) -> [String] {
+        let cacheKey = projectHint ?? "_"
+        sourceSearchRootsLock.lock()
+        if let cached = sourceSearchRootsCache[cacheKey] {
+            sourceSearchRootsLock.unlock()
+            return cached
+        }
+        sourceSearchRootsLock.unlock()
+
         let fileManager = FileManager.default
         var orderedRoots = [String]()
         var seen = Set<String>()
@@ -286,6 +296,9 @@ extension XCTestReport {
         }
         appendRoot(gitsRoot)
 
+        sourceSearchRootsLock.lock()
+        sourceSearchRootsCache[cacheKey] = orderedRoots
+        sourceSearchRootsLock.unlock()
         return orderedRoots
     }
 

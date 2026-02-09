@@ -167,8 +167,8 @@ extension XCTestReport {
             label: "testPreprocessing", attributes: .concurrent)
         let suiteQueue = DispatchQueue(label: "suiteGeneration", attributes: .concurrent)
         let availableCores = max(1, ProcessInfo.processInfo.activeProcessorCount)
-        let preprocessingWorkers = min(4, availableCores)
-        let suiteWorkers = min(4, availableCores)  // Parallelize suite generation
+        let preprocessingWorkers = availableCores  // Use all available cores
+        let suiteWorkers = availableCores  // Use all available cores
 
         func chunkTests(_ tests: [TestNode], workerCount: Int) -> [[TestNode]] {
             guard !tests.isEmpty else { return [] }

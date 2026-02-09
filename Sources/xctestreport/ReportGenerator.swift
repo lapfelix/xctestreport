@@ -31,51 +31,82 @@ extension XCTestReport {
         var summaryExit: Int32 = 1
         var fullExit: Int32 = 1
 
-        let exportGroup = DispatchGroup()
-        let exportQueue = DispatchQueue(label: "reportExport", qos: .userInitiated, attributes: .concurrent)
-
-        exportGroup.enter()
-        exportQueue.async {
-            let startTime = Date()
-            let attachments = exportAttachments()
-            attachmentsExportDuration = Date().timeIntervalSince(startTime)
-            attachmentsByTestIdentifier = attachments
-            exportGroup.leave()
-        }
-
-        // Get summary
-        let summaryCmd = [
-            "xcrun", "xcresulttool", "get", "test-results", "summary", "--path", xcresultPath,
-            "--format", "json", "--compact",
-        ]
-        print("Running summary command: \(summaryCmd.joined(separator: " "))")
-        exportGroup.enter()
-        exportQueue.async {
-            let startTime = Date()
-            let (json, exitCode) = shell(summaryCmd)
-            summaryDuration = Date().timeIntervalSince(startTime)
-            summaryJSON = json
-            summaryExit = exitCode
-            exportGroup.leave()
-        }
-
         let fullJSONPath = (outputDir as NSString).appendingPathComponent("tests_full.json")
-        exportGroup.enter()
-        exportQueue.async {
-            print("Getting full results...")
-            try? FileManager.default.removeItem(atPath: fullJSONPath)
-            let fullCmd = [
-                "xcrun", "xcresulttool", "get", "test-results", "tests", "--path", xcresultPath,
-            ]
-            print("Running: \(fullCmd.joined(separator: " "))")
-            let fullStartTime = Date()
-            let (_, exitCode) = shell(fullCmd, outputFile: fullJSONPath, captureOutput: false)
-            fullDuration = Date().timeIntervalSince(fullStartTime)
-            fullExit = exitCode
-            exportGroup.leave()
-        }
+        let summaryJSONPath = (outputDir as NSString).appendingPathComponent("summary.json")
+        let attachmentsDir = (outputDir as NSString).appendingPathComponent("attachments")
 
-        exportGroup.wait()
+        if htmlOnly {
+            print("HTML-only mode enabled. Reusing summary/tests_full/attachments in \(outputDir)")
+            if compressVideo {
+                print("HTML-only mode: skipping video compression (attachments already exported).")
+            }
+
+            guard FileManager.default.fileExists(atPath: summaryJSONPath) else {
+                print("Summary not found at \(summaryJSONPath)")
+                throw RuntimeError(message: "Missing summary.json for --html-only.")
+            }
+            summaryJSON = try String(contentsOfFile: summaryJSONPath, encoding: .utf8)
+            summaryExit = 0
+
+            guard FileManager.default.fileExists(atPath: fullJSONPath) else {
+                print("Full results not found at \(fullJSONPath)")
+                throw RuntimeError(message: "Missing tests_full.json for --html-only.")
+            }
+            fullExit = 0
+
+            if FileManager.default.fileExists(atPath: attachmentsDir) {
+                attachmentsByTestIdentifier = loadAttachmentsFromManifest(at: attachmentsDir)
+            } else {
+                print("Attachment directory not found at \(attachmentsDir). Continuing without attachments.")
+            }
+        } else {
+            let exportGroup = DispatchGroup()
+            let exportQueue = DispatchQueue(
+                label: "reportExport", qos: .userInitiated, attributes: .concurrent)
+
+            exportGroup.enter()
+            exportQueue.async {
+                let startTime = Date()
+                let attachments = exportAttachments()
+                attachmentsExportDuration = Date().timeIntervalSince(startTime)
+                attachmentsByTestIdentifier = attachments
+                exportGroup.leave()
+            }
+
+            // Get summary
+            let summaryCmd = [
+                "xcrun", "xcresulttool", "get", "test-results", "summary", "--path", xcresultPath,
+                "--format", "json", "--compact",
+            ]
+            print("Running summary command: \(summaryCmd.joined(separator: " "))")
+            exportGroup.enter()
+            exportQueue.async {
+                let startTime = Date()
+                let (json, exitCode) = shell(summaryCmd)
+                summaryDuration = Date().timeIntervalSince(startTime)
+                summaryJSON = json
+                summaryExit = exitCode
+                exportGroup.leave()
+            }
+
+            exportGroup.enter()
+            exportQueue.async {
+                print("Getting full results...")
+                try? FileManager.default.removeItem(atPath: fullJSONPath)
+                let fullCmd = [
+                    "xcrun", "xcresulttool", "get", "test-results", "tests", "--path",
+                    xcresultPath,
+                ]
+                print("Running: \(fullCmd.joined(separator: " "))")
+                let fullStartTime = Date()
+                let (_, exitCode) = shell(fullCmd, outputFile: fullJSONPath, captureOutput: false)
+                fullDuration = Date().timeIntervalSince(fullStartTime)
+                fullExit = exitCode
+                exportGroup.leave()
+            }
+
+            exportGroup.wait()
+        }
 
         print("Summary command completed in \(String(format: "%.2f", summaryDuration)) seconds")
         print("Attachment export completed in \(String(format: "%.2f", attachmentsExportDuration)) seconds")
@@ -86,9 +117,10 @@ extension XCTestReport {
             throw RuntimeError(message: "Failed to get test summary.")
         }
 
-        let summaryJSONPath = (outputDir as NSString).appendingPathComponent("summary.json")
-        print("Writing summary to: \(summaryJSONPath)")
-        try summaryJSON?.write(toFile: summaryJSONPath, atomically: true, encoding: .utf8)
+        if !htmlOnly {
+            print("Writing summary to: \(summaryJSONPath)")
+            try summaryJSON?.write(toFile: summaryJSONPath, atomically: true, encoding: .utf8)
+        }
 
         let decoder = JSONDecoder()
         let summary: Summary

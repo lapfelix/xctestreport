@@ -486,6 +486,44 @@ extension XCTestReport {
         return exportAttachmentsViaXCResultTool()
     }
 
+    func loadAttachmentsFromManifest(at attachmentsDir: String) -> [String: [AttachmentManifestItem]] {
+        let manifestPath = (attachmentsDir as NSString).appendingPathComponent("manifest.json")
+        guard FileManager.default.fileExists(atPath: manifestPath) else {
+            print("Attachment manifest not found at \(manifestPath)")
+            return [:]
+        }
+
+        do {
+            let data = try Data(contentsOf: URL(fileURLWithPath: manifestPath))
+            let manifestEntries = try JSONDecoder().decode([AttachmentManifestEntry].self, from: data)
+            let attachmentsByTest = buildAttachmentsByTest(from: manifestEntries)
+            let totalAttachmentCount = attachmentsByTest.values.reduce(0) { $0 + $1.count }
+            let totalVideoCount = attachmentsByTest.values.reduce(0) { partialResult, attachments in
+                partialResult + attachments.filter { isVideoAttachment($0) }.count
+            }
+            print(
+                "Loaded \(totalAttachmentCount) attachments (\(totalVideoCount) videos) from manifest."
+            )
+            return attachmentsByTest
+        } catch {
+            print("Failed to parse attachment manifest: \(error)")
+            return [:]
+        }
+    }
+
+    func buildAttachmentsByTest(
+        from manifestEntries: [AttachmentManifestEntry]
+    ) -> [String: [AttachmentManifestItem]] {
+        var attachmentsByTest = [String: [AttachmentManifestItem]](
+            minimumCapacity: manifestEntries.count)
+
+        for entry in manifestEntries where !entry.attachments.isEmpty {
+            attachmentsByTest[entry.testIdentifier, default: []].append(
+                contentsOf: entry.attachments)
+        }
+        return attachmentsByTest
+    }
+
     func exportAttachmentsViaXCResultTool() -> [String: [AttachmentManifestItem]] {
         let exportStartTime = Date()
         let attachmentsDir = (outputDir as NSString).appendingPathComponent("attachments")
@@ -584,13 +622,7 @@ extension XCTestReport {
                 }
             }
 
-            var attachmentsByTest = [String: [AttachmentManifestItem]](
-                minimumCapacity: manifestEntries.count)
-
-            for entry in manifestEntries where !entry.attachments.isEmpty {
-                attachmentsByTest[entry.testIdentifier, default: []].append(
-                    contentsOf: entry.attachments)
-            }
+            var attachmentsByTest = buildAttachmentsByTest(from: manifestEntries)
 
             compressBinaryPlistAttachmentsForWebPreviewIfPossible(
                 attachmentsByTestIdentifier: &attachmentsByTest)

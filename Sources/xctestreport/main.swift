@@ -23,6 +23,12 @@ struct XCTestReport: ParsableCommand {
     @Option(name: .customLong("video-height"), help: "Maximum compressed video dimension (longest edge).")
     var videoHeight: Int = 720
 
+    @Flag(
+        name: .customLong("html-only"),
+        help: "Reuse existing summary/tests_full/attachments in outputDir and only generate HTML."
+    )
+    var htmlOnly: Bool = false
+
     struct RuntimeError: Error {
         let message: String
     }

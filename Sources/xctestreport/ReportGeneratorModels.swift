@@ -177,12 +177,12 @@ extension XCTestReport {
         let timestamp: Date
     }
 
-    struct AttachmentManifestEntry: Decodable {
+    struct AttachmentManifestEntry: Codable {
         var attachments: [AttachmentManifestItem]
         let testIdentifier: String
     }
 
-    struct AttachmentManifestItem: Decodable {
+    struct AttachmentManifestItem: Codable {
         var exportedFileName: String
         let isAssociatedWithFailure: Bool?
         let suggestedHumanReadableName: String?

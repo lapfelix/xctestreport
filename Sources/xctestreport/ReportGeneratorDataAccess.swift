@@ -1,5 +1,6 @@
 import Dispatch
 import Foundation
+import SQLite3
 
 private let testDetailsCacheLock = NSLock()
 private var testDetailsCache = [String: XCTestReport.TestDetails]()
@@ -276,8 +277,217 @@ extension XCTestReport {
         return previousRuns
     }
 
+    func exportAttachmentsDirect() -> [String: [AttachmentManifestItem]]? {
+        let exportStartTime = Date()
+        let attachmentsDir = (outputDir as NSString).appendingPathComponent("attachments")
+        try? FileManager.default.removeItem(atPath: attachmentsDir)
+        
+        guard let result = try? exportAttachmentsDirectInternal(attachmentsDir: attachmentsDir, startTime: exportStartTime) else {
+            return nil
+        }
+        
+        let exportElapsed = Date().timeIntervalSince(exportStartTime)
+        if let stats = directorySizeAndCount(at: attachmentsDir) {
+            let exportMB = Double(stats.bytes) / (1024.0 * 1024.0)
+            let mbPerSec = exportElapsed > 0 ? exportMB / exportElapsed : 0
+            let filesPerSec = exportElapsed > 0 ? Double(stats.fileCount) / exportElapsed : 0
+            print(
+                "Attachment export completed in \(String(format: "%.2f", exportElapsed))s; exported \(String(format: "%.1f", exportMB)) MB across \(stats.fileCount) files (\(String(format: "%.2f", mbPerSec)) MB/s, \(String(format: "%.2f", filesPerSec)) files/s)"
+            )
+        }
+        
+        return result
+    }
+    
+    func exportAttachmentsDirectInternal(attachmentsDir: String, startTime: Date) throws -> [String: [AttachmentManifestItem]] {
+        print("Using fast direct extraction from xcresult database...")
+        
+        try FileManager.default.createDirectory(
+            atPath: attachmentsDir, withIntermediateDirectories: true)
+        
+        // Open the xcresult database
+        let dbPath = (xcresultPath as NSString).appendingPathComponent("database.sqlite3")
+        let dataDir = (xcresultPath as NSString).appendingPathComponent("Data")
+        
+        guard FileManager.default.fileExists(atPath: dbPath) else {
+            print("Database not found at \(dbPath)")
+            throw NSError(domain: "xctestreport", code: 1)
+        }
+        
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            print("Failed to open database")
+            throw NSError(domain: "xctestreport", code: 2)
+        }
+        defer { sqlite3_close(db) }
+        
+        // Query to get attachments with their test identifiers
+        let query = """
+            SELECT 
+                a.name,
+                a.uniformTypeIdentifier,
+                a.xcResultKitPayloadRefId,
+                a.activity_fk,
+                tc.identifier
+            FROM Attachments a
+            LEFT JOIN Activities act ON a.activity_fk = act.ROWID
+            LEFT JOIN TestCaseRuns tcr ON act.testCaseRun_fk = tcr.ROWID
+            LEFT JOIN TestCases tc ON tcr.testCase_fk = tc.ROWID
+            WHERE a.xcResultKitPayloadRefId IS NOT NULL
+            """
+        
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else {
+            print("Failed to prepare query")
+            throw NSError(domain: "xctestreport", code: 3)
+        }
+        defer { sqlite3_finalize(stmt) }
+        
+        var attachmentsByTest = [String: [AttachmentManifestItem]]()
+        var manifestEntries = [AttachmentManifestEntry]()
+        var fileCounter = 0
+        var lastProgressTime = Date()
+        
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let payloadRefIdPtr = sqlite3_column_text(stmt, 2) else { continue }
+            let payloadRefId = String(cString: payloadRefIdPtr)
+            
+            // Get test identifier
+            var testIdentifier = ""
+            if let testIdPtr = sqlite3_column_text(stmt, 4) {
+                testIdentifier = String(cString: testIdPtr)
+            }
+            
+            // Construct source and destination paths
+            let sourceFileName = "data.\(payloadRefId)"
+            let sourcePath = (dataDir as NSString).appendingPathComponent(sourceFileName)
+            
+            guard FileManager.default.fileExists(atPath: sourcePath) else {
+                continue
+            }
+            
+            // Get attachment name for human-readable filename
+            var suggestedName: String? = nil
+            if let namePtr = sqlite3_column_text(stmt, 0) {
+                suggestedName = String(cString: namePtr)
+            }
+            
+            // Determine file extension from UTI
+            var fileExt = "dat"
+            if let utiPtr = sqlite3_column_text(stmt, 1) {
+                let uti = String(cString: utiPtr)
+                fileExt = fileExtensionForUTI(uti)
+            }
+            
+            fileCounter += 1
+            let destFileName = "\(fileCounter).\(fileExt)"
+            let destPath = (attachmentsDir as NSString).appendingPathComponent(destFileName)
+            
+            // Copy file
+            do {
+                try FileManager.default.copyItem(atPath: sourcePath, toPath: destPath)
+            } catch {
+                print("Failed to copy \(sourcePath): \(error)")
+                continue
+            }
+            
+            // Create manifest item
+            let item = AttachmentManifestItem(
+                exportedFileName: destFileName,
+                isAssociatedWithFailure: nil,
+                suggestedHumanReadableName: suggestedName
+            )
+            
+            attachmentsByTest[testIdentifier, default: []].append(item)
+            
+            // Progress reporting every 5 seconds
+            let now = Date()
+            if now.timeIntervalSince(lastProgressTime) >= 5.0 {
+                let elapsed = now.timeIntervalSince(startTime)
+                if let stats = directorySizeAndCount(at: attachmentsDir) {
+                    let mb = Double(stats.bytes) / (1024.0 * 1024.0)
+                    print(
+                        "Export progress (\(String(format: "%.0f", elapsed))s): \(stats.fileCount) files, \(String(format: "%.1f", mb)) MB"
+                    )
+                }
+                lastProgressTime = now
+            }
+        }
+        
+        // Generate manifest entries
+        for (testId, items) in attachmentsByTest {
+            manifestEntries.append(
+                AttachmentManifestEntry(attachments: items, testIdentifier: testId)
+            )
+        }
+        
+        // Write manifest.json
+        let manifestPath = (attachmentsDir as NSString).appendingPathComponent("manifest.json")
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let manifestData = try encoder.encode(manifestEntries)
+        try manifestData.write(to: URL(fileURLWithPath: manifestPath))
+        
+        // Video compression if enabled
+        if compressVideo {
+            if fastVideo {
+                print("Fast video mode enabled: max dimension \(videoHeight); skipping duration validation.")
+            }
+            let compressionStartTime = Date()
+            compressExportedVideosIfPossible(
+                in: attachmentsDir,
+                manifestEntries: manifestEntries,
+                maxDimension: videoHeight
+            )
+            let compressionElapsed = Date().timeIntervalSince(compressionStartTime)
+            if let compressedBytes = directorySizeInBytes(at: attachmentsDir) {
+                let compressedMB = Double(compressedBytes) / (1024.0 * 1024.0)
+                print(
+                    "Video compression completed in \(String(format: "%.2f", compressionElapsed))s; attachments now \(String(format: "%.1f", compressedMB)) MB"
+                )
+            }
+        }
+        
+        compressBinaryPlistAttachmentsForWebPreviewIfPossible(
+            attachmentsByTestIdentifier: &attachmentsByTest)
+        
+        let totalAttachmentCount = attachmentsByTest.values.reduce(0) { $0 + $1.count }
+        let totalVideoCount = attachmentsByTest.values.reduce(0) { partialResult, attachments in
+            partialResult + attachments.filter { isVideoAttachment($0) }.count
+        }
+        print(
+            "Loaded \(totalAttachmentCount) attachments (\(totalVideoCount) videos) from manifest."
+        )
+        
+        return attachmentsByTest
+    }
+    
+    func fileExtensionForUTI(_ uti: String) -> String {
+        switch uti {
+        case "public.mpeg-4": return "mp4"
+        case "public.png": return "png"
+        case "public.jpeg": return "jpg"
+        case "public.plain-text": return "txt"
+        case "public.xml": return "xml"
+        case "public.json": return "json"
+        case "com.apple.property-list": return "plist"
+        case "com.apple.dt.xctest.element-snapshot": return "plist"
+        case "public.html": return "html"
+        default: return "dat"
+        }
+    }
 
     func exportAttachments() -> [String: [AttachmentManifestItem]] {
+        // Try fast direct extraction first, fall back to xcresulttool if needed
+        if let result = exportAttachmentsDirect() {
+            return result
+        }
+        print("Direct extraction failed, falling back to xcresulttool...")
+        return exportAttachmentsViaXCResultTool()
+    }
+
+    func exportAttachmentsViaXCResultTool() -> [String: [AttachmentManifestItem]] {
+        let exportStartTime = Date()
         let attachmentsDir = (outputDir as NSString).appendingPathComponent("attachments")
         try? FileManager.default.removeItem(atPath: attachmentsDir)
         try? FileManager.default.createDirectory(
@@ -288,10 +498,57 @@ extension XCTestReport {
             "--output-path", attachmentsDir,
         ]
         print("Running attachment export: \(exportCmd.joined(separator: " "))")
-        let (_, exportExit) = shell(exportCmd)
+
+        let exportProcess = Process()
+        exportProcess.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        exportProcess.arguments = exportCmd
+        exportProcess.standardOutput = nil
+        exportProcess.standardError = nil
+
+        let progressQueue = DispatchQueue(label: "attachmentExportProgress")
+        let progressTimer = DispatchSource.makeTimerSource(queue: progressQueue)
+        progressTimer.schedule(deadline: .now() + .seconds(30), repeating: .seconds(30))
+        progressTimer.setEventHandler { [weak exportProcess] in
+            guard exportProcess?.isRunning == true else { return }
+            let elapsed = Date().timeIntervalSince(exportStartTime)
+            if let stats = self.directorySizeAndCount(at: attachmentsDir) {
+                let mb = Double(stats.bytes) / (1024.0 * 1024.0)
+                print(
+                    "Attachment export progress (\(String(format: "%.0f", elapsed))s): \(stats.fileCount) files, \(String(format: "%.1f", mb)) MB"
+                )
+            } else {
+                print("Attachment export progress (\(String(format: "%.0f", elapsed))s): waiting for output...")
+            }
+        }
+        progressTimer.resume()
+
+        do {
+            try exportProcess.run()
+        } catch {
+            progressTimer.cancel()
+            print("Attachment export failed to start: \(error)")
+            return [:]
+        }
+        exportProcess.waitUntilExit()
+        progressTimer.cancel()
+        let exportExit = exportProcess.terminationStatus
         guard exportExit == 0 else {
             print("Attachment export failed. Continuing without media attachments.")
             return [:]
+        }
+
+        let exportElapsed = Date().timeIntervalSince(exportStartTime)
+        if let stats = directorySizeAndCount(at: attachmentsDir) {
+            let exportMB = Double(stats.bytes) / (1024.0 * 1024.0)
+            let mbPerSec = exportElapsed > 0 ? exportMB / exportElapsed : 0
+            let filesPerSec = exportElapsed > 0 ? Double(stats.fileCount) / exportElapsed : 0
+            print(
+                "Attachment export completed in \(String(format: "%.2f", exportElapsed))s; exported \(String(format: "%.1f", exportMB)) MB across \(stats.fileCount) files (\(String(format: "%.2f", mbPerSec)) MB/s, \(String(format: "%.2f", filesPerSec)) files/s)"
+            )
+        } else {
+            print(
+                "Attachment export completed in \(String(format: "%.2f", exportElapsed))s"
+            )
         }
 
         let manifestPath = (attachmentsDir as NSString).appendingPathComponent("manifest.json")
@@ -305,11 +562,26 @@ extension XCTestReport {
             let manifestEntries = try JSONDecoder().decode([AttachmentManifestEntry].self, from: data)
 
             if compressVideo {
+                if fastVideo {
+                    print("Fast video mode enabled: max dimension \(videoHeight); skipping duration validation.")
+                }
+                let compressionStartTime = Date()
                 compressExportedVideosIfPossible(
                     in: attachmentsDir,
                     manifestEntries: manifestEntries,
                     maxDimension: videoHeight
                 )
+                let compressionElapsed = Date().timeIntervalSince(compressionStartTime)
+                if let compressedBytes = directorySizeInBytes(at: attachmentsDir) {
+                    let compressedMB = Double(compressedBytes) / (1024.0 * 1024.0)
+                    print(
+                        "Video compression completed in \(String(format: "%.2f", compressionElapsed))s; attachments now \(String(format: "%.1f", compressedMB)) MB"
+                    )
+                } else {
+                    print(
+                        "Video compression completed in \(String(format: "%.2f", compressionElapsed))s"
+                    )
+                }
             }
 
             var attachmentsByTest = [String: [AttachmentManifestItem]](
@@ -336,6 +608,56 @@ extension XCTestReport {
             print("Failed to parse attachment manifest: \(error)")
             return [:]
         }
+    }
+
+    func directorySizeInBytes(at path: String) -> UInt64? {
+        let url = URL(fileURLWithPath: path)
+        let resourceKeys: Set<URLResourceKey> = [.isRegularFileKey, .totalFileAllocatedSizeKey]
+        guard let enumerator = FileManager.default.enumerator(
+            at: url,
+            includingPropertiesForKeys: Array(resourceKeys),
+            options: [.skipsHiddenFiles]
+        ) else {
+            return nil
+        }
+
+        var total: UInt64 = 0
+        for case let fileURL as URL in enumerator {
+            guard let resourceValues = try? fileURL.resourceValues(forKeys: resourceKeys) else {
+                continue
+            }
+            guard resourceValues.isRegularFile == true else { continue }
+            if let fileSize = resourceValues.totalFileAllocatedSize {
+                total += UInt64(fileSize)
+            }
+        }
+        return total
+    }
+
+    func directorySizeAndCount(at path: String) -> (bytes: UInt64, fileCount: Int)? {
+        let url = URL(fileURLWithPath: path)
+        let resourceKeys: Set<URLResourceKey> = [.isRegularFileKey, .totalFileAllocatedSizeKey]
+        guard let enumerator = FileManager.default.enumerator(
+            at: url,
+            includingPropertiesForKeys: Array(resourceKeys),
+            options: [.skipsHiddenFiles]
+        ) else {
+            return nil
+        }
+
+        var total: UInt64 = 0
+        var count = 0
+        for case let fileURL as URL in enumerator {
+            guard let resourceValues = try? fileURL.resourceValues(forKeys: resourceKeys) else {
+                continue
+            }
+            guard resourceValues.isRegularFile == true else { continue }
+            if let fileSize = resourceValues.totalFileAllocatedSize {
+                total += UInt64(fileSize)
+                count += 1
+            }
+        }
+        return (total, count)
     }
 
     func compressBinaryPlistAttachmentsForWebPreviewIfPossible(
@@ -549,6 +871,8 @@ extension XCTestReport {
         var failedCount = 0
         var skippedCount = 0
         var startedCount = 0
+        var totalElapsed: TimeInterval = 0
+        var maxElapsed: TimeInterval = 0
         let statsLock = NSLock()
         let limiter = DispatchSemaphore(value: compressionWorkers)
         let group = DispatchGroup()
@@ -573,16 +897,20 @@ extension XCTestReport {
                 print(
                     "Compressing video \(indexLabel)/\(sortedVideoFileNames.count): \(exportedFileName)"
                 )
+                let startTime = Date()
                 let result = self.compressSingleVideoAttachment(
                     exportedFileName: exportedFileName,
                     attachmentsDir: attachmentsDir,
                     maxDimension: maxDimension
                 )
+                let elapsed = Date().timeIntervalSince(startTime)
 
                 statsLock.lock()
                 switch result {
                 case .compressed:
                     compressedCount += 1
+                    totalElapsed += elapsed
+                    maxElapsed = max(maxElapsed, elapsed)
                 case .failed:
                     failedCount += 1
                 case .skipped:
@@ -593,8 +921,9 @@ extension XCTestReport {
         }
         group.wait()
 
+        let averageElapsed = compressedCount > 0 ? (totalElapsed / Double(compressedCount)) : 0
         print(
-            "Video compression complete: compressed \(compressedCount), failed \(failedCount), skipped \(skippedCount)."
+            "Video compression complete: compressed \(compressedCount), failed \(failedCount), skipped \(skippedCount). Avg \(String(format: "%.2f", averageElapsed))s Max \(String(format: "%.2f", maxElapsed))s."
         )
     }
 
@@ -628,6 +957,44 @@ extension XCTestReport {
         }
         try? fileManager.removeItem(atPath: tempOutputPath)
 
+        let h264HardwareCmd = [
+            "ffmpeg",
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            inputPath,
+            "-map",
+            "0:0",
+            "-map_chapters",
+            "0",
+            "-threads",
+            "0",
+            "-vf",
+            scaleFilter,
+            "-c:v",
+            "h264_videotoolbox",
+            "-pix_fmt",
+            "yuv420p",
+            "-q:v",
+            "60",
+            "-allow_sw",
+            "1",
+            "-movflags",
+            "+faststart",
+            "-profile:v",
+            "main",
+            "-an",
+            "-sn",
+            "-max_muxing_queue_size",
+            "40000",
+            "-map_metadata",
+            "0",
+            tempOutputPath,
+        ]
+
         let hevcHardwareCmd = [
             "ffmpeg",
             "-nostdin",
@@ -659,44 +1026,6 @@ extension XCTestReport {
             "main",
             "-vtag",
             "hvc1",
-            "-an",
-            "-sn",
-            "-max_muxing_queue_size",
-            "40000",
-            "-map_metadata",
-            "0",
-            tempOutputPath,
-        ]
-
-        let h264HardwareCmd = [
-            "ffmpeg",
-            "-nostdin",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-y",
-            "-i",
-            inputPath,
-            "-map",
-            "0:0",
-            "-map_chapters",
-            "0",
-            "-threads",
-            "0",
-            "-vf",
-            scaleFilter,
-            "-c:v",
-            "h264_videotoolbox",
-            "-pix_fmt",
-            "yuv420p",
-            "-q:v",
-            "60",
-            "-allow_sw",
-            "1",
-            "-movflags",
-            "+faststart",
-            "-profile:v",
-            "main",
             "-an",
             "-sn",
             "-max_muxing_queue_size",
@@ -745,47 +1074,47 @@ extension XCTestReport {
         ]
 
         let hardwareStartTime = Date()
-        let hevcResult = runFFmpegCommand(hevcHardwareCmd, timeoutSeconds: ffmpegTimeoutSeconds)
+        let h264Result = runFFmpegCommand(h264HardwareCmd, timeoutSeconds: ffmpegTimeoutSeconds)
         let hardwareElapsed = Date().timeIntervalSince(hardwareStartTime)
 
         var compressionSucceeded = false
-        var successfulMode = "hevc_videotoolbox"
+        var successfulMode = "h264_videotoolbox"
         var successfulElapsed = hardwareElapsed
 
-        if hevcResult.timedOut {
+        if h264Result.timedOut {
             print(
-                "Video compression timed out after \(Int(hardwareElapsed))s (hevc_videotoolbox): \(exportedFileName)"
+                "Video compression timed out after \(Int(hardwareElapsed))s (h264_videotoolbox): \(exportedFileName)"
             )
-        } else if hevcResult.exitCode != 0 || !fileManager.fileExists(atPath: tempOutputPath) {
+        } else if h264Result.exitCode != 0 || !fileManager.fileExists(atPath: tempOutputPath) {
             print(
-                "Video compression failed (\(String(format: "%.1f", hardwareElapsed))s, hevc_videotoolbox): \(exportedFileName)"
+                "Video compression failed (\(String(format: "%.1f", hardwareElapsed))s, h264_videotoolbox): \(exportedFileName)"
             )
         } else if !isCompressionOutputUsable(sourcePath: inputPath, outputPath: tempOutputPath) {
-            print("Video compression output failed validation (hevc_videotoolbox): \(exportedFileName)")
+            print("Video compression output failed validation (h264_videotoolbox): \(exportedFileName)")
         } else {
             compressionSucceeded = true
         }
 
         if !compressionSucceeded {
             try? fileManager.removeItem(atPath: tempOutputPath)
-            print("Retrying with hardware encoder (h264_videotoolbox): \(exportedFileName)")
+            print("Retrying with hardware encoder (hevc_videotoolbox): \(exportedFileName)")
 
-            let h264StartTime = Date()
-            let h264Result = runFFmpegCommand(h264HardwareCmd, timeoutSeconds: ffmpegTimeoutSeconds)
-            let h264Elapsed = Date().timeIntervalSince(h264StartTime)
-            successfulElapsed = h264Elapsed
-            successfulMode = "h264_videotoolbox"
+            let hevcStartTime = Date()
+            let hevcResult = runFFmpegCommand(hevcHardwareCmd, timeoutSeconds: ffmpegTimeoutSeconds)
+            let hevcElapsed = Date().timeIntervalSince(hevcStartTime)
+            successfulElapsed = hevcElapsed
+            successfulMode = "hevc_videotoolbox"
 
-            if h264Result.timedOut {
+            if hevcResult.timedOut {
                 print(
-                    "Video compression timed out after \(Int(h264Elapsed))s (h264_videotoolbox): \(exportedFileName)"
+                    "Video compression timed out after \(Int(hevcElapsed))s (hevc_videotoolbox): \(exportedFileName)"
                 )
-            } else if h264Result.exitCode != 0 || !fileManager.fileExists(atPath: tempOutputPath) {
+            } else if hevcResult.exitCode != 0 || !fileManager.fileExists(atPath: tempOutputPath) {
                 print(
-                    "Video compression failed (\(String(format: "%.1f", h264Elapsed))s, h264_videotoolbox): \(exportedFileName)"
+                    "Video compression failed (\(String(format: "%.1f", hevcElapsed))s, hevc_videotoolbox): \(exportedFileName)"
                 )
             } else if !isCompressionOutputUsable(sourcePath: inputPath, outputPath: tempOutputPath) {
-                print("Video compression output failed validation (h264_videotoolbox): \(exportedFileName)")
+                print("Video compression output failed validation (hevc_videotoolbox): \(exportedFileName)")
             } else {
                 compressionSucceeded = true
             }
@@ -940,6 +1269,10 @@ extension XCTestReport {
                 "Compressed output is not smaller (\(outputSize) >= \(sourceSize)); keeping original."
             )
             return false
+        }
+
+        if fastVideo {
+            return true
         }
 
         guard let sourceDuration = probeVideoDurationSeconds(at: sourcePath),

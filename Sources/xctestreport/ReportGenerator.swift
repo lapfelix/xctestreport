@@ -22,7 +22,26 @@ extension XCTestReport {
             }
         }
 
-        let attachmentsByTestIdentifier = exportAttachments()
+        let overallStartTime = Date()
+        var attachmentsByTestIdentifier = [String: [AttachmentManifestItem]]()
+        var attachmentsExportDuration: TimeInterval = 0
+        var summaryDuration: TimeInterval = 0
+        var fullDuration: TimeInterval = 0
+        var summaryJSON: String?
+        var summaryExit: Int32 = 1
+        var fullExit: Int32 = 1
+
+        let exportGroup = DispatchGroup()
+        let exportQueue = DispatchQueue(label: "reportExport", qos: .userInitiated, attributes: .concurrent)
+
+        exportGroup.enter()
+        exportQueue.async {
+            let startTime = Date()
+            let attachments = exportAttachments()
+            attachmentsExportDuration = Date().timeIntervalSince(startTime)
+            attachmentsByTestIdentifier = attachments
+            exportGroup.leave()
+        }
 
         // Get summary
         let summaryCmd = [
@@ -30,10 +49,38 @@ extension XCTestReport {
             "--format", "json", "--compact",
         ]
         print("Running summary command: \(summaryCmd.joined(separator: " "))")
-        let startTime = Date()
-        let (summaryJSON, summaryExit) = shell(summaryCmd)
-        let summaryDuration = Date().timeIntervalSince(startTime)
+        exportGroup.enter()
+        exportQueue.async {
+            let startTime = Date()
+            let (json, exitCode) = shell(summaryCmd)
+            summaryDuration = Date().timeIntervalSince(startTime)
+            summaryJSON = json
+            summaryExit = exitCode
+            exportGroup.leave()
+        }
+
+        let fullJSONPath = (outputDir as NSString).appendingPathComponent("tests_full.json")
+        exportGroup.enter()
+        exportQueue.async {
+            print("Getting full results...")
+            try? FileManager.default.removeItem(atPath: fullJSONPath)
+            let fullCmd = [
+                "xcrun", "xcresulttool", "get", "test-results", "tests", "--path", xcresultPath,
+            ]
+            print("Running: \(fullCmd.joined(separator: " "))")
+            let fullStartTime = Date()
+            let (_, exitCode) = shell(fullCmd, outputFile: fullJSONPath, captureOutput: false)
+            fullDuration = Date().timeIntervalSince(fullStartTime)
+            fullExit = exitCode
+            exportGroup.leave()
+        }
+
+        exportGroup.wait()
+
         print("Summary command completed in \(String(format: "%.2f", summaryDuration)) seconds")
+        print("Attachment export completed in \(String(format: "%.2f", attachmentsExportDuration)) seconds")
+        print("Full results command completed in \(String(format: "%.2f", fullDuration)) seconds")
+
         guard summaryExit == 0, let summaryData = summaryJSON?.data(using: .utf8) else {
             print("Failed to get test summary.")
             throw RuntimeError(message: "Failed to get test summary.")
@@ -66,24 +113,12 @@ extension XCTestReport {
             failures.map { $0.failureText }
         }
 
-        // Get full JSON
-        print("Getting full results...")
-        let fullJSONPath = (outputDir as NSString).appendingPathComponent("tests_full.json")
-        try? FileManager.default.removeItem(atPath: fullJSONPath)
-        let fullCmd = [
-            "xcrun", "xcresulttool", "get", "test-results", "tests", "--path", xcresultPath,
-        ]
-        print("Running: \(fullCmd.joined(separator: " "))")
-        let fullStartTime = Date()
-        let (_, fullExit) = shell(fullCmd, outputFile: fullJSONPath, captureOutput: false)
-        let fullDuration = Date().timeIntervalSince(fullStartTime)
-        print("Full results command completed in \(String(format: "%.2f", fullDuration)) seconds")
-        print("Full results exit code: \(fullExit)")
-
         guard fullExit == 0 else {
             print("Failed to get full results. Exit code: \(fullExit)")
             throw RuntimeError(message: "Failed to get full results.")
         }
+
+        print("Full results exit code: \(fullExit)")
 
         let fullData = try Data(contentsOf: URL(fileURLWithPath: fullJSONPath))
         print("Parsing full results...")
@@ -619,6 +654,8 @@ extension XCTestReport {
         let minimizedIndexHTML = minifyHTMLInterTagWhitespace(indexHTML)
         try minimizedIndexHTML.write(toFile: indexPath, atomically: true, encoding: .utf8)
 
+        let overallDuration = Date().timeIntervalSince(overallStartTime)
         print("HTML report generated at \(indexPath)")
+        print("Report generation completed in \(String(format: "%.2f", overallDuration)) seconds")
     }
 }

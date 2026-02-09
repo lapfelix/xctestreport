@@ -14,11 +14,14 @@ struct XCTestReport: ParsableCommand {
     @Argument(help: "Output directory for the HTML report.")
     var outputDir: String
 
-    @Flag(name: .customLong("compress-video"), help: "Compress exported video attachments with ffmpeg (HEVC VideoToolbox).")
+    @Flag(name: .customLong("compress-video"), help: "Compress exported video attachments with ffmpeg.")
     var compressVideo: Bool = false
 
+    @Flag(name: .customLong("fast-video"), help: "Favor fastest video compression settings.")
+    var fastVideo: Bool = false
+
     @Option(name: .customLong("video-height"), help: "Maximum compressed video dimension (longest edge).")
-    var videoHeight: Int = 1024
+    var videoHeight: Int = 720
 
     struct RuntimeError: Error {
         let message: String

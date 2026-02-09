@@ -168,7 +168,7 @@ extension XCTestReport {
         let suiteQueue = DispatchQueue(label: "suiteGeneration", attributes: .concurrent)
         let availableCores = max(1, ProcessInfo.processInfo.activeProcessorCount)
         let preprocessingWorkers = min(4, availableCores)
-        let suiteWorkers = 1  // Keep deterministic suite row order.
+        let suiteWorkers = min(4, availableCores)  // Parallelize suite generation
 
         func chunkTests(_ tests: [TestNode], workerCount: Int) -> [[TestNode]] {
             guard !tests.isEmpty else { return [] }
@@ -178,8 +178,19 @@ extension XCTestReport {
                 Array(tests[$0..<min($0 + chunkSize, tests.count)])
             }
         }
+        
+        func chunkTestsWithIndices(_ tests: [TestNode], workerCount: Int) -> [[(index: Int, test: TestNode)]] {
+            guard !tests.isEmpty else { return [] }
+            let boundedWorkers = max(1, workerCount)
+            let chunkSize = max(1, (tests.count + boundedWorkers - 1) / boundedWorkers)
+            let indexedTests = tests.enumerated().map { (index: $0.offset, test: $0.element) }
+            return stride(from: 0, to: indexedTests.count, by: chunkSize).map {
+                Array(indexedTests[$0..<min($0 + chunkSize, indexedTests.count)])
+            }
+        }
+        
         let preprocessingChunks = chunkTests(allTests, workerCount: preprocessingWorkers)
-        let suiteChunks = chunkTests(allTests, workerCount: suiteWorkers)
+        let suiteChunks = chunkTestsWithIndices(allTests, workerCount: suiteWorkers)
 
         print("Preprocessing \(allTests.count) tests using \(preprocessingWorkers) cores...")
 
@@ -389,7 +400,7 @@ extension XCTestReport {
         print("Processing \(totalTests) tests for suite generation using \(suiteWorkers) cores...")
 
         let suiteHTMLQueue = DispatchQueue(label: "suiteHTML")
-        var suiteSections = [String: [String]](minimumCapacity: groupedTests.count)
+        var suiteSections = [String: [(index: Int, html: String)]](minimumCapacity: groupedTests.count)
         var processedSuiteTests = 0
 
         // Initialize suite sections with headers
@@ -431,7 +442,7 @@ extension XCTestReport {
 
             suiteHTMLQueue.sync {
                 suiteSections[suite] = []
-                suiteSections[suite]?.append(
+                suiteSections[suite]?.append((index: -1, html:
                     """
                     <div class="suite"><h2 class="collapsible">
                         <span class="suite-name">\(suite)</span>
@@ -444,7 +455,7 @@ extension XCTestReport {
                     <table class="data-table suite-tests-table" style="margin-top:0px">
                     <thead><tr><th scope="col">Test Name</th><th scope="col">Status</th><th scope="col">Duration</th></tr></thead>
                     <tbody>
-                    """)
+                    """))
             }
         }
 
@@ -452,7 +463,7 @@ extension XCTestReport {
         for chunk in suiteChunks {
             suiteGroup.enter()
             suiteQueue.async {
-                for test in chunk {
+                for (testIndex, test) in chunk {
                     let suite =
                         test.nodeIdentifier?.split(separator: "/").first.map(String.init)
                         ?? "Unknown Suite"
@@ -507,7 +518,7 @@ extension XCTestReport {
                         "<tr\(rowClass)><td data-label=\"Test Name\"><a href=\"\(escapedPageName)\">\(escapedTestName)</a></td><td data-label=\"Status\" class=\"\(statusClass)\">\(escapedResult)\(statusEmoji)</td><td data-label=\"Duration\">\(escapedDuration)</td></tr>"
 
                     suiteHTMLQueue.sync {
-                        suiteSections[suite]?.append(testRow)
+                        suiteSections[suite]?.append((index: testIndex, html: testRow))
                     }
 
                     processedTestsQueue.sync {
@@ -594,7 +605,7 @@ extension XCTestReport {
 
         // Close all suite sections
         for suite in groupedTests.keys {
-            suiteSections[suite]?.append("</tbody></table></div></div>")
+            suiteSections[suite]?.append((index: Int.max, html: "</tbody></table></div></div>"))
         }
 
         var buildResultsHTML = ""
@@ -632,7 +643,7 @@ extension XCTestReport {
         var suiteSectionsHTML = ""
         for suite in groupedTests.keys.sorted() {
             if let section = suiteSections[suite] {
-                suiteSectionsHTML += section.joined()
+                suiteSectionsHTML += section.sorted(by: { $0.index < $1.index }).map { $0.html }.joined()
             }
         }
 

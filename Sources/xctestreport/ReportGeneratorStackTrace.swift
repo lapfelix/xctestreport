@@ -1,11 +1,21 @@
 import Dispatch
 import Foundation
+import SQLite3
 
 private let sourceReferenceCacheLock = NSLock()
 private var sourceReferenceResolvedCache = [String: XCTestReport.SourceLocation]()
 private var sourceReferenceMissingCache = Set<String>()
 private let sourceSearchRootsLock = NSLock()
 private var sourceSearchRootsCache = [String: [String]]()
+private let sourceSymbolLocationsLock = NSLock()
+private var sourceSymbolLocationsCache = [String: [SourceSymbolLocationEntry]]()
+
+private struct SourceSymbolLocationEntry {
+    let symbolName: String
+    let functionName: String
+    let typeName: String?
+    let location: XCTestReport.SourceLocation
+}
 
 extension XCTestReport {
     func htmlEscape(_ input: String) -> String {
@@ -217,34 +227,9 @@ extension XCTestReport {
         }
         sourceReferenceCacheLock.unlock()
 
-        let pattern =
-            #"func\s+\#(NSRegularExpression.escapedPattern(for: symbol.functionName))\s*\("#
-        for root in sourceSearchRoots(projectHint: projectHint) {
-            var args = [
-                "rg", "-n", "--no-heading", "--no-ignore-messages", "--glob", "*.swift", "-m",
-                "40",
-            ]
-            if let typeName = symbol.typeName, !typeName.isEmpty {
-                args += ["--glob", "*\(typeName)*.swift"]
-            }
-            args += [pattern, root]
-
-            let (output, exitCode) = shell(args)
-            guard exitCode == 0, let output else { continue }
-            let matches = output
-                .split(separator: "\n")
-                .compactMap { parseRipgrepLocation(from: String($0)) }
-            guard !matches.isEmpty else { continue }
-            let location =
-                matches.max { lhs, rhs in
-                    let leftScore = sourcePathScore(lhs.filePath, projectHint: projectHint)
-                    let rightScore = sourcePathScore(rhs.filePath, projectHint: projectHint)
-                    if leftScore == rightScore {
-                        return lhs.filePath.count > rhs.filePath.count
-                    }
-                    return leftScore < rightScore
-                } ?? matches[0]
-
+        if let location = resolveSourceReferenceLocationFromSymbols(
+            referenceName: referenceName, parsedSymbol: symbol, projectHint: projectHint)
+        {
             sourceReferenceCacheLock.lock()
             sourceReferenceResolvedCache[cacheKey] = location
             sourceReferenceCacheLock.unlock()
@@ -255,6 +240,37 @@ extension XCTestReport {
         sourceReferenceMissingCache.insert(cacheKey)
         sourceReferenceCacheLock.unlock()
         return nil
+    }
+
+    private func resolveSourceReferenceLocationFromSymbols(
+        referenceName: String,
+        parsedSymbol: (typeName: String?, functionName: String),
+        projectHint: String?
+    ) -> SourceLocation? {
+        let entries = sourceSymbolLocations()
+        guard !entries.isEmpty else { return nil }
+
+        if let direct = entries.first(where: { $0.symbolName == referenceName }) {
+            return direct.location
+        }
+
+        var candidates = entries.filter { $0.functionName == parsedSymbol.functionName }
+        if let typeName = parsedSymbol.typeName?.lowercased() {
+            let typed = candidates.filter { $0.typeName?.lowercased() == typeName }
+            if !typed.isEmpty {
+                candidates = typed
+            }
+        }
+        guard !candidates.isEmpty else { return nil }
+
+        return candidates.max { lhs, rhs in
+            let leftScore = sourcePathScore(lhs.location.filePath, projectHint: projectHint)
+            let rightScore = sourcePathScore(rhs.location.filePath, projectHint: projectHint)
+            if leftScore == rightScore {
+                return lhs.location.filePath.count > rhs.location.filePath.count
+            }
+            return leftScore < rightScore
+        }?.location
     }
 
     private func sourceSearchRoots(projectHint: String?) -> [String] {
@@ -302,8 +318,69 @@ extension XCTestReport {
         return orderedRoots
     }
 
+    private func sourceSymbolLocations() -> [SourceSymbolLocationEntry] {
+        let cacheKey = xcresultPath
+        sourceSymbolLocationsLock.lock()
+        if let cached = sourceSymbolLocationsCache[cacheKey] {
+            sourceSymbolLocationsLock.unlock()
+            return cached
+        }
+        sourceSymbolLocationsLock.unlock()
+
+        let dbPath = (xcresultPath as NSString).appendingPathComponent("database.sqlite3")
+        guard FileManager.default.fileExists(atPath: dbPath) else { return [] }
+
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            return []
+        }
+        defer { sqlite3_close(db) }
+
+        let query = """
+            SELECT s.symbolName, l.filePath, l.lineNumber
+            FROM SourceCodeSymbolInfos s
+            JOIN SourceCodeLocations l ON s.location_fk = l.ROWID
+            WHERE s.symbolName IS NOT NULL AND l.filePath IS NOT NULL AND l.lineNumber IS NOT NULL
+            """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        var entries = [SourceSymbolLocationEntry]()
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let symbolPtr = sqlite3_column_text(stmt, 0),
+                let filePtr = sqlite3_column_text(stmt, 1)
+            else { continue }
+            let lineNumber = Int(sqlite3_column_int(stmt, 2))
+            guard lineNumber > 0 else { continue }
+            let filePath = String(cString: filePtr)
+            guard filePath != "/<compiler-generated>" else { continue }
+
+            let symbolName = String(cString: symbolPtr)
+            guard let parsed = parseSourceReferenceSymbol(symbolName) else { continue }
+
+            let location = SourceLocation(filePath: filePath, line: lineNumber, column: nil)
+            entries.append(
+                SourceSymbolLocationEntry(
+                    symbolName: symbolName,
+                    functionName: parsed.functionName,
+                    typeName: parsed.typeName,
+                    location: location
+                )
+            )
+        }
+
+        sourceSymbolLocationsLock.lock()
+        sourceSymbolLocationsCache[cacheKey] = entries
+        sourceSymbolLocationsLock.unlock()
+        return entries
+    }
+
     private func parseSourceReferenceSymbol(_ sourceReference: String) -> (typeName: String?, functionName: String)? {
         var symbol = sourceReference.trimmingCharacters(in: .whitespacesAndNewlines)
+        if symbol.hasPrefix("@objc ") {
+            symbol = String(symbol.dropFirst("@objc ".count))
+        }
         if symbol.hasPrefix("static ") {
             symbol = String(symbol.dropFirst("static ".count))
         }

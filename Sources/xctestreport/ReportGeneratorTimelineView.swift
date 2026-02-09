@@ -454,8 +454,9 @@ extension XCTestReport {
                 let relativePath = "attachments/\(urlEncodePath(source.fileName))"
                 let startTime = source.startTime ?? defaultTimelineBase
                 let hiddenStyle = index == 0 ? "" : " style=\"display:none;\""
+                let runIndexAttribute = source.runIndex.map { " data-run-index=\"\($0)\"" } ?? ""
                 return """
-                    <div class="video-card timeline-video-card"\(hiddenStyle) data-video-index="\(index)">
+                    <div class="video-card timeline-video-card"\(hiddenStyle) data-video-index="\(index)"\(runIndexAttribute)>
                         <div class="timeline-video-frame">
                             <video class="timeline-video" preload="metadata" data-video-start="\(startTime)">
                                 <source src="\(relativePath)" type="\(source.mimeType)">

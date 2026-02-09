@@ -151,8 +151,6 @@ extension XCTestReport {
         let duration: String?
         let nodeIdentifier: String?
         let details: String?
-        let pageName: String?
-        let statusIndicators: [StatusIndicatorExportItem]?
     }
 
     struct SuiteExportItem: Codable {
@@ -177,50 +175,6 @@ extension XCTestReport {
         let failedTests: Int
         let skippedTests: Int
         let timestamp: Date
-    }
-
-    struct StatusIndicatorExportItem: Codable {
-        let symbol: String
-        let title: String
-    }
-
-    struct IndexTestExportItem: Codable {
-        let name: String
-        let result: String
-        let duration: String?
-        let pageName: String?
-        let statusIndicators: [StatusIndicatorExportItem]?
-    }
-
-    struct IndexSuiteSummaryExport: Codable {
-        let name: String
-        let totalTests: Int
-        let passedTests: Int
-        let failedTests: Int
-        let skippedTests: Int
-        let passPercentage: Double
-        let durationText: String
-        let tests: [IndexTestExportItem]
-    }
-
-    struct IndexBuildResultsExport: Codable {
-        let errorCount: Int
-        let warningCount: Int
-    }
-
-    struct IndexSummaryExport: Codable {
-        let reportTitle: String
-        let totalTests: Int
-        let passedTests: Int
-        let failedTests: Int
-        let skippedTests: Int
-    }
-
-    struct IndexPagePayload: Codable {
-        let summary: IndexSummaryExport
-        let buildResults: IndexBuildResultsExport?
-        let comparisonInfo: String?
-        let suites: [IndexSuiteSummaryExport]
     }
 
     struct AttachmentManifestEntry: Decodable {
@@ -262,6 +216,7 @@ extension XCTestReport {
         let mimeType: String
         let startTime: Double?
         let failureAssociated: Bool
+        let runIndex: Int?
     }
 
     struct ScreenshotSource: Codable {

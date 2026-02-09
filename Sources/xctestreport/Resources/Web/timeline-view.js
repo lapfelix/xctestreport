@@ -715,6 +715,25 @@
     var clampedIndex = Math.max(0, Math.min(runStates.length - 1, Number(nextRunIndex) || 0));
     activeRunIndex = clampedIndex;
 
+    if (selector && cards.length) {
+      var desiredVideoIndex = -1;
+      for (var i = 0; i < cards.length; i += 1) {
+        var card = cards[i];
+        if (!card) continue;
+        var runIndexValue = card.getAttribute('data-run-index');
+        if (runIndexValue != null && runIndexValue !== '') {
+          if (parseInt(runIndexValue, 10) === activeRunIndex) {
+            desiredVideoIndex = i;
+            break;
+          }
+        }
+      }
+      if (desiredVideoIndex >= 0 && desiredVideoIndex !== activeIndex) {
+        selector.value = String(desiredVideoIndex);
+        setActiveVideoCard(desiredVideoIndex, preserveAbsoluteTime);
+      }
+    }
+
     runPanels.forEach(function(panel, panelIndex) {
       panel.style.display = panelIndex === activeRunIndex ? '' : 'none';
       clearRunPanelState(panel);
@@ -899,6 +918,44 @@
   function getActiveVideo() {
     var card = getActiveVideoCard();
     return card ? card.querySelector('video') : null;
+  }
+
+  function setActiveVideoCard(nextIndex, shouldPreserveTime) {
+    var nextCard = cards[nextIndex] || null;
+    if (!nextCard) return;
+
+    var previousAbsolute = shouldPreserveTime ? currentAbsoluteTime() : null;
+    activeIndex = nextIndex;
+    cards.forEach(function(card, idx) {
+      var video = card.querySelector('video');
+      if (idx === activeIndex) {
+        card.style.display = '';
+      } else {
+        card.style.display = 'none';
+        if (video) video.pause();
+      }
+    });
+
+    var activeVideo = getActiveVideo();
+    if (activeVideo) {
+      updateActiveMediaAspect();
+      clampScrubber(activeVideo);
+      if (previousAbsolute != null) {
+        setAbsoluteTime(previousAbsolute);
+      } else {
+        updateFromVideoTime();
+      }
+      if (!activeVideo.paused) {
+        startTouchAnimation();
+      }
+    } else {
+      updateDownloadVideoButton();
+      if (previousAbsolute != null) {
+        setAbsoluteTime(previousAbsolute);
+      } else {
+        updateFromVideoTime();
+      }
+    }
   }
 
   function getActiveMediaElement() {
@@ -1968,11 +2025,15 @@
       scrubPreviewActive = true;
       scrubPreviewTime = target;
       requestVideoSeek(target);
+      updateTouchOverlay();
+      scheduleHierarchyOverlayUpdate(false);
       return;
     }
 
     virtualCurrentTime = Math.max(0, Math.min(virtualDuration, absoluteTime - (timelineBase || 0)));
     updateStillFrameForTime((timelineBase || 0) + virtualCurrentTime);
+    updateTouchOverlay();
+    scheduleHierarchyOverlayUpdate(false);
   }
 
   function ensureTouchMarker(layer) {
@@ -2525,7 +2586,8 @@
     setPlayButtonIcon(video ? !video.paused : virtualPlaying);
     updateDownloadVideoButton();
     if (video && scrubDragging) {
-      hideTouchMarker();
+      updateTouchOverlay();
+      scheduleHierarchyOverlayUpdate(false);
       return;
     }
     updateTouchOverlay();
@@ -2864,27 +2926,7 @@
       closeHierarchyMenu();
       clearScrubPreview();
       pendingVideoSeekTime = null;
-      activeIndex = parseInt(selector.value, 10) || 0;
-      cards.forEach(function(card, idx) {
-        var video = card.querySelector('video');
-        if (idx === activeIndex) {
-          card.style.display = '';
-        } else {
-          card.style.display = 'none';
-          if (video) video.pause();
-        }
-      });
-      var activeVideo = getActiveVideo();
-      if (activeVideo) {
-        updateActiveMediaAspect();
-        clampScrubber(activeVideo);
-        updateFromVideoTime();
-        if (!activeVideo.paused) {
-          startTouchAnimation();
-        }
-      } else {
-        updateDownloadVideoButton();
-      }
+      setActiveVideoCard(parseInt(selector.value, 10) || 0, true);
     });
   }
 
@@ -2951,6 +2993,25 @@
     applyRunState(initialRunIndex, false);
     if (runSelector) {
       runSelector.value = String(initialRunIndex);
+    }
+
+    if (selector) {
+      var desiredVideoIndex = -1;
+      for (var i = 0; i < cards.length; i += 1) {
+        var card = cards[i];
+        if (!card) continue;
+        var runIndexValue = card.getAttribute('data-run-index');
+        if (runIndexValue != null && runIndexValue !== '') {
+          if (parseInt(runIndexValue, 10) === initialRunIndex) {
+            desiredVideoIndex = i;
+            break;
+          }
+        }
+      }
+      if (desiredVideoIndex >= 0) {
+        selector.value = String(desiredVideoIndex);
+        setActiveVideoCard(desiredVideoIndex, false);
+      }
     }
 
     setPlayButtonIcon(false);

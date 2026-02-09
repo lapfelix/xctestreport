@@ -728,9 +728,24 @@ extension XCTestReport {
         let videoAttachments = allAttachments.filter { isVideoAttachment($0) }
         guard !videoAttachments.isEmpty else { return [] }
 
-        let rootActivities = activities?.testRuns.flatMap { $0.activities } ?? []
+        let activityRuns = activities?.testRuns ?? []
+        let rootActivities = activityRuns.flatMap { $0.activities }
         var attachmentTimestamps = [String: [Double]]()
-        collectActivityAttachmentTimestamps(from: rootActivities, into: &attachmentTimestamps)
+        var attachmentRunIndex = [String: Int]()
+        if activityRuns.isEmpty {
+            collectActivityAttachmentTimestamps(from: rootActivities, into: &attachmentTimestamps)
+        } else {
+            for (runIndex, run) in activityRuns.enumerated() {
+                var runTimestamps = [String: [Double]]()
+                collectActivityAttachmentTimestamps(from: run.activities, into: &runTimestamps)
+                for (key, values) in runTimestamps {
+                    attachmentTimestamps[key, default: []].append(contentsOf: values)
+                    if attachmentRunIndex[key] == nil {
+                        attachmentRunIndex[key] = runIndex
+                    }
+                }
+            }
+        }
         let fallbackStartTime = collectEarliestActivityTimestamp(from: rootActivities)
 
         return videoAttachments.map { attachment in
@@ -742,7 +757,8 @@ extension XCTestReport {
                 fileName: attachment.exportedFileName,
                 mimeType: videoMimeType(for: attachment.exportedFileName),
                 startTime: startTime,
-                failureAssociated: attachment.isAssociatedWithFailure ?? false
+                failureAssociated: attachment.isAssociatedWithFailure ?? false,
+                runIndex: attachmentRunIndex[label]
             )
         }
     }
@@ -909,23 +925,33 @@ extension XCTestReport {
     }
 
     func timelineDisplayTitle(_ node: TimelineNode, baseTime: Double?) -> String {
+        let sourceLocationLabel = node.sourceLocationLabel
         let baseTitle: String
         if node.repeatCount > 1 {
             if let start = node.timestamp, let end = node.endTimestamp, let baseTime {
                 let startText = formatTimelineOffset(start - baseTime)
                 let endText = formatTimelineOffset(end - baseTime)
-                baseTitle = "\(node.title) ×\(node.repeatCount) (\(startText)-\(endText))"
+                if let sourceLocationLabel, !sourceLocationLabel.isEmpty {
+                    baseTitle = "\(node.title) (\(sourceLocationLabel)) ×\(node.repeatCount) (\(startText)-\(endText))"
+                } else {
+                    baseTitle = "\(node.title) ×\(node.repeatCount) (\(startText)-\(endText))"
+                }
             } else {
-                baseTitle = "\(node.title) ×\(node.repeatCount)"
+                if let sourceLocationLabel, !sourceLocationLabel.isEmpty {
+                    baseTitle = "\(node.title) (\(sourceLocationLabel)) ×\(node.repeatCount)"
+                } else {
+                    baseTitle = "\(node.title) ×\(node.repeatCount)"
+                }
             }
         } else {
-            baseTitle = node.title
+            if let sourceLocationLabel, !sourceLocationLabel.isEmpty {
+                baseTitle = "\(node.title) (\(sourceLocationLabel))"
+            } else {
+                baseTitle = node.title
+            }
         }
 
-        guard let sourceLocationLabel = node.sourceLocationLabel, !sourceLocationLabel.isEmpty else {
-            return baseTitle
-        }
-        return "\(baseTitle) (\(sourceLocationLabel))"
+        return baseTitle
     }
 
     func timelineNodeHasInteraction(_ node: TimelineNode) -> Bool {

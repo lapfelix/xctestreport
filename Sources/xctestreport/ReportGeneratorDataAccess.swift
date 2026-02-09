@@ -542,7 +542,7 @@ extension XCTestReport {
         )
 
         let sortedVideoFileNames = videoFileNames.sorted()
-        let compressionWorkers = max(1, min(8, ProcessInfo.processInfo.activeProcessorCount))
+        let compressionWorkers = max(1, min(4, ProcessInfo.processInfo.activeProcessorCount))
         print("Video compression workers: \(compressionWorkers)")
 
         var compressedCount = 0
@@ -628,7 +628,7 @@ extension XCTestReport {
         }
         try? fileManager.removeItem(atPath: tempOutputPath)
 
-        let hardwareCompressCmd = [
+        let hevcHardwareCmd = [
             "ffmpeg",
             "-nostdin",
             "-hide_banner",
@@ -659,6 +659,44 @@ extension XCTestReport {
             "main",
             "-vtag",
             "hvc1",
+            "-an",
+            "-sn",
+            "-max_muxing_queue_size",
+            "40000",
+            "-map_metadata",
+            "0",
+            tempOutputPath,
+        ]
+
+        let h264HardwareCmd = [
+            "ffmpeg",
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            inputPath,
+            "-map",
+            "0:0",
+            "-map_chapters",
+            "0",
+            "-threads",
+            "0",
+            "-vf",
+            scaleFilter,
+            "-c:v",
+            "h264_videotoolbox",
+            "-pix_fmt",
+            "yuv420p",
+            "-q:v",
+            "60",
+            "-allow_sw",
+            "1",
+            "-movflags",
+            "+faststart",
+            "-profile:v",
+            "main",
             "-an",
             "-sn",
             "-max_muxing_queue_size",
@@ -707,25 +745,50 @@ extension XCTestReport {
         ]
 
         let hardwareStartTime = Date()
-        let hardwareResult = runFFmpegCommand(hardwareCompressCmd, timeoutSeconds: ffmpegTimeoutSeconds)
+        let hevcResult = runFFmpegCommand(hevcHardwareCmd, timeoutSeconds: ffmpegTimeoutSeconds)
         let hardwareElapsed = Date().timeIntervalSince(hardwareStartTime)
 
         var compressionSucceeded = false
-        var successfulMode = "videotoolbox"
+        var successfulMode = "hevc_videotoolbox"
         var successfulElapsed = hardwareElapsed
 
-        if hardwareResult.timedOut {
+        if hevcResult.timedOut {
             print(
-                "Video compression timed out after \(Int(hardwareElapsed))s (videotoolbox): \(exportedFileName)"
+                "Video compression timed out after \(Int(hardwareElapsed))s (hevc_videotoolbox): \(exportedFileName)"
             )
-        } else if hardwareResult.exitCode != 0 || !fileManager.fileExists(atPath: tempOutputPath) {
+        } else if hevcResult.exitCode != 0 || !fileManager.fileExists(atPath: tempOutputPath) {
             print(
-                "Video compression failed (\(String(format: "%.1f", hardwareElapsed))s, videotoolbox): \(exportedFileName)"
+                "Video compression failed (\(String(format: "%.1f", hardwareElapsed))s, hevc_videotoolbox): \(exportedFileName)"
             )
         } else if !isCompressionOutputUsable(sourcePath: inputPath, outputPath: tempOutputPath) {
-            print("Video compression output failed validation (videotoolbox): \(exportedFileName)")
+            print("Video compression output failed validation (hevc_videotoolbox): \(exportedFileName)")
         } else {
             compressionSucceeded = true
+        }
+
+        if !compressionSucceeded {
+            try? fileManager.removeItem(atPath: tempOutputPath)
+            print("Retrying with hardware encoder (h264_videotoolbox): \(exportedFileName)")
+
+            let h264StartTime = Date()
+            let h264Result = runFFmpegCommand(h264HardwareCmd, timeoutSeconds: ffmpegTimeoutSeconds)
+            let h264Elapsed = Date().timeIntervalSince(h264StartTime)
+            successfulElapsed = h264Elapsed
+            successfulMode = "h264_videotoolbox"
+
+            if h264Result.timedOut {
+                print(
+                    "Video compression timed out after \(Int(h264Elapsed))s (h264_videotoolbox): \(exportedFileName)"
+                )
+            } else if h264Result.exitCode != 0 || !fileManager.fileExists(atPath: tempOutputPath) {
+                print(
+                    "Video compression failed (\(String(format: "%.1f", h264Elapsed))s, h264_videotoolbox): \(exportedFileName)"
+                )
+            } else if !isCompressionOutputUsable(sourcePath: inputPath, outputPath: tempOutputPath) {
+                print("Video compression output failed validation (h264_videotoolbox): \(exportedFileName)")
+            } else {
+                compressionSucceeded = true
+            }
         }
 
         if !compressionSucceeded {

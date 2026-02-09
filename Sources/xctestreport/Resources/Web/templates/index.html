@@ -8,60 +8,19 @@
 <link rel="stylesheet" href="report.css">
 </head>
 <body>
-<div id="report-app">
-    <h1>Test Report: <span v-text="summary.reportTitle"></span></h1>
-    <div class="summary-stats">
-        <div>
-            Total: <span class="stat-number" v-text="summary.totalTests"></span>,
-            Passed: <span class="stat-number passed-number" v-text="summary.passedTests"></span>,
-            Failed: <span class="stat-number failed-number" v-text="summary.failedTests"></span>,
-            Skipped: <span class="stat-number skipped-number" v-text="summary.skippedTests"></span>
-        </div>
-        <button id="toggle-all" type="button" @click="toggleAllSuites" :disabled="!suites.length" v-text="allSuitesExpanded ? 'Collapse All' : 'Expand All'"></button>
+<h1>Test Report: {{report_title}}</h1>
+<div class="summary-stats">
+    <div>
+        Total: <span class="stat-number">{{total_tests}}</span>,
+        Passed: <span class="stat-number passed-number">{{passed_tests}}</span>,
+        Failed: <span class="stat-number failed-number">{{failed_tests}}</span>,
+        Skipped: <span class="stat-number skipped-number">{{skipped_tests}}</span>
     </div>
-    <p v-if="buildResults" class="build-results-line">
-        <span>🛑 Errors: </span><span v-text="buildResults.errorCount"></span>
-        <span>&nbsp; ⚠️ Warnings: </span><span v-text="buildResults.warningCount"></span>
-    </p>
-    <p v-if="comparisonInfo" class="comparison-info" v-text="comparisonInfo"></p>
-    <div v-if="loadError" class="report-error" v-text="loadError"></div>
-    <div v-else-if="!suites.length" class="report-empty">No test suites available in this report.</div>
-    <div v-else>
-        <div class="suite" v-for="suite in suites" :key="suite.name">
-            <h2 class="collapsible" :class="{ collapsed: !isSuiteExpanded(suite.name) }" role="button" tabindex="0" @click="toggleSuite(suite.name)" @keydown.enter.prevent="toggleSuite(suite.name)" @keydown.space.prevent="toggleSuite(suite.name)" :aria-expanded="isSuiteExpanded(suite.name) ? 'true' : 'false'">
-                <span class="suite-name" v-text="suite.name"></span>
-                <span class="suite-stats">
-                    <span class="stats-number"><span v-text="suite.passedTests"></span>/<span v-text="suite.totalTests"></span></span> Passed
-                    <span class="stats-percent">(<span v-text="formatPercent(suite.passPercentage)"></span>%)</span>
-                    <span class="suite-duration" v-text="suite.durationText"></span>
-                </span>
-            </h2>
-            <div class="content">
-                <table class="data-table suite-tests-table" style="margin-top:0px">
-                    <thead>
-                        <tr>
-                            <th scope="col">Test Name</th>
-                            <th scope="col">Status</th>
-                            <th scope="col">Duration</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr v-for="test in suite.tests" :key="test.pageName || test.name" :class="{ failed: test.result !== 'Passed' }">
-                            <td data-label="Test Name"><a :href="test.pageName || '#'" v-text="test.name"></a></td>
-                            <td data-label="Status" :class="statusClass(test.result)">
-                                <span v-text="test.result"></span>
-                                <span class="emoji-status" v-for="indicator in test.statusIndicators" :key="indicator.symbol + indicator.title" :title="indicator.title" v-text="indicator.symbol"></span>
-                            </td>
-                            <td data-label="Duration" v-text="test.duration || '0s'"></td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
+    <button id="toggle-all">Collapse All</button>
 </div>
-<script type="application/json" id="index-page-payload">{{index_page_payload_json}}</script>
-<script src="vue.global.prod.js"></script>
+{{build_results_html}}
+{{comparison_info_html}}
+{{suite_sections_html}}
 <script src="index-page.js"></script>
 </body>
 </html>

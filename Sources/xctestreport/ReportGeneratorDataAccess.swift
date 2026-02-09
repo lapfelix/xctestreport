@@ -104,6 +104,13 @@ extension XCTestReport {
         }
         testActivitiesCacheLock.unlock()
 
+        if let activities = loadTestActivitiesFromDatabase(for: testIdentifier) {
+            testActivitiesCacheLock.lock()
+            testActivitiesCache[cacheKey] = activities
+            testActivitiesCacheLock.unlock()
+            return activities
+        }
+
         let cmd = [
             "xcrun", "xcresulttool", "get", "test-results", "activities", "--test-id",
             testIdentifier, "--path", xcresultPath, "--format", "json", "--compact",
@@ -124,6 +131,187 @@ extension XCTestReport {
             print("Failed to decode activities for \(testIdentifier): \(error)")
             return nil
         }
+    }
+
+    private struct ActivityRow {
+        let id: Int64
+        let parentId: Int64?
+        let title: String
+        let startTime: Double?
+        let failureIDs: String?
+        let orderInParent: Int?
+    }
+
+    private struct ActivityAttachmentRow {
+        let activityId: Int64
+        let name: String
+        let timestamp: Double?
+    }
+
+    private func loadTestActivitiesFromDatabase(for testIdentifier: String) -> TestActivities? {
+        let dbPath = (xcresultPath as NSString).appendingPathComponent("database.sqlite3")
+        guard FileManager.default.fileExists(atPath: dbPath) else { return nil }
+
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            return nil
+        }
+        defer { sqlite3_close(db) }
+
+        let runQuery = """
+            SELECT r.ROWID
+            FROM TestCaseRuns r
+            JOIN TestCases c ON r.testCase_fk = c.ROWID
+            WHERE c.identifier = ?
+            ORDER BY r.orderInTestSuiteRun
+            """
+        var runStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, runQuery, -1, &runStmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(runStmt) }
+
+        let testIdentifierCString = (testIdentifier as NSString).utf8String
+        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        sqlite3_bind_text(runStmt, 1, testIdentifierCString, -1, transient)
+
+        var runIds = [Int64]()
+        while sqlite3_step(runStmt) == SQLITE_ROW {
+            runIds.append(sqlite3_column_int64(runStmt, 0))
+        }
+        guard !runIds.isEmpty else { return nil }
+
+        var runs = [TestActivityRun]()
+        runs.reserveCapacity(runIds.count)
+        for runId in runIds {
+            let activities = loadActivities(for: runId, db: db)
+            runs.append(TestActivityRun(activities: activities))
+        }
+
+        return TestActivities(testIdentifier: testIdentifier, testRuns: runs)
+    }
+
+    private func loadActivities(for runId: Int64, db: OpaquePointer?) -> [TestActivity] {
+        guard let db else { return [] }
+
+        let activityQuery = """
+            SELECT ROWID, title, startTime, failureIDs, parent_fk, orderInParent
+            FROM Activities
+            WHERE testCaseRun_fk = ?
+            ORDER BY orderInParent, startTime, ROWID
+            """
+        var activityStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, activityQuery, -1, &activityStmt, nil) == SQLITE_OK else {
+            return []
+        }
+        defer { sqlite3_finalize(activityStmt) }
+
+        sqlite3_bind_int64(activityStmt, 1, runId)
+
+        var rows = [ActivityRow]()
+        while sqlite3_step(activityStmt) == SQLITE_ROW {
+            let id = sqlite3_column_int64(activityStmt, 0)
+            let title = sqlite3_column_text(activityStmt, 1).map { String(cString: $0) } ?? ""
+            let startTime = sqlite3_column_type(activityStmt, 2) == SQLITE_NULL
+                ? nil
+                : sqlite3_column_double(activityStmt, 2)
+            let failureIDs = sqlite3_column_text(activityStmt, 3).map { String(cString: $0) }
+            let parentId = sqlite3_column_type(activityStmt, 4) == SQLITE_NULL
+                ? nil
+                : sqlite3_column_int64(activityStmt, 4)
+            let orderInParent = sqlite3_column_type(activityStmt, 5) == SQLITE_NULL
+                ? nil
+                : Int(sqlite3_column_int64(activityStmt, 5))
+
+            rows.append(
+                ActivityRow(
+                    id: id,
+                    parentId: parentId,
+                    title: title,
+                    startTime: startTime,
+                    failureIDs: failureIDs,
+                    orderInParent: orderInParent
+                )
+            )
+        }
+
+        let attachmentsByActivity = loadAttachments(for: runId, db: db)
+        var rowsByParent = [Int64: [ActivityRow]]()
+        var rootRows = [ActivityRow]()
+        for row in rows {
+            if let parentId = row.parentId {
+                rowsByParent[parentId, default: []].append(row)
+            } else {
+                rootRows.append(row)
+            }
+        }
+
+        func sortRows(_ rows: [ActivityRow]) -> [ActivityRow] {
+            return rows.sorted { lhs, rhs in
+                if let leftOrder = lhs.orderInParent,
+                    let rightOrder = rhs.orderInParent,
+                    leftOrder != rightOrder
+                {
+                    return leftOrder < rightOrder
+                }
+                if let leftStart = lhs.startTime,
+                    let rightStart = rhs.startTime,
+                    leftStart != rightStart
+                {
+                    return leftStart < rightStart
+                }
+                return lhs.id < rhs.id
+            }
+        }
+
+        func buildActivity(_ row: ActivityRow) -> TestActivity {
+            let attachmentRows = attachmentsByActivity[row.id] ?? []
+            let attachments = attachmentRows.map {
+                TestActivityAttachment(name: $0.name, timestamp: $0.timestamp)
+            }
+            let childRows = sortRows(rowsByParent[row.id] ?? [])
+            let children = childRows.map { buildActivity($0) }
+            let failureAssociated =
+                row.failureIDs.map { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            return TestActivity(
+                title: row.title,
+                startTime: row.startTime,
+                isAssociatedWithFailure: failureAssociated,
+                attachments: attachments.isEmpty ? nil : attachments,
+                childActivities: children.isEmpty ? nil : children
+            )
+        }
+
+        return sortRows(rootRows).map { buildActivity($0) }
+    }
+
+    private func loadAttachments(for runId: Int64, db: OpaquePointer?) -> [Int64: [ActivityAttachmentRow]] {
+        guard let db else { return [:] }
+        let attachmentQuery = """
+            SELECT a.activity_fk, a.name, a.timestamp
+            FROM Attachments a
+            JOIN Activities act ON a.activity_fk = act.ROWID
+            WHERE act.testCaseRun_fk = ? AND a.name IS NOT NULL
+            """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, attachmentQuery, -1, &stmt, nil) == SQLITE_OK else {
+            return [:]
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, runId)
+
+        var attachmentsByActivity = [Int64: [ActivityAttachmentRow]]()
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let activityId = sqlite3_column_int64(stmt, 0)
+            guard let namePtr = sqlite3_column_text(stmt, 1) else { continue }
+            let name = String(cString: namePtr)
+            let timestamp = sqlite3_column_type(stmt, 2) == SQLITE_NULL
+                ? nil
+                : sqlite3_column_double(stmt, 2)
+
+            attachmentsByActivity[activityId, default: []].append(
+                ActivityAttachmentRow(activityId: activityId, name: name, timestamp: timestamp)
+            )
+        }
+        return attachmentsByActivity
     }
 
     func findFirstValidStartTime(_ nodes: [TestNode]) -> Double {

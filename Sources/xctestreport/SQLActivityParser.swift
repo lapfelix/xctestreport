@@ -232,7 +232,8 @@ final class SQLActivityParser {
                             startTime: issue.timestamp ?? row.startTime,
                             isAssociatedWithFailure: false,
                             attachments: nil,
-                            childActivities: nil
+                            childActivities: nil,
+                            failureBranchStyle: nil
                         )
                     }
                     return XCTestReport.TestActivity(
@@ -240,7 +241,8 @@ final class SQLActivityParser {
                         startTime: issue.timestamp ?? row.startTime,
                         isAssociatedWithFailure: true,
                         attachments: nil,
-                        childActivities: stackFrameActivities.isEmpty ? nil : stackFrameActivities
+                        childActivities: stackFrameActivities.isEmpty ? nil : stackFrameActivities,
+                        failureBranchStyle: true
                     )
                 }
                 children.append(contentsOf: failureIssueActivities)
@@ -259,7 +261,8 @@ final class SQLActivityParser {
                 startTime: row.startTime,
                 isAssociatedWithFailure: failureAssociated,
                 attachments: attachments.isEmpty ? nil : attachments,
-                childActivities: children.isEmpty ? nil : children
+                childActivities: children.isEmpty ? nil : children,
+                failureBranchStyle: nil
             )
         }
 

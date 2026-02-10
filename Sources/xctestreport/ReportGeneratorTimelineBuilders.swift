@@ -1089,6 +1089,7 @@ extension XCTestReport {
                 timestamp: timestamp,
                 endTimestamp: endTimestamp,
                 failureAssociated: failureAssociated,
+                failureBranchStyle: activity.failureBranchStyle ?? false,
                 attachments: attachments,
                 children: children,
                 repeatCount: 1
@@ -1104,6 +1105,7 @@ extension XCTestReport {
             && lhs.children.isEmpty
             && rhs.children.isEmpty
             && lhs.failureAssociated == rhs.failureAssociated
+            && lhs.failureBranchStyle == rhs.failureBranchStyle
     }
 
     func collapseRepeatedTimelineNodes(_ nodes: [TimelineNode]) -> [TimelineNode] {
@@ -1116,6 +1118,7 @@ extension XCTestReport {
                 timestamp: node.timestamp,
                 endTimestamp: node.endTimestamp ?? node.timestamp,
                 failureAssociated: node.failureAssociated,
+                failureBranchStyle: node.failureBranchStyle,
                 attachments: node.attachments,
                 children: collapsedChildren,
                 repeatCount: max(node.repeatCount, 1)
@@ -1140,6 +1143,7 @@ extension XCTestReport {
                     timestamp: current.timestamp ?? next.timestamp,
                     endTimestamp: next.endTimestamp ?? next.timestamp ?? current.endTimestamp,
                     failureAssociated: current.failureAssociated || next.failureAssociated,
+                    failureBranchStyle: current.failureBranchStyle || next.failureBranchStyle,
                     attachments: current.attachments,
                     children: current.children,
                     repeatCount: current.repeatCount + next.repeatCount
@@ -1234,6 +1238,7 @@ extension XCTestReport {
 
             let timeAttribute = node.timestamp.map { String(format: "%.6f", $0) } ?? ""
             let hasChildren = !node.children.isEmpty
+            let nodeClass = node.failureBranchStyle ? "timeline-node timeline-node-failure-branch" : "timeline-node"
             var eventClassList = ["timeline-event"]
             if node.failureAssociated {
                 eventClassList.append("timeline-failure")
@@ -1291,11 +1296,6 @@ extension XCTestReport {
                 }.joined(separator: "")
                 attachmentList = "<ul class=\"timeline-attachments\">\(renderedAttachments)</ul>"
             }
-
-            let nodeClass =
-                (hasChildren && node.failureAssociated)
-                ? "timeline-node timeline-node-failure-branch"
-                : "timeline-node"
 
             if node.children.isEmpty {
                 return "<li class=\"\(nodeClass)\" style=\"--timeline-depth: \(depth);\">\(row)\(attachmentList)</li>"

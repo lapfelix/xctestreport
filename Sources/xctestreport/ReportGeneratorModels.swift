@@ -205,6 +205,7 @@ extension XCTestReport {
         let isAssociatedWithFailure: Bool?
         let attachments: [TestActivityAttachment]?
         let childActivities: [TestActivity]?
+        let failureBranchStyle: Bool?
     }
 
     struct TestActivityAttachment: Decodable {
@@ -243,6 +244,7 @@ extension XCTestReport {
         let timestamp: Double?
         let endTimestamp: Double?
         let failureAssociated: Bool
+        let failureBranchStyle: Bool
         let attachments: [TimelineAttachment]
         let children: [TimelineNode]
         let repeatCount: Int

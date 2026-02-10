@@ -75,7 +75,8 @@ extension XCTestReport {
         } else if captureOutput {
             let pipe = Pipe()
             task.standardOutput = pipe
-            task.standardError = pipe
+            // Keep stderr separate so parser callers get clean JSON from stdout.
+            task.standardError = nil
         } else {
             task.standardOutput = nil
             task.standardError = nil
@@ -144,18 +145,7 @@ extension XCTestReport {
         }
         testActivitiesCacheLock.unlock()
 
-        // Fast path: keep SQL activity extraction when it carries structural fidelity.
-        if let activities = loadTestActivitiesFromDatabase(for: testIdentifier),
-            activitiesContainRichTimelineData(activities)
-        {
-            testActivitiesCacheLock.lock()
-            testActivitiesCache[cacheKey] = activities
-            testActivitiesCacheLock.unlock()
-            return activities
-        }
-
-        // Fallback path: xcresulttool preserves nested activity trees and failure markers
-        // when SQL rows are flattened/missing associations.
+        // Prefer xcresulttool activities for timeline fidelity.
         let cmd = [
             "xcrun", "xcresulttool", "get", "test-results", "activities", "--test-id",
             testIdentifier, "--path", xcresultPath, "--format", "json", "--compact",
@@ -163,6 +153,16 @@ extension XCTestReport {
         let (output, exitCode) = shell(cmd)
         if exitCode == 0, let output, let data = output.data(using: .utf8),
             let activities = try? JSONDecoder().decode(TestActivities.self, from: data)
+        {
+            testActivitiesCacheLock.lock()
+            testActivitiesCache[cacheKey] = activities
+            testActivitiesCacheLock.unlock()
+            return activities
+        }
+
+        // Fallback: direct SQL extraction if xcresulttool is unavailable or fails.
+        if let activities = loadTestActivitiesFromDatabase(for: testIdentifier),
+            activitiesContainRichTimelineData(activities)
         {
             testActivitiesCacheLock.lock()
             testActivitiesCache[cacheKey] = activities

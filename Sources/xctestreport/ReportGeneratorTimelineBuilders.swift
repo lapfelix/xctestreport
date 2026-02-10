@@ -437,11 +437,16 @@ extension XCTestReport {
     }
 
     func keyedArchiveDictionary(_ reference: Any?, objects: [Any]) -> [String: Any] {
+        guard let archiveObject = keyedArchiveObject(reference, objects: objects) as? [String: Any] else {
+            return [:]
+        }
+
         guard
-            let archiveObject = keyedArchiveObject(reference, objects: objects) as? [String: Any],
             let keyRefs = archiveObject["NS.keys"] as? [Any],
             let valueRefs = archiveObject["NS.objects"] as? [Any]
-        else { return [:] }
+        else {
+            return archiveObject
+        }
 
         var dictionary = [String: Any](minimumCapacity: min(keyRefs.count, valueRefs.count))
         for index in 0..<min(keyRefs.count, valueRefs.count) {
@@ -466,15 +471,14 @@ extension XCTestReport {
         return nil
     }
 
-    func readAttachmentData(at filePath: String) -> Data? {
-        let fileURL = URL(fileURLWithPath: filePath)
-        if fileURL.pathExtension.caseInsensitiveCompare("gz") != .orderedSame {
-            return FileManager.default.contents(atPath: filePath)
-        }
-
+    func runAttachmentDecompressionCommand(_ command: String, filePath: String) -> Data? {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        task.arguments = ["gunzip", "-c", filePath]
+        if command == "zstd" {
+            task.arguments = [command, "-d", "-c", filePath]
+        } else {
+            task.arguments = [command, "-c", filePath]
+        }
 
         let outputPipe = Pipe()
         let errorPipe = Pipe()
@@ -491,6 +495,33 @@ extension XCTestReport {
         _ = errorPipe.fileHandleForReading.readDataToEndOfFile()
         task.waitUntilExit()
         guard task.terminationStatus == 0, !data.isEmpty else { return nil }
+        return data
+    }
+
+    func isZstdCompressedData(_ data: Data) -> Bool {
+        guard data.count >= 4 else { return false }
+        return data[data.startIndex] == 0x28
+            && data[data.startIndex.advanced(by: 1)] == 0xB5
+            && data[data.startIndex.advanced(by: 2)] == 0x2F
+            && data[data.startIndex.advanced(by: 3)] == 0xFD
+    }
+
+    func readAttachmentData(at filePath: String) -> Data? {
+        let fileURL = URL(fileURLWithPath: filePath)
+        if fileURL.pathExtension.caseInsensitiveCompare("gz") == .orderedSame {
+            return runAttachmentDecompressionCommand("gunzip", filePath: filePath)
+        }
+
+        guard let data = FileManager.default.contents(atPath: filePath) else {
+            return nil
+        }
+
+        if isZstdCompressedData(data),
+            let decompressed = runAttachmentDecompressionCommand("zstd", filePath: filePath)
+        {
+            return decompressed
+        }
+
         return data
     }
 
@@ -513,6 +544,7 @@ extension XCTestReport {
             rootArchiveObject["parentWindowSize"], objects: objects)
         let width = (parentWindow["Width"] as? NSNumber)?.doubleValue ?? 0
         let height = (parentWindow["Height"] as? NSNumber)?.doubleValue ?? 0
+        let hasUsableWindowBounds = width > 1 && height > 1
 
         let eventPaths = keyedArchiveArray(rootArchiveObject["eventPaths"], objects: objects)
         guard !eventPaths.isEmpty else { return nil }
@@ -532,14 +564,24 @@ extension XCTestReport {
                 else { continue }
 
                 let offset = keyedArchiveDouble(pointerEvent["offset"], objects: objects) ?? 0
-                let clampedX = min(max(0, x), width)
-                let clampedY = min(max(0, y), height)
+                let pointX =
+                    hasUsableWindowBounds
+                    ? min(max(0, x), width)
+                    : max(0, x)
+                let pointY =
+                    hasUsableWindowBounds
+                    ? min(max(0, y), height)
+                    : max(0, y)
                 let absoluteTime = baseTimestamp + max(0, offset)
-                points.append(TouchGesturePoint(time: absoluteTime, x: clampedX, y: clampedY))
+                points.append(TouchGesturePoint(time: absoluteTime, x: pointX, y: pointY))
             }
         }
 
         guard !points.isEmpty else { return nil }
+        let hasMeaningfulPoint = points.contains { point in
+            abs(point.x) > 0.5 || abs(point.y) > 0.5
+        }
+        guard hasMeaningfulPoint else { return nil }
         points.sort { $0.time < $1.time }
 
         guard let first = points.first, let last = points.last else { return nil }
@@ -574,6 +616,29 @@ extension XCTestReport {
         var gestures = [TouchGestureOverlay]()
         var seenGestureKeys = Set<String>()
         var seenExportedFiles = Set<String>()
+        let synthesizedEventTimestamps = flatNodes.compactMap { node -> Double? in
+            guard node.title.localizedCaseInsensitiveContains("synthesize event") else { return nil }
+            return node.timestamp
+        }
+
+        func nearestSynthesizedEventTimestamp(for timestamp: Double) -> Double? {
+            guard !synthesizedEventTimestamps.isEmpty else { return nil }
+            var bestTimestamp: Double?
+            var bestDistance = Double.greatestFiniteMagnitude
+            for candidate in synthesizedEventTimestamps {
+                let distance = abs(candidate - timestamp)
+                if distance < bestDistance {
+                    bestDistance = distance
+                    bestTimestamp = candidate
+                }
+            }
+
+            let maxSynthesizedAnchorSkew: Double = 1.2
+            if bestDistance > maxSynthesizedAnchorSkew {
+                return nil
+            }
+            return bestTimestamp
+        }
 
         for node in flatNodes {
             for attachment in node.attachments {
@@ -587,11 +652,10 @@ extension XCTestReport {
                     .removingPercentEncoding ?? relativePath.replacingOccurrences(
                     of: "attachments/", with: "")
                 let filePath = (attachmentRoot as NSString).appendingPathComponent(fileName)
-                seenExportedFiles.insert(fileName)
-
                 let baseTimestamp = attachment.timestamp ?? node.timestamp
                 guard let baseTimestamp else { continue }
 
+                seenExportedFiles.insert(fileName)
                 let cacheKey = "\(filePath)|\(String(format: "%.6f", baseTimestamp))"
                 let overlay: TouchGestureOverlay?
                 if let cached = parsedCache[cacheKey] {
@@ -604,9 +668,8 @@ extension XCTestReport {
                 }
 
                 guard let overlay else { continue }
-                let dedupeKey = cacheKey
-                guard !seenGestureKeys.contains(dedupeKey) else { continue }
-                seenGestureKeys.insert(dedupeKey)
+                guard !seenGestureKeys.contains(cacheKey) else { continue }
+                seenGestureKeys.insert(cacheKey)
                 gestures.append(overlay)
             }
         }
@@ -639,11 +702,55 @@ extension XCTestReport {
             }
         }
 
-        let fallbackSizeGesture = gestures.first { $0.width > 1 && $0.height > 1 }
+        let alignedGestures = gestures.map { gesture -> TouchGestureOverlay in
+            let duration = max(0, gesture.endTime - gesture.startTime)
+            let pathDistance = gesture.points.enumerated().reduce(0.0) {
+                partial, entry in
+                let index = entry.offset
+                guard index > 0 else { return partial }
+                let current = entry.element
+                let previous = gesture.points[index - 1]
+                return partial + hypot(current.x - previous.x, current.y - previous.y)
+            }
+            let displacement: Double = {
+                guard let first = gesture.points.first, let last = gesture.points.last else { return 0 }
+                return hypot(last.x - first.x, last.y - first.y)
+            }()
+            let isTapLike =
+                duration <= 0.09
+                && displacement <= 12
+                && pathDistance <= 12
+                && gesture.points.count <= 3
+            guard isTapLike else { return gesture }
+
+            guard let synthesizedAnchor = nearestSynthesizedEventTimestamp(for: gesture.startTime)
+            else { return gesture }
+
+            // Attachments often timestamp synthesized events at completion.
+            // Pull tap gestures back to the synthesized event activity start when the skew is plausible.
+            let skew = gesture.startTime - synthesizedAnchor
+            let maxBackshift: Double = 1.2
+            guard skew > 0.08, skew <= maxBackshift else { return gesture }
+            let shift = -skew
+
+            let shiftedPoints = gesture.points.map { point in
+                TouchGesturePoint(time: point.time + shift, x: point.x, y: point.y)
+            }
+
+            return TouchGestureOverlay(
+                startTime: gesture.startTime + shift,
+                endTime: gesture.endTime + shift,
+                width: gesture.width,
+                height: gesture.height,
+                points: shiftedPoints
+            )
+        }
+
+        let fallbackSizeGesture = alignedGestures.first { $0.width > 1 && $0.height > 1 }
         let fallbackWidth = fallbackSizeGesture?.width ?? 402
         let fallbackHeight = fallbackSizeGesture?.height ?? 874
 
-        let normalizedGestures = gestures.map { gesture -> TouchGestureOverlay in
+        let normalizedGestures = alignedGestures.map { gesture -> TouchGestureOverlay in
             guard gesture.width <= 1 || gesture.height <= 1 else { return gesture }
 
             let maxX = gesture.points.map(\.x).max() ?? 0
@@ -709,15 +816,129 @@ extension XCTestReport {
     }
 
     func buildAttachmentLookup(
-        for testIdentifier: String, attachmentsByTestIdentifier: [String: [AttachmentManifestItem]]
+        for testIdentifier: String,
+        attachmentsByTestIdentifier: [String: [AttachmentManifestItem]],
+        activityTimestampRange: ClosedRange<Double>? = nil
     ) -> [String: [AttachmentManifestItem]] {
         var lookup = [String: [AttachmentManifestItem]]()
-        for attachment in attachmentsByTestIdentifier[testIdentifier] ?? [] {
-            if let name = attachment.suggestedHumanReadableName {
-                lookup[name, default: []].append(attachment)
+        var dedupe = Set<String>()
+
+        func append(_ attachment: AttachmentManifestItem, for key: String) {
+            let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            let dedupeKey = "\(trimmed)|\(attachment.exportedFileName)"
+            guard !dedupe.contains(dedupeKey) else { return }
+            dedupe.insert(dedupeKey)
+            lookup[trimmed, default: []].append(attachment)
+        }
+
+        let globalAttachmentPadding: Double = 5.0
+        for sourceKey in [testIdentifier, ""] {
+            for attachment in attachmentsByTestIdentifier[sourceKey] ?? [] {
+                if sourceKey.isEmpty, let activityTimestampRange {
+                    guard let timestamp = attachment.timestamp else { continue }
+                    let paddedRange =
+                        (activityTimestampRange.lowerBound - globalAttachmentPadding)
+                        ... (activityTimestampRange.upperBound + globalAttachmentPadding)
+                    guard paddedRange.contains(timestamp) else { continue }
+                }
+
+                if let name = attachment.suggestedHumanReadableName {
+                    append(attachment, for: name)
+                    append(attachment, for: cleanedAttachmentLabel(name))
+                }
             }
         }
+
+        for key in lookup.keys {
+            lookup[key]?.sort { lhs, rhs in
+                let leftTime = lhs.timestamp ?? .greatestFiniteMagnitude
+                let rightTime = rhs.timestamp ?? .greatestFiniteMagnitude
+                if leftTime != rightTime { return leftTime < rightTime }
+                return lhs.exportedFileName < rhs.exportedFileName
+            }
+        }
+
         return lookup
+    }
+
+    func buildAttachmentPayloadLookup(
+        for testIdentifier: String,
+        attachmentsByTestIdentifier: [String: [AttachmentManifestItem]],
+        activityTimestampRange: ClosedRange<Double>? = nil
+    ) -> [String: AttachmentManifestItem] {
+        var lookup = [String: AttachmentManifestItem]()
+        let globalAttachmentPadding: Double = 5.0
+
+        for sourceKey in [testIdentifier, ""] {
+            for attachment in attachmentsByTestIdentifier[sourceKey] ?? [] {
+                if sourceKey.isEmpty, let activityTimestampRange {
+                    guard let timestamp = attachment.timestamp else { continue }
+                    let paddedRange =
+                        (activityTimestampRange.lowerBound - globalAttachmentPadding)
+                        ... (activityTimestampRange.upperBound + globalAttachmentPadding)
+                    guard paddedRange.contains(timestamp) else { continue }
+                }
+
+                guard let payloadRefId = attachment.payloadRefId,
+                    !payloadRefId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                else { continue }
+                if lookup[payloadRefId] == nil {
+                    lookup[payloadRefId] = attachment
+                }
+            }
+        }
+
+        return lookup
+    }
+
+    func resolveAttachmentLookupMatch(
+        attachmentName: String,
+        attachmentTimestamp: Double?,
+        attachmentPayloadId: String?,
+        attachmentLookup: [String: [AttachmentManifestItem]],
+        attachmentPayloadLookup: [String: AttachmentManifestItem]
+    ) -> AttachmentManifestItem? {
+        if let attachmentPayloadId,
+            let directMatch = attachmentPayloadLookup[attachmentPayloadId]
+        {
+            return directMatch
+        }
+
+        var candidateKeys = [attachmentName]
+        let cleanedName = cleanedAttachmentLabel(attachmentName)
+        if cleanedName != attachmentName {
+            candidateKeys.append(cleanedName)
+        }
+
+        let maxTimestampSkew: Double = 1.5
+
+        for key in candidateKeys {
+            guard let candidates = attachmentLookup[key], !candidates.isEmpty else { continue }
+
+            if let attachmentTimestamp {
+                var bestIndex: Int?
+                var bestDistance = Double.greatestFiniteMagnitude
+                for index in 0..<candidates.count {
+                    let candidate = candidates[index]
+                    let candidateTimestamp = candidate.timestamp ?? attachmentTimestamp
+                    let distance = abs(candidateTimestamp - attachmentTimestamp)
+                    if distance < bestDistance {
+                        bestDistance = distance
+                        bestIndex = index
+                    }
+                }
+
+                guard let bestIndex else { continue }
+                guard bestDistance <= maxTimestampSkew else { continue }
+
+                return candidates[bestIndex]
+            }
+
+            return candidates.first
+        }
+
+        return nil
     }
 
     func buildVideoSources(
@@ -805,6 +1026,7 @@ extension XCTestReport {
     func buildTimelineNodes(
         from activities: [TestActivity],
         attachmentLookup: [String: [AttachmentManifestItem]],
+        attachmentPayloadLookup: [String: AttachmentManifestItem],
         sourceLocationBySymbol: [String: SourceLocation],
         nextId: inout Int
     ) -> [TimelineNode] {
@@ -815,13 +1037,20 @@ extension XCTestReport {
             var seenAttachments = Set<String>()
             let attachments: [TimelineAttachment] = (activity.attachments ?? []).compactMap {
                 attachment -> TimelineAttachment? in
-                let key = "\(attachment.name)|\(attachment.timestamp ?? -1)"
-                guard !seenAttachments.contains(key) else { return nil }
-                seenAttachments.insert(key)
-
-                let matching = attachmentLookup[attachment.name]?.first
+                let matching = resolveAttachmentLookupMatch(
+                    attachmentName: attachment.name,
+                    attachmentTimestamp: attachment.timestamp,
+                    attachmentPayloadId: attachment.payloadId,
+                    attachmentLookup: attachmentLookup,
+                    attachmentPayloadLookup: attachmentPayloadLookup
+                )
                 let relativePath =
                     matching != nil ? "attachments/\(urlEncodePath(matching!.exportedFileName))" : nil
+                let dedupeKey =
+                    relativePath ?? "\(attachment.name)|\(attachment.timestamp ?? -1)"
+                guard !seenAttachments.contains(dedupeKey) else { return nil }
+                seenAttachments.insert(dedupeKey)
+
                 return TimelineAttachment(
                     name: attachment.name,
                     timestamp: attachment.timestamp,
@@ -834,6 +1063,7 @@ extension XCTestReport {
             let children = buildTimelineNodes(
                 from: activity.childActivities ?? [],
                 attachmentLookup: attachmentLookup,
+                attachmentPayloadLookup: attachmentPayloadLookup,
                 sourceLocationBySymbol: sourceLocationBySymbol,
                 nextId: &nextId)
             let childEndTimestamp = children.compactMap { $0.endTimestamp ?? $0.timestamp }.max()

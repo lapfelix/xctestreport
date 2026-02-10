@@ -186,6 +186,8 @@ extension XCTestReport {
         var exportedFileName: String
         let isAssociatedWithFailure: Bool?
         let suggestedHumanReadableName: String?
+        let timestamp: Double?
+        let payloadRefId: String?
     }
 
     struct TestActivities: Decodable {
@@ -208,6 +210,7 @@ extension XCTestReport {
     struct TestActivityAttachment: Decodable {
         let name: String
         let timestamp: Double?
+        let payloadId: String?
     }
 
     struct VideoSource {

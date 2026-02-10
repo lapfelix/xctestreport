@@ -10,8 +10,48 @@ private let previousRunsCacheLock = NSLock()
 private var previousRunsCache = [String: [XCTestReport.TestRunDetail]]()
 private let previousRunsDirsCacheLock = NSLock()
 private var previousRunsDirsCache = [String: [String]]()
+private let cocoaToUnixEpochOffset: Double = 978_307_200
 
 extension XCTestReport {
+    func normalizeXCResultTimestamp(_ value: Double?) -> Double? {
+        guard let value, value.isFinite else { return nil }
+        // xcresult SQLite tables often store Cocoa absolute time (seconds since 2001-01-01).
+        // Convert to Unix epoch so DB-derived timestamps align with xcresulttool JSON.
+        if value > 0 && value < 1_000_000_000 {
+            return value + cocoaToUnixEpochOffset
+        }
+        return value
+    }
+
+    func activitiesContainRichTimelineData(_ activities: TestActivities) -> Bool {
+        var hasChildren = false
+        var hasFailureAssociation = false
+
+        func traverse(_ nodes: [TestActivity]) {
+            for node in nodes {
+                if let children = node.childActivities, !children.isEmpty {
+                    hasChildren = true
+                    traverse(children)
+                }
+                if node.isAssociatedWithFailure == true {
+                    hasFailureAssociation = true
+                }
+                if hasChildren && hasFailureAssociation {
+                    return
+                }
+            }
+        }
+
+        for run in activities.testRuns {
+            traverse(run.activities)
+            if hasChildren && hasFailureAssociation {
+                break
+            }
+        }
+
+        return hasChildren || hasFailureAssociation
+    }
+
     func shell(_ args: [String], outputFile: String? = nil, captureOutput: Bool = true) -> (
         String?, Int32
     ) {
@@ -104,6 +144,32 @@ extension XCTestReport {
         }
         testActivitiesCacheLock.unlock()
 
+        // Fast path: keep SQL activity extraction when it carries structural fidelity.
+        if let activities = loadTestActivitiesFromDatabase(for: testIdentifier),
+            activitiesContainRichTimelineData(activities)
+        {
+            testActivitiesCacheLock.lock()
+            testActivitiesCache[cacheKey] = activities
+            testActivitiesCacheLock.unlock()
+            return activities
+        }
+
+        // Fallback path: xcresulttool preserves nested activity trees and failure markers
+        // when SQL rows are flattened/missing associations.
+        let cmd = [
+            "xcrun", "xcresulttool", "get", "test-results", "activities", "--test-id",
+            testIdentifier, "--path", xcresultPath, "--format", "json", "--compact",
+        ]
+        let (output, exitCode) = shell(cmd)
+        if exitCode == 0, let output, let data = output.data(using: .utf8),
+            let activities = try? JSONDecoder().decode(TestActivities.self, from: data)
+        {
+            testActivitiesCacheLock.lock()
+            testActivitiesCache[cacheKey] = activities
+            testActivitiesCacheLock.unlock()
+            return activities
+        }
+
         if let activities = loadTestActivitiesFromDatabase(for: testIdentifier) {
             testActivitiesCacheLock.lock()
             testActivitiesCache[cacheKey] = activities
@@ -111,26 +177,8 @@ extension XCTestReport {
             return activities
         }
 
-        let cmd = [
-            "xcrun", "xcresulttool", "get", "test-results", "activities", "--test-id",
-            testIdentifier, "--path", xcresultPath, "--format", "json", "--compact",
-        ]
-        let (output, exitCode) = shell(cmd)
-        guard exitCode == 0, let output, let data = output.data(using: .utf8) else {
-            print("Failed to get activities for: \(testIdentifier)")
-            return nil
-        }
-
-        do {
-            let activities = try JSONDecoder().decode(TestActivities.self, from: data)
-            testActivitiesCacheLock.lock()
-            testActivitiesCache[cacheKey] = activities
-            testActivitiesCacheLock.unlock()
-            return activities
-        } catch {
-            print("Failed to decode activities for \(testIdentifier): \(error)")
-            return nil
-        }
+        print("Failed to get activities for: \(testIdentifier)")
+        return nil
     }
 
     private struct ActivityRow {
@@ -226,7 +274,7 @@ extension XCTestReport {
                     id: id,
                     parentId: parentId,
                     title: title,
-                    startTime: startTime,
+                    startTime: normalizeXCResultTimestamp(startTime),
                     failureIDs: failureIDs,
                     orderInParent: orderInParent
                 )
@@ -265,7 +313,7 @@ extension XCTestReport {
         func buildActivity(_ row: ActivityRow) -> TestActivity {
             let attachmentRows = attachmentsByActivity[row.id] ?? []
             let attachments = attachmentRows.map {
-                TestActivityAttachment(name: $0.name, timestamp: $0.timestamp)
+                TestActivityAttachment(name: $0.name, timestamp: $0.timestamp, payloadId: nil)
             }
             let childRows = sortRows(rowsByParent[row.id] ?? [])
             let children = childRows.map { buildActivity($0) }
@@ -308,7 +356,11 @@ extension XCTestReport {
                 : sqlite3_column_double(stmt, 2)
 
             attachmentsByActivity[activityId, default: []].append(
-                ActivityAttachmentRow(activityId: activityId, name: name, timestamp: timestamp)
+                ActivityAttachmentRow(
+                    activityId: activityId,
+                    name: name,
+                    timestamp: normalizeXCResultTimestamp(timestamp)
+                )
             )
         }
         return attachmentsByActivity
@@ -516,12 +568,15 @@ extension XCTestReport {
                 a.uniformTypeIdentifier,
                 a.xcResultKitPayloadRefId,
                 a.activity_fk,
-                tc.identifier
+                tc.identifier,
+                a.timestamp,
+                a.testIssue_fk
             FROM Attachments a
             LEFT JOIN Activities act ON a.activity_fk = act.ROWID
             LEFT JOIN TestCaseRuns tcr ON act.testCaseRun_fk = tcr.ROWID
             LEFT JOIN TestCases tc ON tcr.testCase_fk = tc.ROWID
             WHERE a.xcResultKitPayloadRefId IS NOT NULL
+            ORDER BY a.timestamp, a.ROWID
             """
         
         var stmt: OpaquePointer?
@@ -580,10 +635,16 @@ extension XCTestReport {
             }
             
             // Create manifest item
+            let attachmentTimestamp = sqlite3_column_type(stmt, 5) == SQLITE_NULL
+                ? nil
+                : normalizeXCResultTimestamp(sqlite3_column_double(stmt, 5))
+            let associatedWithFailure = sqlite3_column_type(stmt, 6) != SQLITE_NULL
             let item = AttachmentManifestItem(
                 exportedFileName: destFileName,
-                isAssociatedWithFailure: nil,
-                suggestedHumanReadableName: suggestedName
+                isAssociatedWithFailure: associatedWithFailure ? true : nil,
+                suggestedHumanReadableName: suggestedName,
+                timestamp: attachmentTimestamp,
+                payloadRefId: payloadRefId
             )
             
             attachmentsByTest[testIdentifier, default: []].append(item)

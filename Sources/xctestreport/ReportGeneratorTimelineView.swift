@@ -273,8 +273,44 @@ extension XCTestReport {
         let screenshotSources = buildScreenshotSources(
             for: testIdentifier, activities: activities,
             attachmentsByTestIdentifier: attachmentsByTestIdentifier)
+        var activityTimestamps = [Double]()
+        activityTimestamps.reserveCapacity(256)
+
+        func collectActivityTimestamps(from nodes: [TestActivity]) {
+            for node in nodes {
+                if let startTime = node.startTime {
+                    activityTimestamps.append(startTime)
+                }
+                if let attachments = node.attachments {
+                    for attachment in attachments {
+                        if let timestamp = attachment.timestamp {
+                            activityTimestamps.append(timestamp)
+                        }
+                    }
+                }
+                collectActivityTimestamps(from: node.childActivities ?? [])
+            }
+        }
+
+        for activitiesForRun in runActivityLists {
+            collectActivityTimestamps(from: activitiesForRun)
+        }
+
+        let activityTimestampRange: ClosedRange<Double>? = {
+            guard let minValue = activityTimestamps.min(),
+                let maxValue = activityTimestamps.max()
+            else { return nil }
+            return minValue...maxValue
+        }()
+
         let attachmentLookup = buildAttachmentLookup(
-            for: testIdentifier, attachmentsByTestIdentifier: attachmentsByTestIdentifier)
+            for: testIdentifier,
+            attachmentsByTestIdentifier: attachmentsByTestIdentifier,
+            activityTimestampRange: activityTimestampRange)
+        let attachmentPayloadLookup = buildAttachmentPayloadLookup(
+            for: testIdentifier,
+            attachmentsByTestIdentifier: attachmentsByTestIdentifier,
+            activityTimestampRange: activityTimestampRange)
 
         var nextId = 1
         let fallbackTimelineBase =
@@ -293,6 +329,7 @@ extension XCTestReport {
             let timelineNodes = buildTimelineNodes(
                 from: activitiesForRun,
                 attachmentLookup: attachmentLookup,
+                attachmentPayloadLookup: attachmentPayloadLookup,
                 sourceLocationBySymbol: sourceLocationBySymbol,
                 nextId: &nextId)
             let collapsedTimelineNodes = collapseRepeatedTimelineNodes(timelineNodes)

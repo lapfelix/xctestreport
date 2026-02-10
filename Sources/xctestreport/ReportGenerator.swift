@@ -350,7 +350,7 @@ extension XCTestReport {
                     }
 
                     let timelineSourceLocationMap: [String: SourceLocation]
-                    if result != "Passed", let testRuns = testDetails?.testRuns {
+                    if let testRuns = testDetails?.testRuns {
                         timelineSourceLocationMap = sourceReferenceLocationMap(
                             from: testRuns,
                             testIdentifierURL: testDetails?.testIdentifierURL

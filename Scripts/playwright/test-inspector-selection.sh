@@ -67,21 +67,92 @@ async function run(htmlPath) {
   const box = await overlay.boundingBox();
   await assert(!!box, "Hierarchy overlay has no bounding box.");
 
-  const points = [
-    [0.5, 0.5],
-    [0.35, 0.5],
-    [0.65, 0.5],
-    [0.5, 0.35],
-    [0.5, 0.65],
-  ];
-  let candidateCount = 0;
-  for (const [rx, ry] of points) {
-    await page.mouse.click(box.x + box.width * rx, box.y + box.height * ry);
+  const mediaRect = await page.evaluate(() => {
+    function displayedMediaRect(mediaElement) {
+      if (!mediaElement) return { x: 0, y: 0, width: 0, height: 0 };
+      var elementWidth = mediaElement.clientWidth || mediaElement.offsetWidth || 0;
+      var elementHeight = mediaElement.clientHeight || mediaElement.offsetHeight || 0;
+      if (elementWidth <= 0 || elementHeight <= 0) return { x: 0, y: 0, width: 0, height: 0 };
+      var intrinsicWidth = mediaElement.videoWidth || mediaElement.naturalWidth || elementWidth;
+      var intrinsicHeight = mediaElement.videoHeight || mediaElement.naturalHeight || elementHeight;
+      if (intrinsicWidth <= 0 || intrinsicHeight <= 0) {
+        return { x: 0, y: 0, width: elementWidth, height: elementHeight };
+      }
+      var elementRatio = elementWidth / elementHeight;
+      var mediaRatio = intrinsicWidth / intrinsicHeight;
+      if (!Number.isFinite(elementRatio) || !Number.isFinite(mediaRatio) || mediaRatio <= 0) {
+        return { x: 0, y: 0, width: elementWidth, height: elementHeight };
+      }
+      if (mediaRatio > elementRatio) {
+        var renderedHeight = elementWidth / mediaRatio;
+        return { x: 0, y: (elementHeight - renderedHeight) / 2, width: elementWidth, height: renderedHeight };
+      }
+      var renderedWidth = elementHeight * mediaRatio;
+      return { x: (elementWidth - renderedWidth) / 2, y: 0, width: renderedWidth, height: elementHeight };
+    }
+
+    var cards = Array.from(document.querySelectorAll(".timeline-video-card"));
+    var card = cards.find((entry) => entry.style.display !== "none") || cards[0] || null;
+    if (!card) return null;
+    var media = card.querySelector("video, [data-still-frame]");
+    if (!media) return null;
+    return displayedMediaRect(media);
+  });
+  await assert(
+    !!mediaRect && mediaRect.width > 0 && mediaRect.height > 0,
+    "Could not resolve displayed media bounds for hierarchy overlay clicks."
+  );
+
+  async function clickOverlayPoint(rx, ry) {
+    await page.mouse.click(
+      box.x + mediaRect.x + (mediaRect.width * rx),
+      box.y + mediaRect.y + (mediaRect.height * ry)
+    );
     await page.waitForTimeout(120);
-    candidateCount = await page.locator(".hierarchy-candidate-item").count();
-    if (candidateCount >= 2) break;
   }
-  await assert(candidateCount >= 2, `Expected at least 2 hierarchy candidates, got ${candidateCount}.`);
+
+  async function readCandidateState() {
+    return await page.evaluate(() => {
+      var items = Array.from(document.querySelectorAll(".hierarchy-candidate-item")).map((element) => ({
+        id: element.getAttribute("data-hierarchy-element-id") || "",
+        selected: element.classList.contains("is-selected"),
+      }));
+      var selectedItems = items.filter((item) => item.selected);
+      return {
+        count: items.length,
+        firstId: items[0] ? items[0].id : null,
+        secondId: items[1] ? items[1].id : null,
+        selectedCount: selectedItems.length,
+        selectedId: selectedItems[0] ? selectedItems[0].id : null,
+      };
+    });
+  }
+
+  const candidatePoints = [];
+  for (let y = 12; y <= 88; y += 8) {
+    for (let x = 12; x <= 88; x += 8) {
+      const rx = x / 100;
+      const ry = y / 100;
+      await clickOverlayPoint(rx, ry);
+      const state = await readCandidateState();
+      if (state.count >= 2 && state.firstId && state.secondId && state.firstId !== state.secondId) {
+        candidatePoints.push({ rx, ry, state });
+      }
+    }
+  }
+
+  await assert(
+    candidatePoints.length >= 2,
+    `Expected at least 2 distinct on-screen points with overlapping hierarchy candidates, got ${candidatePoints.length}.`
+  );
+  const pointA = candidatePoints[0];
+  await clickOverlayPoint(pointA.rx, pointA.ry);
+  const pointAState = await readCandidateState();
+  await assert(pointAState.selectedCount === 1, `Expected 1 selected candidate after overlay click, got ${pointAState.selectedCount}.`);
+  await assert(
+    pointAState.selectedId === pointAState.firstId,
+    "Overlay click did not select the first candidate at the clicked point."
+  );
 
   const firstCandidate = page.locator(".hierarchy-candidate-item").nth(0);
   const secondCandidate = page.locator(".hierarchy-candidate-item").nth(1);
@@ -102,6 +173,33 @@ async function run(htmlPath) {
   await assert(
     secondSelectedId && firstSelectedId && secondSelectedId !== firstSelectedId,
     "Selecting another candidate did not replace the previous candidate selection."
+  );
+
+  let screenSelectionValidated = false;
+  for (const point of candidatePoints) {
+    if (point === pointA) continue;
+    await clickOverlayPoint(point.rx, point.ry);
+    const pointState = await readCandidateState();
+    if (pointState.count < 2 || !pointState.firstId || pointState.firstId === secondSelectedId) continue;
+    await assert(
+      pointState.selectedCount === 1,
+      `Expected 1 selected candidate after overlay click, got ${pointState.selectedCount}.`
+    );
+    await assert(
+      pointState.selectedId === pointState.firstId,
+      "Overlay click did not switch selection to the first candidate at the clicked point."
+    );
+    await assert(
+      pointState.selectedId !== secondSelectedId,
+      "Selecting another on-screen element did not replace the previous inspector selection."
+    );
+    screenSelectionValidated = true;
+    break;
+  }
+
+  await assert(
+    screenSelectionValidated,
+    "Could not validate on-screen re-selection; try a report with richer overlapping hierarchy at click points."
   );
 
   const visibleEvents = page.locator(".timeline-event:visible");

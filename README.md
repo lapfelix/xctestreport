@@ -69,14 +69,14 @@ open ~/Desktop/xcresultout/index.html
 Typical output directory:
 
 - `index.html`
-- `test_<identifier>.html` (one per test case)
-- `attachments/` (exported media + previews)
-- `timeline_payloads/` (compressed timeline payload blobs)
 - `summary.json`
 - `tests_full.json`
 - `tests_grouped.json`
+- `tests/test_<identifier>.html` (one per test case)
+- `web/report.css`, `web/index-page.js`, `web/timeline-view.js`, `web/plist-preview.js`
+- `attachments/` (exported media + previews)
+- `timeline_payloads/` (compressed timeline payload blobs)
 - `test_details/*.json`
-- `report.css`, `index-page.js`, `timeline-view.js`, `plist-preview.js`
 
 ## Web Assets (for edits)
 - Templates: `Sources/xctestreport/Resources/Web/templates/`

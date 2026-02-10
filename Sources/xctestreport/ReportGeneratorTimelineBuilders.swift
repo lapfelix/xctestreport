@@ -67,9 +67,7 @@ extension XCTestReport {
 
     func attachmentFileExtension(from relativePath: String?) -> String {
         guard let relativePath else { return "" }
-        let fileName = relativePath
-            .replacingOccurrences(of: "attachments/", with: "")
-            .removingPercentEncoding ?? relativePath
+        let fileName = attachmentFileName(fromRelativePath: relativePath)
         let extensionValue = URL(fileURLWithPath: fileName).pathExtension.lowercased()
         guard extensionValue == "gz" else { return extensionValue }
         let uncompressedFileName = (fileName as NSString).deletingPathExtension
@@ -654,10 +652,7 @@ extension XCTestReport {
                     let relativePath = attachment.relativePath
                 else { continue }
 
-                let fileName = relativePath
-                    .replacingOccurrences(of: "attachments/", with: "")
-                    .removingPercentEncoding ?? relativePath.replacingOccurrences(
-                    of: "attachments/", with: "")
+                let fileName = attachmentFileName(fromRelativePath: relativePath)
                 let filePath = (attachmentRoot as NSString).appendingPathComponent(fileName)
                 let baseTimestamp = attachment.timestamp ?? node.timestamp
                 guard let baseTimestamp else { continue }
@@ -795,10 +790,7 @@ extension XCTestReport {
                     let relativePath = attachment.relativePath
                 else { continue }
 
-                let fileName = relativePath
-                    .replacingOccurrences(of: "attachments/", with: "")
-                    .removingPercentEncoding ?? relativePath.replacingOccurrences(
-                    of: "attachments/", with: "")
+                let fileName = attachmentFileName(fromRelativePath: relativePath)
                 let filePath = (attachmentRoot as NSString).appendingPathComponent(fileName)
                 guard let timestamp = attachment.timestamp ?? node.timestamp else { continue }
 
@@ -1015,7 +1007,7 @@ extension XCTestReport {
                 ?? fallbackStartTime
             guard let timestamp else { return nil }
 
-            let src = "attachments/\(urlEncodePath(attachment.exportedFileName))"
+            let src = attachmentRelativePathForTestPage(fileName: attachment.exportedFileName)
             guard !seenSources.contains(src) else { return nil }
             seenSources.insert(src)
 
@@ -1055,7 +1047,9 @@ extension XCTestReport {
                     attachmentPayloadLookup: attachmentPayloadLookup
                 )
                 let relativePath =
-                    matching != nil ? "attachments/\(urlEncodePath(matching!.exportedFileName))" : nil
+                    matching != nil
+                    ? attachmentRelativePathForTestPage(fileName: matching!.exportedFileName)
+                    : nil
                 let dedupeKey =
                     relativePath ?? "\(attachment.name)|\(attachment.timestamp ?? -1)"
                 guard !seenAttachments.contains(dedupeKey) else { return nil }
@@ -1069,13 +1063,16 @@ extension XCTestReport {
                 )
             }
 
-            let timestamp = activity.startTime ?? attachments.compactMap { $0.timestamp }.min()
             let children = buildTimelineNodes(
                 from: activity.childActivities ?? [],
                 attachmentLookup: attachmentLookup,
                 attachmentPayloadLookup: attachmentPayloadLookup,
                 sourceLocationBySymbol: sourceLocationBySymbol,
                 nextId: &nextId)
+            let childStartTimestamp = children.compactMap { $0.timestamp }.min()
+            let timestamp =
+                activity.startTime ?? attachments.compactMap { $0.timestamp }.min()
+                ?? childStartTimestamp
             let childEndTimestamp = children.compactMap { $0.endTimestamp ?? $0.timestamp }.max()
             let attachmentEndTimestamp = attachments.compactMap { $0.timestamp }.max()
             let endTimestamp = [timestamp, childEndTimestamp, attachmentEndTimestamp].compactMap { $0 }
@@ -1295,13 +1292,18 @@ extension XCTestReport {
                 attachmentList = "<ul class=\"timeline-attachments\">\(renderedAttachments)</ul>"
             }
 
+            let nodeClass =
+                (hasChildren && node.failureAssociated)
+                ? "timeline-node timeline-node-failure-branch"
+                : "timeline-node"
+
             if node.children.isEmpty {
-                return "<li class=\"timeline-node\" style=\"--timeline-depth: \(depth);\">\(row)\(attachmentList)</li>"
+                return "<li class=\"\(nodeClass)\" style=\"--timeline-depth: \(depth);\">\(row)\(attachmentList)</li>"
             }
 
             let childHTML = renderTimelineNodesHTML(node.children, baseTime: baseTime, depth: depth + 1)
             return """
-                <li class="timeline-node" style="--timeline-depth: \(depth);">
+                <li class="\(nodeClass)" style="--timeline-depth: \(depth);">
                     <details>
                         <summary>\(row)</summary>
                         \(attachmentList)

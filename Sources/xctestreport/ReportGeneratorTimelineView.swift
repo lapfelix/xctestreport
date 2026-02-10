@@ -182,7 +182,7 @@ extension XCTestReport {
         } catch {
             return nil
         }
-        return "timeline_payloads/\(urlEncodePath(loaderFileName))"
+        return timelinePayloadRelativePathForTestPage(fileName: loaderFileName)
     }
 
     private func writeCompressedTimelinePayloads(
@@ -219,8 +219,8 @@ extension XCTestReport {
             return nil
         }
 
-        let runStatesSrc = "timeline_payloads/\(urlEncodePath(runStatesFileName))"
-        let screenshotSrc = "timeline_payloads/\(urlEncodePath(screenshotFileName))"
+        let runStatesSrc = timelinePayloadRelativePathForTestPage(fileName: runStatesFileName)
+        let screenshotSrc = timelinePayloadRelativePathForTestPage(fileName: screenshotFileName)
         let loaderScriptSrc = writeCompressedTimelinePayloadLoaderScript(
             runStatesSrc: runStatesSrc,
             screenshotSrc: screenshotSrc,
@@ -488,7 +488,7 @@ extension XCTestReport {
             }
 
             videoElements = videoSources.enumerated().map { index, source in
-                let relativePath = "attachments/\(urlEncodePath(source.fileName))"
+                let relativePath = attachmentRelativePathForTestPage(fileName: source.fileName)
                 let startTime = source.startTime ?? defaultTimelineBase
                 let hiddenStyle = index == 0 ? "" : " style=\"display:none;\""
                 let runIndexAttribute = source.runIndex.map { " data-run-index=\"\($0)\"" } ?? ""

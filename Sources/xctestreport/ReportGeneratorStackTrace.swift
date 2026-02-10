@@ -465,6 +465,90 @@ extension XCTestReport {
             """
     }
 
+    func renderSourceReferenceSection(
+        from testRuns: [TestRunDetail],
+        testIdentifierURL: String?
+    ) -> String {
+        let references = failingSourceReferences(from: testRuns)
+        guard !references.isEmpty else { return "" }
+
+        let projectHint = projectNameHint(from: testIdentifierURL)
+        var seen = Set<String>()
+        let items = references.compactMap { reference -> String? in
+            let dedupeKey = "\(reference.name)|\(reference.url ?? "")"
+            guard !seen.contains(dedupeKey) else { return nil }
+            seen.insert(dedupeKey)
+
+            let escapedName = htmlEscape(reference.name)
+            if let location = resolveSourceReferenceLocation(
+                referenceName: reference.name,
+                referenceURL: reference.url,
+                projectHint: projectHint
+            ) {
+                let columnSuffix = location.column.map { ":\($0)" } ?? ""
+                let label = "\(location.filePath):\(location.line)\(columnSuffix)"
+                let escapedLabel = htmlEscape(label)
+                if let deepLink = xcodeURL(
+                    filePath: location.filePath,
+                    line: location.line,
+                    column: location.column
+                ) {
+                    return
+                        "<li><code>\(escapedName)</code><br><code>\(escapedLabel)</code> <a href=\"\(htmlEscape(deepLink))\">Open</a></li>"
+                }
+                return "<li><code>\(escapedName)</code><br><code>\(escapedLabel)</code></li>"
+            }
+
+            return "<li><code>\(escapedName)</code></li>"
+        }.joined(separator: "")
+
+        guard !items.isEmpty else { return "" }
+        return """
+            <h3>Failure Source References</h3>
+            <ul>\(items)</ul>
+            """
+    }
+
+    private func failingSourceReferences(
+        from testRuns: [TestRunDetail]
+    ) -> [(name: String, url: String?)] {
+        var references = [(name: String, url: String?)]()
+        var seen = Set<String>()
+
+        func appendReference(name: String, url: String?) {
+            let key = "\(name)|\(url ?? "")"
+            guard !seen.contains(key) else { return }
+            seen.insert(key)
+            references.append((name: name, url: url))
+        }
+
+        func walkDetail(_ detail: TestRunChildDetail, inFailureContext: Bool) {
+            let isFailureNode =
+                inFailureContext
+                || (detail.result?.lowercased() == "failed")
+                || detail.name.localizedCaseInsensitiveContains("failed")
+
+            if detail.nodeType == "Source Code Reference" && isFailureNode {
+                appendReference(name: detail.name, url: detail.url)
+            }
+
+            for child in detail.children ?? [] {
+                walkDetail(child, inFailureContext: isFailureNode)
+            }
+        }
+
+        for run in testRuns {
+            for child in run.children ?? [] {
+                let childFailure = child.result?.lowercased() == "failed"
+                for detail in child.children ?? [] {
+                    walkDetail(detail, inFailureContext: childFailure)
+                }
+            }
+        }
+
+        return references
+    }
+
     func extractStackTracePreview(
         for testIdentifier: String?,
         attachmentsByTestIdentifier: [String: [AttachmentManifestItem]]
@@ -513,7 +597,7 @@ extension XCTestReport {
 
             let candidate = StackTracePreview(
                 attachmentName: attachment.suggestedHumanReadableName ?? attachment.exportedFileName,
-                relativePath: "attachments/\(urlEncodePath(attachment.exportedFileName))",
+                relativePath: attachmentRelativePathForTestPage(fileName: attachment.exportedFileName),
                 preview: preview,
                 frameCount: frameLineIndexes.count
             )

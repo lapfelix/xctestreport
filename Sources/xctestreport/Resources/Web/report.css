@@ -779,6 +779,23 @@ tr.failed {
     color: #9f1f2f;
 }
 
+.timeline-node.timeline-node-failure-branch > details > ul > li.timeline-node > .timeline-event:not(.timeline-failure),
+.timeline-node.timeline-node-failure-branch > details > ul > li.timeline-node > details > summary > .timeline-event:not(.timeline-failure) {
+    background: #FDF1F3;
+    border-color: #F2C6CE;
+}
+
+.timeline-node.timeline-node-failure-branch > details > ul > li.timeline-node > .timeline-event:not(.timeline-failure):hover,
+.timeline-node.timeline-node-failure-branch > details > ul > li.timeline-node > details > summary > .timeline-event:not(.timeline-failure):hover {
+    background: #FBE6EA;
+    border-color: #E8A9B5;
+}
+
+.timeline-node.timeline-node-failure-branch > details > ul > li.timeline-node > .timeline-event:not(.timeline-failure) .timeline-title,
+.timeline-node.timeline-node-failure-branch > details > ul > li.timeline-node > details > summary > .timeline-event:not(.timeline-failure) .timeline-title {
+    color: #9f1f2f;
+}
+
 .timeline-time {
     color: #666;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
@@ -2463,6 +2480,23 @@ button#toggle-all {
     }
 
     .timeline-event.timeline-failure .timeline-title {
+        color: #ffbcc6;
+    }
+
+    .timeline-node.timeline-node-failure-branch > details > ul > li.timeline-node > .timeline-event:not(.timeline-failure),
+    .timeline-node.timeline-node-failure-branch > details > ul > li.timeline-node > details > summary > .timeline-event:not(.timeline-failure) {
+        background: #3F262D;
+        border-color: #6F4A56;
+    }
+
+    .timeline-node.timeline-node-failure-branch > details > ul > li.timeline-node > .timeline-event:not(.timeline-failure):hover,
+    .timeline-node.timeline-node-failure-branch > details > ul > li.timeline-node > details > summary > .timeline-event:not(.timeline-failure):hover {
+        background: #4B2C35;
+        border-color: #875968;
+    }
+
+    .timeline-node.timeline-node-failure-branch > details > ul > li.timeline-node > .timeline-event:not(.timeline-failure) .timeline-title,
+    .timeline-node.timeline-node-failure-branch > details > ul > li.timeline-node > details > summary > .timeline-event:not(.timeline-failure) .timeline-title {
         color: #ffbcc6;
     }
 

@@ -7,7 +7,9 @@ extension XCTestReport {
         try? FileManager.default.createDirectory(
             atPath: outputDir, withIntermediateDirectories: true)
         let webTemplates = try loadWebTemplates()
-        try copyWebAssets(to: outputDir)
+        try copyWebAssets(to: webAssetsDirectoryPath)
+        try? FileManager.default.createDirectory(
+            atPath: testPagesDirectoryPath, withIntermediateDirectories: true)
 
         // Check xcresult file size
         let fileManager = FileManager.default
@@ -329,6 +331,16 @@ extension XCTestReport {
                             failureInfo += sourceLocationsHtml
                         }
 
+                        if let testRuns = testDetails?.testRuns {
+                            let sourceReferencesHtml = renderSourceReferenceSection(
+                                from: testRuns,
+                                testIdentifierURL: testDetails?.testIdentifierURL
+                            )
+                            if !sourceReferencesHtml.isEmpty {
+                                failureInfo += sourceReferencesHtml
+                            }
+                        }
+
                         let stackTraceHtml = renderStackTraceSection(
                             for: test.nodeIdentifier,
                             attachmentsByTestIdentifier: attachmentsByTestIdentifier
@@ -404,7 +416,8 @@ extension XCTestReport {
                             "Failed to render test detail template for \(test.name): \(error)")
                         continue
                     }
-                    let testPagePath = (outputDir as NSString).appendingPathComponent(testPageName)
+                    let testPagePath = (testPagesDirectoryPath as NSString).appendingPathComponent(
+                        testPageName)
                     let minimizedTestDetailHTML = minifyHTMLInterTagWhitespace(testDetailHTML)
                     try? minimizedTestDetailHTML.write(
                         toFile: testPagePath, atomically: true, encoding: .utf8)
@@ -508,7 +521,8 @@ extension XCTestReport {
                     let escapedResult = htmlEscape(result)
                     let escapedDuration = htmlEscape(duration)
                     let escapedTestName = htmlEscape(test.name)
-                    let escapedPageName = htmlEscape(testPageName)
+                    let testPageRelativePath = "\(testPagesDirectoryName)/\(testPageName)"
+                    let escapedPageName = htmlEscape(testPageRelativePath)
 
                     var statusEmoji = ""
                     if let previousResults = previousResults,

@@ -29,6 +29,8 @@ extension XCTestReport {
     }
 
     func copyWebAssets(to directory: String) throws {
+        try FileManager.default.createDirectory(
+            atPath: directory, withIntermediateDirectories: true)
         try copyWebAsset(
             named: "report", withExtension: "css", subdirectory: "Web", to: directory)
         try copyWebAsset(

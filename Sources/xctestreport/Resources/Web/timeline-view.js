@@ -1465,9 +1465,7 @@
 
   function updateHierarchyCandidateSelectionState() {
     if (!hierarchyCandidateList) return;
-    var selectionKey = (selectedHierarchyElementId || '') + '|' + (hoveredHierarchyElementId || '');
-    if (selectionKey === hierarchyCandidateSelectionKey) return;
-    hierarchyCandidateSelectionKey = selectionKey;
+    hierarchyCandidateSelectionKey = (selectedHierarchyElementId || '') + '|' + (hoveredHierarchyElementId || '');
     Array.prototype.forEach.call(hierarchyCandidateList.querySelectorAll('.hierarchy-candidate-item'), function(button) {
       var elementId = button.getAttribute('data-hierarchy-element-id');
       button.classList.toggle('is-selected', !!selectedHierarchyElementId && elementId === selectedHierarchyElementId);

@@ -23,35 +23,6 @@ extension XCTestReport {
         return value
     }
 
-    func activitiesContainRichTimelineData(_ activities: TestActivities) -> Bool {
-        var hasChildren = false
-        var hasFailureAssociation = false
-
-        func traverse(_ nodes: [TestActivity]) {
-            for node in nodes {
-                if let children = node.childActivities, !children.isEmpty {
-                    hasChildren = true
-                    traverse(children)
-                }
-                if node.isAssociatedWithFailure == true {
-                    hasFailureAssociation = true
-                }
-                if hasChildren && hasFailureAssociation {
-                    return
-                }
-            }
-        }
-
-        for run in activities.testRuns {
-            traverse(run.activities)
-            if hasChildren && hasFailureAssociation {
-                break
-            }
-        }
-
-        return hasChildren || hasFailureAssociation
-    }
-
     func shell(_ args: [String], outputFile: String? = nil, captureOutput: Bool = true) -> (
         String?, Int32
     ) {
@@ -145,7 +116,16 @@ extension XCTestReport {
         }
         testActivitiesCacheLock.unlock()
 
-        // Prefer xcresulttool activities for timeline fidelity.
+        // Prefer SQL for speed. Fall back to xcresulttool if SQL has no timeline rows.
+        if let activities = loadTestActivitiesFromDatabase(for: testIdentifier),
+            activities.testRuns.contains(where: { !$0.activities.isEmpty })
+        {
+            testActivitiesCacheLock.lock()
+            testActivitiesCache[cacheKey] = activities
+            testActivitiesCacheLock.unlock()
+            return activities
+        }
+
         let cmd = [
             "xcrun", "xcresulttool", "get", "test-results", "activities", "--test-id",
             testIdentifier, "--path", xcresultPath, "--format", "json", "--compact",
@@ -154,23 +134,6 @@ extension XCTestReport {
         if exitCode == 0, let output, let data = output.data(using: .utf8),
             let activities = try? JSONDecoder().decode(TestActivities.self, from: data)
         {
-            testActivitiesCacheLock.lock()
-            testActivitiesCache[cacheKey] = activities
-            testActivitiesCacheLock.unlock()
-            return activities
-        }
-
-        // Fallback: direct SQL extraction if xcresulttool is unavailable or fails.
-        if let activities = loadTestActivitiesFromDatabase(for: testIdentifier),
-            activitiesContainRichTimelineData(activities)
-        {
-            testActivitiesCacheLock.lock()
-            testActivitiesCache[cacheKey] = activities
-            testActivitiesCacheLock.unlock()
-            return activities
-        }
-
-        if let activities = loadTestActivitiesFromDatabase(for: testIdentifier) {
             testActivitiesCacheLock.lock()
             testActivitiesCache[cacheKey] = activities
             testActivitiesCacheLock.unlock()
@@ -241,10 +204,36 @@ extension XCTestReport {
         guard let db else { return [] }
 
         let activityQuery = """
-            SELECT ROWID, title, startTime, failureIDs, parent_fk, orderInParent
-            FROM Activities
-            WHERE testCaseRun_fk = ?
-            ORDER BY orderInParent, startTime, ROWID
+            WITH RECURSIVE activity_tree(
+                id,
+                parent_fk,
+                title,
+                start_time,
+                failure_ids,
+                order_in_parent
+            ) AS (
+                SELECT
+                    ROWID,
+                    parent_fk,
+                    title,
+                    startTime,
+                    failureIDs,
+                    orderInParent
+                FROM Activities
+                WHERE testCaseRun_fk = ?
+                UNION
+                SELECT
+                    child.ROWID,
+                    child.parent_fk,
+                    child.title,
+                    child.startTime,
+                    child.failureIDs,
+                    child.orderInParent
+                FROM Activities child
+                JOIN activity_tree parent ON child.parent_fk = parent.id
+            )
+            SELECT id, title, start_time, failure_ids, parent_fk, order_in_parent
+            FROM activity_tree
             """
         var activityStmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, activityQuery, -1, &activityStmt, nil) == SQLITE_OK else {
@@ -334,10 +323,19 @@ extension XCTestReport {
     private func loadAttachments(for runId: Int64, db: OpaquePointer?) -> [Int64: [ActivityAttachmentRow]] {
         guard let db else { return [:] }
         let attachmentQuery = """
+            WITH RECURSIVE activity_tree(id) AS (
+                SELECT ROWID
+                FROM Activities
+                WHERE testCaseRun_fk = ?
+                UNION
+                SELECT child.ROWID
+                FROM Activities child
+                JOIN activity_tree parent ON child.parent_fk = parent.id
+            )
             SELECT a.activity_fk, a.name, a.timestamp
             FROM Attachments a
-            JOIN Activities act ON a.activity_fk = act.ROWID
-            WHERE act.testCaseRun_fk = ? AND a.name IS NOT NULL
+            JOIN activity_tree tree ON a.activity_fk = tree.id
+            WHERE a.name IS NOT NULL
             """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, attachmentQuery, -1, &stmt, nil) == SQLITE_OK else {

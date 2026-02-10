@@ -159,6 +159,13 @@ extension XCTestReport {
         return trimmed.isEmpty ? rawName : trimmed
     }
 
+    func isSynthesizedEventAttachmentName(_ rawName: String) -> Bool {
+        let lowered = rawName.lowercased()
+        return lowered.contains("synthesized event")
+            || lowered.contains("kxctattachmentlegacysynthesizedevent")
+            || lowered.contains("synthesizedevent")
+    }
+
     func attachmentIconLabel(for previewKind: String) -> String {
         switch previewKind {
         case "image":
@@ -643,7 +650,7 @@ extension XCTestReport {
         for node in flatNodes {
             for attachment in node.attachments {
                 guard
-                    attachment.name.localizedCaseInsensitiveContains("synthesized event"),
+                    isSynthesizedEventAttachmentName(attachment.name),
                     let relativePath = attachment.relativePath
                 else { continue }
 
@@ -677,9 +684,12 @@ extension XCTestReport {
         if includeManifestFallback {
             for attachment in attachmentsByTestIdentifier[testIdentifier] ?? [] {
                 let label = attachment.suggestedHumanReadableName ?? attachment.exportedFileName
-                guard label.localizedCaseInsensitiveContains("synthesized event") else { continue }
+                guard isSynthesizedEventAttachmentName(label) else { continue }
                 guard !seenExportedFiles.contains(attachment.exportedFileName) else { continue }
-                guard let baseTimestamp = parseSynthesizedEventTimestamp(from: label) else { continue }
+                guard
+                    let baseTimestamp =
+                        attachment.timestamp ?? parseSynthesizedEventTimestamp(from: label)
+                else { continue }
 
                 let filePath = (attachmentRoot as NSString).appendingPathComponent(
                     attachment.exportedFileName)

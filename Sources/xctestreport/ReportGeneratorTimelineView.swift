@@ -433,7 +433,9 @@ extension XCTestReport {
         if !videoSources.isEmpty {
             mediaMode = "video"
             layoutClass = ""
-            if videoSources.count > 1 {
+            let runBoundVideos = videoSources.count > 1
+                && videoSources.allSatisfy { $0.runIndex != nil }
+            if videoSources.count > 1 && !runBoundVideos {
                 let options = videoSources.enumerated().map { index, source in
                     "<option value=\"\(index)\">\(htmlEscape(source.label))</option>"
                 }.joined(separator: "")

@@ -689,6 +689,36 @@
     }
   }
 
+  function runIndexForVideoCard(card) {
+    if (!card) return null;
+    var runIndexValue = card.getAttribute('data-run-index');
+    if (runIndexValue == null || runIndexValue === '') return null;
+    var parsed = parseInt(runIndexValue, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  function desiredVideoIndexForRun(runIndex) {
+    if (!cards.length) return -1;
+    for (var index = 0; index < cards.length; index += 1) {
+      if (runIndexForVideoCard(cards[index]) === runIndex) {
+        return index;
+      }
+    }
+    return -1;
+  }
+
+  function syncVideoSelectionForRun(runIndex, preserveAbsoluteTime) {
+    if (!cards.length) return;
+    var desiredVideoIndex = desiredVideoIndexForRun(runIndex);
+    if (desiredVideoIndex < 0) return;
+    if (selector) {
+      selector.value = String(desiredVideoIndex);
+    }
+    if (desiredVideoIndex !== activeIndex) {
+      setActiveVideoCard(desiredVideoIndex, preserveAbsoluteTime);
+    }
+  }
+
   function applyRunState(nextRunIndex, preserveAbsoluteTime) {
     if (!runStates.length) {
       clearScrubPreview();
@@ -714,25 +744,7 @@
     var absoluteTimeBefore = preserveAbsoluteTime ? currentAbsoluteTime() : null;
     var clampedIndex = Math.max(0, Math.min(runStates.length - 1, Number(nextRunIndex) || 0));
     activeRunIndex = clampedIndex;
-
-    if (selector && cards.length) {
-      var desiredVideoIndex = -1;
-      for (var i = 0; i < cards.length; i += 1) {
-        var card = cards[i];
-        if (!card) continue;
-        var runIndexValue = card.getAttribute('data-run-index');
-        if (runIndexValue != null && runIndexValue !== '') {
-          if (parseInt(runIndexValue, 10) === activeRunIndex) {
-            desiredVideoIndex = i;
-            break;
-          }
-        }
-      }
-      if (desiredVideoIndex >= 0 && desiredVideoIndex !== activeIndex) {
-        selector.value = String(desiredVideoIndex);
-        setActiveVideoCard(desiredVideoIndex, preserveAbsoluteTime);
-      }
-    }
+    syncVideoSelectionForRun(activeRunIndex, preserveAbsoluteTime);
 
     runPanels.forEach(function(panel, panelIndex) {
       panel.style.display = panelIndex === activeRunIndex ? '' : 'none';
@@ -2992,25 +3004,7 @@
     if (runSelector) {
       runSelector.value = String(initialRunIndex);
     }
-
-    if (selector) {
-      var desiredVideoIndex = -1;
-      for (var i = 0; i < cards.length; i += 1) {
-        var card = cards[i];
-        if (!card) continue;
-        var runIndexValue = card.getAttribute('data-run-index');
-        if (runIndexValue != null && runIndexValue !== '') {
-          if (parseInt(runIndexValue, 10) === initialRunIndex) {
-            desiredVideoIndex = i;
-            break;
-          }
-        }
-      }
-      if (desiredVideoIndex >= 0) {
-        selector.value = String(desiredVideoIndex);
-        setActiveVideoCard(desiredVideoIndex, false);
-      }
-    }
+    syncVideoSelectionForRun(initialRunIndex, false);
 
     setPlayButtonIcon(false);
     var startingVideo = getActiveVideo();

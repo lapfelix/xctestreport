@@ -370,6 +370,39 @@ extension XCTestReport {
         return String(format: "%02d:%02d", minutes, seconds)
     }
 
+    struct ActivityAttachmentReference {
+        let name: String
+        let payloadId: String?
+        let timestamp: Double?
+        let runIndex: Int
+    }
+
+    func collectActivityAttachmentReferences(
+        from activities: [TestActivity],
+        runIndex: Int,
+        into storage: inout [ActivityAttachmentReference]
+    ) {
+        for activity in activities {
+            for attachment in activity.attachments ?? [] {
+                storage.append(
+                    ActivityAttachmentReference(
+                        name: attachment.name,
+                        payloadId: attachment.payloadId,
+                        timestamp: attachment.timestamp,
+                        runIndex: runIndex
+                    )
+                )
+            }
+            if let children = activity.childActivities {
+                collectActivityAttachmentReferences(
+                    from: children,
+                    runIndex: runIndex,
+                    into: &storage
+                )
+            }
+        }
+    }
+
     func collectActivityAttachmentTimestamps(
         from activities: [TestActivity], into storage: inout [String: [Double]]
     ) {
@@ -953,27 +986,88 @@ extension XCTestReport {
 
         let activityRuns = activities?.testRuns ?? []
         let rootActivities = activityRuns.flatMap { $0.activities }
-        var attachmentTimestamps = [String: [Double]]()
-        var attachmentRunIndex = [String: Int]()
+        let fallbackStartTime = collectEarliestActivityTimestamp(from: rootActivities)
+
+        var attachmentReferences = [ActivityAttachmentReference]()
+        attachmentReferences.reserveCapacity(256)
         if activityRuns.isEmpty {
-            collectActivityAttachmentTimestamps(from: rootActivities, into: &attachmentTimestamps)
+            collectActivityAttachmentReferences(
+                from: rootActivities,
+                runIndex: 0,
+                into: &attachmentReferences
+            )
         } else {
             for (runIndex, run) in activityRuns.enumerated() {
-                var runTimestamps = [String: [Double]]()
-                collectActivityAttachmentTimestamps(from: run.activities, into: &runTimestamps)
-                for (key, values) in runTimestamps {
-                    attachmentTimestamps[key, default: []].append(contentsOf: values)
-                    if attachmentRunIndex[key] == nil {
-                        attachmentRunIndex[key] = runIndex
-                    }
-                }
+                collectActivityAttachmentReferences(
+                    from: run.activities,
+                    runIndex: runIndex,
+                    into: &attachmentReferences
+                )
             }
         }
-        let fallbackStartTime = collectEarliestActivityTimestamp(from: rootActivities)
+
+        var payloadTimestamps = [String: [Double]]()
+        var payloadRunIndex = [String: Int]()
+        var nameReferences = [String: [ActivityAttachmentReference]]()
+
+        for reference in attachmentReferences {
+            nameReferences[reference.name, default: []].append(reference)
+            guard let payloadId = reference.payloadId,
+                !payloadId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else { continue }
+
+            if let timestamp = reference.timestamp {
+                payloadTimestamps[payloadId, default: []].append(timestamp)
+            }
+            if payloadRunIndex[payloadId] == nil {
+                payloadRunIndex[payloadId] = reference.runIndex
+            }
+        }
+
+        func bestNameReference(
+            for label: String,
+            around timestamp: Double?
+        ) -> ActivityAttachmentReference? {
+            guard let candidates = nameReferences[label], !candidates.isEmpty else { return nil }
+            guard let timestamp else { return candidates.first }
+
+            var bestMatch: ActivityAttachmentReference?
+            var bestDistance = Double.greatestFiniteMagnitude
+            for candidate in candidates {
+                guard let candidateTimestamp = candidate.timestamp else { continue }
+                let distance = abs(candidateTimestamp - timestamp)
+                if distance < bestDistance {
+                    bestDistance = distance
+                    bestMatch = candidate
+                }
+            }
+            return bestMatch ?? candidates.first
+        }
 
         return videoAttachments.map { attachment in
             let label = attachment.suggestedHumanReadableName ?? attachment.exportedFileName
-            let startTime = attachmentTimestamps[label]?.min() ?? fallbackStartTime
+            let payloadId = attachment.payloadRefId?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let normalizedPayloadId = payloadId?.isEmpty == true ? nil : payloadId
+
+            var resolvedRunIndex: Int? = nil
+            var resolvedStartTime: Double? = nil
+
+            if let payloadId = normalizedPayloadId {
+                resolvedRunIndex = payloadRunIndex[payloadId]
+                resolvedStartTime = payloadTimestamps[payloadId]?.min()
+            }
+
+            if let nameMatch = bestNameReference(for: label, around: attachment.timestamp) {
+                if resolvedRunIndex == nil {
+                    resolvedRunIndex = nameMatch.runIndex
+                }
+                if resolvedStartTime == nil {
+                    resolvedStartTime = nameMatch.timestamp
+                }
+            }
+
+            let startTime = resolvedStartTime ?? attachment.timestamp ?? fallbackStartTime
 
             return VideoSource(
                 label: label,
@@ -981,7 +1075,7 @@ extension XCTestReport {
                 mimeType: videoMimeType(for: attachment.exportedFileName),
                 startTime: startTime,
                 failureAssociated: attachment.isAssociatedWithFailure ?? false,
-                runIndex: attachmentRunIndex[label]
+                runIndex: resolvedRunIndex
             )
         }
     }

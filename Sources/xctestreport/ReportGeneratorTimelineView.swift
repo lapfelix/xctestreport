@@ -160,36 +160,11 @@ extension XCTestReport {
         return compressedData
     }
 
-    private func writeCompressedTimelinePayloadLoaderScript(
-        runStatesSrc: String,
-        screenshotSrc: String,
-        compressedRunStates: Data,
-        compressedScreenshots: Data,
-        payloadDir: String,
-        payloadBaseName: String
-    ) -> String? {
-        let loaderFileName = payloadBaseName + ".payload.js"
-        let loaderPath = (payloadDir as NSString).appendingPathComponent(loaderFileName)
-        let runStatesBase64 = compressedRunStates.base64EncodedString()
-        let screenshotBase64 = compressedScreenshots.base64EncodedString()
-
-        let script = """
-            (function(){var store=window.__xctestreportTimelinePayloads=window.__xctestreportTimelinePayloads||{};store["\(runStatesSrc)"]="\(runStatesBase64)";store["\(screenshotSrc)"]="\(screenshotBase64)";})();
-            """
-
-        do {
-            try script.write(to: URL(fileURLWithPath: loaderPath), atomically: true, encoding: .utf8)
-        } catch {
-            return nil
-        }
-        return timelinePayloadRelativePathForTestPage(fileName: loaderFileName)
-    }
-
     private func writeCompressedTimelinePayloads(
         runStatesJSON: String,
         screenshotJSON: String,
         payloadBaseName: String
-    ) -> (runStatesSrc: String, screenshotSrc: String, loaderScriptSrc: String)? {
+    ) -> (runStatesSrc: String, screenshotSrc: String)? {
         guard let runStatesData = runStatesJSON.data(using: .utf8),
             let screenshotData = screenshotJSON.data(using: .utf8),
             let compressedRunStates = gzipCompressData(runStatesData),
@@ -221,20 +196,7 @@ extension XCTestReport {
 
         let runStatesSrc = timelinePayloadRelativePathForTestPage(fileName: runStatesFileName)
         let screenshotSrc = timelinePayloadRelativePathForTestPage(fileName: screenshotFileName)
-        let loaderScriptSrc = writeCompressedTimelinePayloadLoaderScript(
-            runStatesSrc: runStatesSrc,
-            screenshotSrc: screenshotSrc,
-            compressedRunStates: compressedRunStates,
-            compressedScreenshots: compressedScreenshots,
-            payloadDir: payloadDir,
-            payloadBaseName: payloadBaseName
-        ) ?? ""
-
-        return (
-            runStatesSrc,
-            screenshotSrc,
-            loaderScriptSrc
-        )
+        return (runStatesSrc, screenshotSrc)
     }
 
     private func encodeCompactRunStatesJSON(_ runStates: [TimelineRunState]) -> String {
@@ -433,11 +395,10 @@ extension XCTestReport {
         let runStatesJSON: String = {
             return encodeCompactRunStatesJSON(runStates)
         }()
-        var runStatesInlineJSON = runStatesJSON
-        var screenshotInlineJSON = screenshotJSON
+        let runStatesInlineJSON = runStatesJSON
+        let screenshotInlineJSON = screenshotJSON
         var runStatesSrc = ""
         var screenshotSrc = ""
-        var payloadLoaderScript = ""
 
         if let payloadBaseName, !payloadBaseName.isEmpty,
             let payloadPaths = writeCompressedTimelinePayloads(
@@ -447,12 +408,6 @@ extension XCTestReport {
         {
             runStatesSrc = payloadPaths.runStatesSrc
             screenshotSrc = payloadPaths.screenshotSrc
-            if !payloadPaths.loaderScriptSrc.isEmpty {
-                payloadLoaderScript =
-                    "<script src=\"\(htmlEscape(payloadPaths.loaderScriptSrc))\"></script>"
-            }
-            runStatesInlineJSON = "[]"
-            screenshotInlineJSON = "[]"
         }
 
         let runSelectorHTML: String = {
@@ -589,7 +544,7 @@ extension XCTestReport {
                     "screenshot_json": jsonForScriptTag(screenshotInlineJSON),
                     "run_states_src": htmlEscape(runStatesSrc),
                     "screenshot_src": htmlEscape(screenshotSrc),
-                    "payload_loader_script": payloadLoaderScript,
+                    "payload_loader_script": "",
                 ],
                 templateName: "timeline-section.html")
         } catch {

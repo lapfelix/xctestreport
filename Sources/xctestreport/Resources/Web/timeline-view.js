@@ -818,7 +818,7 @@
       return Promise.resolve(buffer);
     }
     if (typeof DecompressionStream !== 'function') {
-      return Promise.reject(new Error('This browser cannot decompress gzip plist previews.'));
+      return Promise.reject(new Error('This browser cannot decompress gzip timeline payloads.'));
     }
 
     try {

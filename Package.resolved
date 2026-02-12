@@ -2,12 +2,30 @@
   "object": {
     "pins": [
       {
+        "package": "GzipSwift",
+        "repositoryURL": "https://github.com/1024jp/GzipSwift.git",
+        "state": {
+          "branch": null,
+          "revision": "56bf51fdd2fe4b2cf254b2cf34aede3d7caccc6c",
+          "version": "6.1.0"
+        }
+      },
+      {
         "package": "swift-argument-parser",
         "repositoryURL": "https://github.com/apple/swift-argument-parser.git",
         "state": {
           "branch": null,
           "revision": "41982a3656a71c768319979febd796c6fd111d5c",
           "version": "1.5.0"
+        }
+      },
+      {
+        "package": "zstd",
+        "repositoryURL": "https://github.com/facebook/zstd.git",
+        "state": {
+          "branch": "dev",
+          "revision": "1168da0e567960d50cba1b58c9b0ba047ece4733",
+          "version": null
         }
       }
     ]

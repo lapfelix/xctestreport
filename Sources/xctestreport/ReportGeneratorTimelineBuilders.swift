@@ -1,5 +1,7 @@
 import Dispatch
 import Foundation
+import Gzip
+import libzstd
 
 extension XCTestReport {
     func videoMimeType(for fileName: String) -> String {
@@ -509,31 +511,59 @@ extension XCTestReport {
         return nil
     }
 
-    func runAttachmentDecompressionCommand(_ command: String, filePath: String) -> Data? {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        if command == "zstd" {
-            task.arguments = [command, "-d", "-c", filePath]
-        } else {
-            task.arguments = [command, "-c", filePath]
-        }
-
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-        task.standardOutput = outputPipe
-        task.standardError = errorPipe
-
+    func decompressGzipData(_ compressedData: Data) -> Data? {
         do {
-            try task.run()
+            return try compressedData.gunzipped()
         } catch {
             return nil
         }
+    }
 
-        let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
-        _ = errorPipe.fileHandleForReading.readDataToEndOfFile()
-        task.waitUntilExit()
-        guard task.terminationStatus == 0, !data.isEmpty else { return nil }
-        return data
+    func decompressZstdData(_ compressedData: Data) -> Data? {
+        guard !compressedData.isEmpty else { return Data() }
+        guard let stream = ZSTD_createDStream() else { return nil }
+        defer { ZSTD_freeDStream(stream) }
+
+        let initResult = ZSTD_initDStream(stream)
+        guard ZSTD_isError(initResult) == 0 else { return nil }
+
+        let outputChunkSize = max(1, Int(ZSTD_DStreamOutSize()))
+        var outputChunk = [UInt8](repeating: 0, count: outputChunkSize)
+        var decompressed = Data()
+
+        let decompressedData: Data? = compressedData.withUnsafeBytes { rawBuffer in
+            guard let baseAddress = rawBuffer.baseAddress else { return Data() }
+
+            var input = ZSTD_inBuffer(
+                src: baseAddress,
+                size: rawBuffer.count,
+                pos: 0
+            )
+
+            while input.pos < input.size {
+                var producedBytes = 0
+                let decodeResult = outputChunk.withUnsafeMutableBytes { outputBytes in
+                    var output = ZSTD_outBuffer(
+                        dst: outputBytes.baseAddress,
+                        size: outputBytes.count,
+                        pos: 0
+                    )
+                    let result = ZSTD_decompressStream(stream, &output, &input)
+                    producedBytes = Int(output.pos)
+                    return result
+                }
+                if ZSTD_isError(decodeResult) != 0 {
+                    return nil
+                }
+                if producedBytes > 0 {
+                    decompressed.append(contentsOf: outputChunk.prefix(producedBytes))
+                }
+            }
+
+            return decompressed
+        }
+
+        return decompressedData
     }
 
     func isZstdCompressedData(_ data: Data) -> Bool {
@@ -547,17 +577,18 @@ extension XCTestReport {
     func readAttachmentData(at filePath: String) -> Data? {
         let fileURL = URL(fileURLWithPath: filePath)
         if fileURL.pathExtension.caseInsensitiveCompare("gz") == .orderedSame {
-            return runAttachmentDecompressionCommand("gunzip", filePath: filePath)
+            guard let compressed = FileManager.default.contents(atPath: filePath) else {
+                return nil
+            }
+            return decompressGzipData(compressed)
         }
 
         guard let data = FileManager.default.contents(atPath: filePath) else {
             return nil
         }
 
-        if isZstdCompressedData(data),
-            let decompressed = runAttachmentDecompressionCommand("zstd", filePath: filePath)
-        {
-            return decompressed
+        if isZstdCompressedData(data) {
+            return decompressZstdData(data)
         }
 
         return data

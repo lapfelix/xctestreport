@@ -295,6 +295,7 @@ extension XCTestReport {
                 sourceLocationBySymbol: sourceLocationBySymbol,
                 nextId: &nextId)
             let collapsedTimelineNodes = collapseRepeatedTimelineNodes(timelineNodes)
+            let terminalFailureIDs = terminalFailureNodeIDs(in: collapsedTimelineNodes)
 
             var flatNodes = [TimelineNode]()
             flattenTimelineNodes(collapsedTimelineNodes, into: &flatNodes)
@@ -315,7 +316,8 @@ extension XCTestReport {
             let events = timestampedNodes.map { node in
                 let startTime = node.timestamp ?? timelineBaseTime
                 let endTime = max(startTime, node.endTimestamp ?? startTime)
-                let kind = timelineEventKind(for: node)
+                let kind = timelineEventKind(
+                    for: node, terminalFailureNodeIDs: terminalFailureIDs)
                 return TimelineEventEntry(
                     id: node.id,
                     title: timelineDisplayTitle(node, baseTime: timelineBaseTime),
@@ -324,7 +326,9 @@ extension XCTestReport {
                     kind: kind
                 )
             }
-            let initialFailureEventIndex = timestampedNodes.firstIndex { $0.failureAssociated } ?? -1
+            let initialFailureEventIndex = timestampedNodes.firstIndex {
+                terminalFailureIDs.contains($0.id)
+            } ?? -1
             let firstEventLabel =
                 events.first?.title ?? "No event selected"
 

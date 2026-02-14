@@ -408,9 +408,20 @@
   var PLAY_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 6V18L18 12Z"></path></svg>';
   var PAUSE_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="6" width="4" height="12" rx="1"></rect><rect x="13" y="6" width="4" height="12" rx="1"></rect></svg>';
 
+  function hasFailureDescendantNode(node) {
+    if (!node || !(node instanceof Element)) return false;
+    var container = node.closest('li.timeline-node');
+    if (!container) return false;
+    var descendantFailures = container.querySelectorAll('.timeline-event.timeline-failure');
+    for (var index = 0; index < descendantFailures.length; index += 1) {
+      if (descendantFailures[index] !== node) return true;
+    }
+    return false;
+  }
+
   function fallbackEventKindFromNode(node) {
     if (!node || !node.classList) return 'event';
-    if (node.classList.contains('timeline-failure')) return 'error';
+    if (node.classList.contains('timeline-failure') && !hasFailureDescendantNode(node)) return 'error';
     if (node.classList.contains('timeline-touch')) return 'tap';
     if (node.classList.contains('timeline-hierarchy')) return 'hierarchy';
     return 'event';

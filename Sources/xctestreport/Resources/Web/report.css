@@ -2206,8 +2206,13 @@ button#toggle-all {
     .test-detail-page .timeline-video-layout {
         grid-template-columns: 1fr;
         grid-template-rows: auto auto;
-        gap: 10px;
+        gap: 8px;
         height: auto;
+    }
+
+    .test-detail-page .video-panel {
+        padding: 8px;
+        gap: 6px;
     }
 
     .test-detail-page .timeline-video-layout.timeline-layout-single {
@@ -2220,16 +2225,66 @@ button#toggle-all {
     }
 
     .test-detail-page .timeline-video-card {
-        width: min(100%, 320px);
+        width: 100%;
+        max-width: 100%;
+    }
+
+    .test-detail-page .video-selector {
+        width: 100%;
+        max-width: 100%;
+        padding: 7px 9px;
+        font-size: 0.94rem;
     }
 
     .test-detail-page .timeline-video-frame {
-        max-height: 58vh;
+        max-height: min(62vh, 520px);
     }
 
     .test-detail-page .timeline-video-section {
         height: auto;
         grid-template-rows: auto auto;
+        gap: 8px;
+        padding: 8px;
+    }
+
+    .test-detail-page .timeline-controls {
+        padding: 10px 10px 12px;
+        gap: 10px;
+    }
+
+    .test-detail-page .timeline-scrubber {
+        --timeline-track-height: 10px;
+        --timeline-thumb-size: 18px;
+        --timeline-hit-height: 32px;
+    }
+
+    .test-detail-page .timeline-marker-legend {
+        font-size: 0.72rem;
+        line-height: 1.15;
+        gap: 6px 10px;
+    }
+
+    .test-detail-page .timeline-timebar {
+        font-size: 0.88rem;
+    }
+
+    .test-detail-page .timeline-button {
+        width: 40px;
+        height: 34px;
+    }
+
+    .test-detail-page .timeline-button-play {
+        width: 46px;
+    }
+
+    .test-detail-page .timeline-icon {
+        width: 18px;
+        height: 18px;
+    }
+
+    .test-detail-page .timeline-button-play .timeline-icon {
+        width: 19px;
+        height: 19px;
     }
 
     .test-detail-page .test-meta-content {

@@ -1339,8 +1339,33 @@ extension XCTestReport {
         return loweredTitle.contains("ui hierarchy") || hasHierarchyAttachment
     }
 
-    func timelineEventKind(for node: TimelineNode) -> TimelineEventKind {
-        if node.failureAssociated {
+    func terminalFailureNodeIDs(in nodes: [TimelineNode]) -> Set<String> {
+        var terminalNodeIDs = Set<String>()
+
+        func walk(_ node: TimelineNode) -> Bool {
+            var hasFailureInChildren = false
+            for child in node.children {
+                if walk(child) {
+                    hasFailureInChildren = true
+                }
+            }
+
+            if node.failureAssociated && !hasFailureInChildren {
+                terminalNodeIDs.insert(node.id)
+            }
+
+            return node.failureAssociated || hasFailureInChildren
+        }
+
+        for node in nodes {
+            _ = walk(node)
+        }
+
+        return terminalNodeIDs
+    }
+
+    func timelineEventKind(for node: TimelineNode, terminalFailureNodeIDs: Set<String>) -> TimelineEventKind {
+        if terminalFailureNodeIDs.contains(node.id) {
             return .error
         }
         if timelineNodeHasInteraction(node) {

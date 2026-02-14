@@ -2170,6 +2170,10 @@ button#toggle-all {
         min-width: 0;
     }
 
+    .test-detail-page .video-panel .hierarchy-side-panel.is-collapsed {
+        display: none;
+    }
+
     .test-detail-page .test-detail-shell {
         gap: 6px;
         padding: 8px;
@@ -2216,8 +2220,22 @@ button#toggle-all {
     }
 
     .test-detail-page .timeline-video-layout.timeline-layout-single {
+        grid-template-rows: auto;
+        height: auto;
+        align-content: start;
+    }
+
+    .test-detail-page .timeline-video-layout[data-media-mode="none"].timeline-layout-single {
         grid-template-rows: minmax(0, 1fr);
         height: 100%;
+    }
+
+    .test-detail-page .timeline-video-layout[data-media-mode="video"] {
+        align-content: start;
+    }
+
+    .test-detail-page .timeline-video-layout[data-media-mode="video"] .video-panel {
+        align-content: start;
     }
 
     .test-detail-page .timeline-video-layout.timeline-layout-single .timeline-tree {

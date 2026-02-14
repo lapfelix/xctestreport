@@ -404,6 +404,9 @@
   var hierarchyHighlightRenderKey = '';
   var hierarchyInspectorRenderKey = '';
   var hierarchyCandidateSelectionKey = '';
+  var hierarchyPanelTransitionRefreshFrame = 0;
+  var hierarchyPanelTransitionRefreshUntil = 0;
+  var hierarchyOverlayClickToken = 0;
   var suppressTimelineToggleRefresh = false;
   var PLAY_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 6V18L18 12Z"></path></svg>';
   var PAUSE_ICON = '<svg class="timeline-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="6" width="4" height="12" rx="1"></rect><rect x="13" y="6" width="4" height="12" rx="1"></rect></svg>';
@@ -1423,6 +1426,38 @@
     updateLayoutSplitterAria(currentLeftPanelWidth(), layoutSplitBounds());
   }
 
+  function scheduleHierarchyPanelTransitionRefresh(durationMs) {
+    var duration = Math.max(0, Number(durationMs) || 0);
+    var now = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function')
+      ? performance.now()
+      : Date.now();
+    var refreshUntil = now + duration;
+    if (refreshUntil > hierarchyPanelTransitionRefreshUntil) {
+      hierarchyPanelTransitionRefreshUntil = refreshUntil;
+    }
+    if (hierarchyPanelTransitionRefreshFrame) return;
+
+    function refreshStep(frameTime) {
+      hierarchyPanelTransitionRefreshFrame = 0;
+      updateActiveMediaLayout();
+      updateTouchOverlay();
+      scheduleHierarchyOverlayUpdate(true);
+
+      var currentTime = Number.isFinite(frameTime)
+        ? frameTime
+        : ((typeof performance !== 'undefined' && performance && typeof performance.now === 'function')
+          ? performance.now()
+          : Date.now());
+      if (currentTime < (hierarchyPanelTransitionRefreshUntil - 1)) {
+        hierarchyPanelTransitionRefreshFrame = requestAnimationFrame(refreshStep);
+      } else {
+        hierarchyPanelTransitionRefreshUntil = 0;
+      }
+    }
+
+    hierarchyPanelTransitionRefreshFrame = requestAnimationFrame(refreshStep);
+  }
+
   function escapeHTML(value) {
     return String(value == null ? '' : value)
       .replace(/&/g, '&amp;')
@@ -1470,6 +1505,7 @@
     updateTouchOverlay();
     clearHierarchyRenderCaches();
     updateHierarchyOverlay();
+    scheduleHierarchyPanelTransitionRefresh(260);
   }
 
   function refreshHierarchyPanelVisibility() {
@@ -1484,6 +1520,7 @@
     }
     clearHierarchyRenderCaches();
     updateActiveMediaLayout();
+    scheduleHierarchyPanelTransitionRefresh(120);
   }
 
   function updateHierarchyCandidateSelectionState() {
@@ -1936,9 +1973,8 @@
 
   function handleHierarchyOverlayClick(event, layer) {
     if (!layer) return;
-    var snapshot = hierarchySnapshotById(currentHierarchySnapshotId);
     var media = getActiveMediaElement();
-    if (!snapshot || !media || snapshot.width <= 0 || snapshot.height <= 0) return;
+    if (!media) return;
 
     var layerRect = layer.getBoundingClientRect();
     var localX = event.clientX - layerRect.left;
@@ -1950,26 +1986,49 @@
       return;
     }
 
+    event.preventDefault();
+    event.stopPropagation();
+
     var normalizedX = (localX - mediaRect.x) / Math.max(1, mediaRect.width);
     var normalizedY = (localY - mediaRect.y) / Math.max(1, mediaRect.height);
-    var hierarchyX = normalizedX * snapshot.width;
-    var hierarchyY = normalizedY * snapshot.height;
-    var pointLabel = '(' + Number(hierarchyX).toFixed(0) + ', ' + Number(hierarchyY).toFixed(0) + ')';
-    var candidates = hierarchyElementsAtPoint(snapshot, hierarchyX, hierarchyY);
+    var clickToken = ++hierarchyOverlayClickToken;
 
-    if (!candidates.length) {
-      selectedHierarchyElementId = null;
-      hoveredHierarchyElementId = null;
-      showHierarchyCandidateEmpty(snapshot, 'No elements at this point.', pointLabel);
-      updateHierarchyOverlay();
-      event.preventDefault();
-      event.stopPropagation();
+    function applySelectionFromClick() {
+      if (clickToken !== hierarchyOverlayClickToken) return;
+      var snapshot = hierarchySnapshotForAbsoluteTime(currentAbsoluteTime());
+      if (!snapshot || snapshot.width <= 0 || snapshot.height <= 0) {
+        updateHierarchyOverlay();
+        return;
+      }
+
+      var hierarchyX = normalizedX * snapshot.width;
+      var hierarchyY = normalizedY * snapshot.height;
+      var pointLabel = '(' + Number(hierarchyX).toFixed(0) + ', ' + Number(hierarchyY).toFixed(0) + ')';
+      var candidates = hierarchyElementsAtPoint(snapshot, hierarchyX, hierarchyY);
+
+      if (!candidates.length) {
+        selectedHierarchyElementId = null;
+        hoveredHierarchyElementId = null;
+        showHierarchyCandidateEmpty(snapshot, 'No elements at this point.', pointLabel);
+        updateHierarchyOverlay();
+        return;
+      }
+
+      openHierarchyCandidateMenu(snapshot, candidates, pointLabel);
+      scheduleHierarchyPanelTransitionRefresh(200);
+    }
+
+    var shouldDeferSelection = !!(hierarchyPanel && !hierarchyPanel.hidden && !isHierarchyPanelExpanded());
+    if (!shouldDeferSelection) {
+      applySelectionFromClick();
       return;
     }
 
-    openHierarchyCandidateMenu(snapshot, candidates, pointLabel);
-    event.preventDefault();
-    event.stopPropagation();
+    setHierarchyPanelExpanded(true);
+    requestAnimationFrame(function() {
+      requestAnimationFrame(applySelectionFromClick);
+    });
+    scheduleHierarchyPanelTransitionRefresh(260);
   }
 
   function updateHierarchyOverlay() {
@@ -2958,6 +3017,25 @@
       closeHierarchyMenu();
       applyRunState(parseInt(runSelector.value || '0', 10), true);
     });
+  }
+
+  if (hierarchyPanel) {
+    var refreshOnHierarchyPanelTransition = function(event) {
+      if (!event) return;
+      var transitionTarget = event.target;
+      if (!transitionTarget || !(transitionTarget instanceof Element)) return;
+      if (!(transitionTarget === hierarchyPanel || transitionTarget.closest('.hierarchy-side-body'))) return;
+      if (event.propertyName && event.propertyName !== 'width' && event.propertyName !== 'min-width'
+        && event.propertyName !== 'opacity' && event.propertyName !== 'transform'
+        && event.propertyName !== 'padding' && event.propertyName !== 'border-width') {
+        return;
+      }
+      scheduleHierarchyPanelTransitionRefresh(120);
+    };
+    hierarchyPanel.addEventListener('transitionrun', refreshOnHierarchyPanelTransition);
+    hierarchyPanel.addEventListener('transitionstart', refreshOnHierarchyPanelTransition);
+    hierarchyPanel.addEventListener('transitionend', refreshOnHierarchyPanelTransition);
+    hierarchyPanel.addEventListener('transitioncancel', refreshOnHierarchyPanelTransition);
   }
 
   window.addEventListener('resize', function() {

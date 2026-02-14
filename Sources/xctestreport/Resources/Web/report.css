@@ -2918,3 +2918,69 @@ button#toggle-all {
         color: #b1e3bf;
     }
 }
+
+@media (max-width: 767px) and (prefers-color-scheme: dark) {
+    .summary-stats {
+        background: #141C27;
+        border: 1px solid #2F3D52;
+        box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03);
+    }
+
+    button#toggle-all {
+        background-color: #2A3447;
+        border-color: #4D6286;
+        color: #DDE8FB;
+    }
+
+    .suite {
+        margin-bottom: 10px;
+        border: 1px solid #36475F;
+        border-radius: 10px;
+        background: #151D28;
+        overflow: hidden;
+    }
+
+    h2.collapsible {
+        background: linear-gradient(180deg, #273348 0%, #212B3D 100%);
+        border-radius: 10px 10px 0 0;
+        border-bottom: 1px solid #3D5070;
+        color: #F2F6FF;
+    }
+
+    .suite-stats {
+        color: #C5D2E9;
+    }
+
+    .suite-tests-table tr {
+        background: #1A2433;
+        border-color: #3A4C67;
+        box-shadow: none;
+    }
+
+    .suite-tests-table tr.failed {
+        background: linear-gradient(180deg, #3A232D 0%, #331E28 100%);
+        border-color: #8A596A;
+    }
+
+    .suite-tests-table td {
+        background: transparent;
+        border-bottom-color: #33445F;
+        color: #D7E2F6;
+    }
+
+    .suite-tests-table td::before {
+        color: #92A6C8;
+    }
+
+    .suite-tests-table td:first-child a {
+        color: #8FBDFE;
+    }
+
+    .suite-tests-table td[data-label="Status"].failed {
+        color: #FF9A93;
+    }
+
+    .suite-tests-table td[data-label="Duration"] {
+        color: #A8BAD6;
+    }
+}

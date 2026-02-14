@@ -177,7 +177,8 @@
     };
   }
 
-  function decodeHierarchyElement(raw) {
+  function decodeHierarchyElement(raw, sourceIndex) {
+    var indexValue = Number.isFinite(sourceIndex) ? sourceIndex : -1;
     if (Array.isArray(raw)) {
       return {
         id: asString(raw[0], ''),
@@ -191,7 +192,8 @@
         y: asNumber(raw[8], 0),
         width: asNumber(raw[9], 0),
         height: asNumber(raw[10], 0),
-        properties: objectOrEmpty(raw[11])
+        properties: objectOrEmpty(raw[11]),
+        sourceIndex: indexValue
       };
     }
 
@@ -208,12 +210,14 @@
       y: asNumber(source.y, 0),
       width: asNumber(source.width != null ? source.width : source.w, 0),
       height: asNumber(source.height != null ? source.height : source.h, 0),
-      properties: objectOrEmpty(source.properties != null ? source.properties : source.p)
+      properties: objectOrEmpty(source.properties != null ? source.properties : source.p),
+      sourceIndex: indexValue
     };
   }
 
   function decodeHierarchySnapshot(raw) {
     if (Array.isArray(raw)) {
+      var compactElements = Array.isArray(raw[6]) ? raw[6] : [];
       return {
         id: asString(raw[0], ''),
         label: asString(raw[1], ''),
@@ -221,7 +225,9 @@
         width: asNumber(raw[3], 0),
         height: asNumber(raw[4], 0),
         failureAssociated: asBoolean(raw[5]),
-        elements: (Array.isArray(raw[6]) ? raw[6] : []).map(decodeHierarchyElement)
+        elements: compactElements.map(function(element, index) {
+          return decodeHierarchyElement(element, index);
+        })
       };
     }
 
@@ -234,7 +240,9 @@
       width: asNumber(source.width != null ? source.width : source.w, 0),
       height: asNumber(source.height != null ? source.height : source.h, 0),
       failureAssociated: asBoolean(source.failureAssociated != null ? source.failureAssociated : source.f),
-      elements: (Array.isArray(elements) ? elements : []).map(decodeHierarchyElement)
+      elements: (Array.isArray(elements) ? elements : []).map(function(element, index) {
+        return decodeHierarchyElement(element, index);
+      })
     };
   }
 
@@ -1899,21 +1907,107 @@
     if (!snapshot || !snapshot.elements) return [];
     var maxElementWidth = snapshot.width * 1.35;
     var maxElementHeight = snapshot.height * 1.35;
-    var seenIds = Object.create(null);
-    var matches = snapshot.elements.filter(function(element) {
-      if (!element || !element.id || seenIds[element.id]) return false;
-      seenIds[element.id] = true;
-      if (element.width <= 2 || element.height <= 2) return false;
-      if (element.width > maxElementWidth || element.height > maxElementHeight) return false;
-      if (element.x > snapshot.width + 20 || element.y > snapshot.height + 20) return false;
-      if ((element.x + element.width) < -20 || (element.y + element.height) < -20) return false;
-      return x >= element.x && y >= element.y && x <= (element.x + element.width) && y <= (element.y + element.height);
+    var bestMatchById = Object.create(null);
+    snapshot.elements.forEach(function(element) {
+      if (!element || !element.id) return;
+      if (element.width <= 2 || element.height <= 2) return;
+      if (element.width > maxElementWidth || element.height > maxElementHeight) return;
+      if (element.x > snapshot.width + 20 || element.y > snapshot.height + 20) return;
+      if ((element.x + element.width) < -20 || (element.y + element.height) < -20) return;
+      if (!(x >= element.x && y >= element.y && x <= (element.x + element.width) && y <= (element.y + element.height))) return;
+
+      var existing = bestMatchById[element.id];
+      if (!existing) {
+        bestMatchById[element.id] = element;
+        return;
+      }
+      var existingArea = Math.max(0, existing.width * existing.height);
+      var nextArea = Math.max(0, element.width * element.height);
+      if ((element.depth || 0) > (existing.depth || 0)) {
+        bestMatchById[element.id] = element;
+        return;
+      }
+      if ((element.depth || 0) === (existing.depth || 0) && nextArea < existingArea) {
+        bestMatchById[element.id] = element;
+        return;
+      }
+      if ((element.depth || 0) === (existing.depth || 0)
+        && Math.abs(nextArea - existingArea) < 0.01
+        && (element.sourceIndex || 0) > (existing.sourceIndex || 0)) {
+        bestMatchById[element.id] = element;
+      }
     });
+
+    var matches = Object.keys(bestMatchById).map(function(key) {
+      return bestMatchById[key];
+    });
+    var parentById = hierarchyParentMap(snapshot);
+
+    function isAncestorOf(ancestorId, elementId) {
+      if (!ancestorId || !elementId || ancestorId === elementId) return false;
+      var cursor = parentById[elementId];
+      var hops = 0;
+      while (cursor && hops < 128) {
+        if (cursor === ancestorId) return true;
+        cursor = parentById[cursor];
+        hops += 1;
+      }
+      return false;
+    }
+
+    function roleHitPriority(element) {
+      var role = String((element && element.role) || '').toLowerCase();
+      if (!role) return 0;
+      var snapshotArea = Math.max(1, Number(snapshot.width || 0) * Number(snapshot.height || 0));
+      var elementArea = Math.max(0, Number(element && element.width || 0) * Number(element && element.height || 0));
+      var areaRatio = elementArea / snapshotArea;
+      if (role === 'button' || role === 'link' || role === 'switch'
+        || role === 'slider' || role === 'textfield' || role === 'securetextfield'
+        || role === 'searchfield' || role === 'picker' || role === 'segmentedcontrol'
+        || role === 'tabbarbutton' || role === 'menuitem' || role === 'checkbox'
+        || role === 'radiobutton' || role === 'key' || role === 'cell'
+        || role === 'tablecell' || role === 'collectioncell') {
+        return 3;
+      }
+      if (role === 'webview' || role === 'image' || role === 'statictext' || role === 'textview') {
+        return 2;
+      }
+      if ((role === 'window' || role === 'application' || role === 'statusbar') && areaRatio >= 0.8) {
+        return -3;
+      }
+      if ((role === 'other' || role === 'group' || role === 'scrollview' || role === 'webview') && areaRatio >= 0.8) {
+        return -1;
+      }
+      if (role === 'other' || role === 'group' || role === 'scrollview') {
+        return 1;
+      }
+      if (role === 'window' || role === 'application' || role === 'statusbar') {
+        return -2;
+      }
+      return 0;
+    }
+
     matches.sort(function(a, b) {
+      var priorityA = roleHitPriority(a);
+      var priorityB = roleHitPriority(b);
+      if (priorityA !== priorityB) return priorityB - priorityA;
+
+      if (isAncestorOf(a.id, b.id)) return 1;
+      if (isAncestorOf(b.id, a.id)) return -1;
+
       var areaA = Math.max(0, a.width * a.height);
       var areaB = Math.max(0, b.width * b.height);
       if (areaA !== areaB) return areaA - areaB;
-      return (b.depth || 0) - (a.depth || 0);
+
+      var depthA = Number(a.depth || 0);
+      var depthB = Number(b.depth || 0);
+      if (depthA !== depthB) return depthB - depthA;
+
+      var sourceIndexA = Number.isFinite(a.sourceIndex) ? a.sourceIndex : -1;
+      var sourceIndexB = Number.isFinite(b.sourceIndex) ? b.sourceIndex : -1;
+      if (sourceIndexA !== sourceIndexB) return sourceIndexB - sourceIndexA;
+
+      return String(a.id || '').localeCompare(String(b.id || ''));
     });
     return matches;
   }

@@ -106,19 +106,40 @@ extension XCTestReport {
         }
         if lowered.contains("ui snapshot")
             || lowered.contains("kxctattachmentlegacysnapshot")
-            || lowered.contains("synthesized event")
-            || lowered.contains("kxctattachmentlegacysynthesizedevent")
             || lowered.contains("app ui hierarchy")
         {
             return "plist"
+        }
+        if lowered.contains("synthesized event")
+            || lowered.contains("kxctattachmentlegacysynthesizedevent")
+        {
+            // Synthesized-event payloads are often zstd-compressed keyed archives.
+            // When no generated text sidecar exists, treat them as downloadable files.
+            return "file"
         }
 
         return "file"
     }
 
     func preferredAttachmentPreviewPath(name: String, relativePath: String?) -> String? {
-        _ = name
-        return relativePath
+        guard let relativePath else { return nil }
+        guard isSynthesizedEventAttachmentName(name) else { return relativePath }
+
+        let fileName = attachmentFileName(fromRelativePath: relativePath)
+        guard !fileName.isEmpty else { return relativePath }
+
+        let previewFileName = fileName + ".preview.txt"
+        let previewAbsolutePath = (outputDir as NSString).appendingPathComponent(
+            "attachments/\(previewFileName)")
+        guard FileManager.default.fileExists(atPath: previewAbsolutePath) else {
+            return relativePath
+        }
+
+        let parentPath = (relativePath as NSString).deletingLastPathComponent
+        if parentPath.isEmpty {
+            return previewFileName
+        }
+        return (parentPath as NSString).appendingPathComponent(previewFileName)
     }
 
     func inlineAttachmentPreviewHTML(name: String, previewRelativePath: String?) -> String {
@@ -671,6 +692,74 @@ extension XCTestReport {
         return formatter.date(from: label)?.timeIntervalSince1970
     }
 
+    func synthesizedEventPreviewText(
+        fileName: String,
+        baseTimestamp: Double,
+        overlay: TouchGestureOverlay?
+    ) -> String {
+        var lines = [String]()
+        lines.append("Synthesized Event Preview")
+        lines.append("Attachment: \(fileName)")
+        lines.append("Base Timestamp (unix): \(String(format: "%.6f", baseTimestamp))")
+
+        guard let overlay else {
+            lines.append("")
+            lines.append("Unable to parse this synthesized event payload.")
+            lines.append("The raw attachment may be a compressed keyed archive.")
+            return lines.joined(separator: "\n")
+        }
+
+        let duration = max(0, overlay.endTime - overlay.startTime)
+        let widthLabel = max(0, overlay.width)
+        let heightLabel = max(0, overlay.height)
+        lines.append("Window: \(String(format: "%.1f", widthLabel)) x \(String(format: "%.1f", heightLabel))")
+        lines.append("Points: \(overlay.points.count)")
+        lines.append("Duration: \(String(format: "%.3f", duration))s")
+        lines.append("Start (unix): \(String(format: "%.6f", overlay.startTime))")
+        lines.append("End (unix): \(String(format: "%.6f", overlay.endTime))")
+
+        if let first = overlay.points.first, let last = overlay.points.last {
+            lines.append(
+                "First point: x \(String(format: "%.1f", first.x)), y \(String(format: "%.1f", first.y))")
+            lines.append(
+                "Last point: x \(String(format: "%.1f", last.x)), y \(String(format: "%.1f", last.y))")
+        }
+
+        lines.append("")
+        lines.append("Sample points (offset, x, y):")
+        let sampleLimit = 24
+        for point in overlay.points.prefix(sampleLimit) {
+            let offset = max(0, point.time - overlay.startTime)
+            lines.append(
+                "  +\(String(format: "%.3f", offset))s  x=\(String(format: "%.1f", point.x))  y=\(String(format: "%.1f", point.y))"
+            )
+        }
+        if overlay.points.count > sampleLimit {
+            lines.append("  ... \(overlay.points.count - sampleLimit) more point(s)")
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    func writeSynthesizedEventPreviewIfNeeded(
+        fileName: String,
+        filePath: String,
+        baseTimestamp: Double,
+        overlay: TouchGestureOverlay?
+    ) {
+        let previewPath = filePath + ".preview.txt"
+        let previewText = synthesizedEventPreviewText(
+            fileName: fileName,
+            baseTimestamp: baseTimestamp,
+            overlay: overlay
+        )
+        do {
+            try previewText.write(toFile: previewPath, atomically: true, encoding: .utf8)
+        } catch {
+            // Best effort only; timeline rendering should continue without preview sidecar.
+        }
+    }
+
     func buildTouchGestures(
         from nodes: [TimelineNode],
         testIdentifier: String,
@@ -685,6 +774,7 @@ extension XCTestReport {
         var gestures = [TouchGestureOverlay]()
         var seenGestureKeys = Set<String>()
         var seenExportedFiles = Set<String>()
+        var writtenPreviewFiles = Set<String>()
         let synthesizedEventTimestamps = flatNodes.compactMap { node -> Double? in
             guard node.title.localizedCaseInsensitiveContains("synthesize event") else { return nil }
             return node.timestamp
@@ -733,6 +823,16 @@ extension XCTestReport {
                     overlay = parsed
                 }
 
+                if !writtenPreviewFiles.contains(fileName) {
+                    writeSynthesizedEventPreviewIfNeeded(
+                        fileName: fileName,
+                        filePath: filePath,
+                        baseTimestamp: baseTimestamp,
+                        overlay: overlay
+                    )
+                    writtenPreviewFiles.insert(fileName)
+                }
+
                 guard let overlay else { continue }
                 guard !seenGestureKeys.contains(cacheKey) else { continue }
                 seenGestureKeys.insert(cacheKey)
@@ -761,6 +861,16 @@ extension XCTestReport {
                         at: filePath, baseTimestamp: baseTimestamp)
                     parsedCache[cacheKey] = parsed
                     overlay = parsed
+                }
+
+                if !writtenPreviewFiles.contains(attachment.exportedFileName) {
+                    writeSynthesizedEventPreviewIfNeeded(
+                        fileName: attachment.exportedFileName,
+                        filePath: filePath,
+                        baseTimestamp: baseTimestamp,
+                        overlay: overlay
+                    )
+                    writtenPreviewFiles.insert(attachment.exportedFileName)
                 }
 
                 guard let overlay else { continue }

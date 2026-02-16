@@ -30,44 +30,39 @@ body.test-detail-page {
     box-sizing: border-box;
     height: 100%;
     display: grid;
-    grid-template-rows: auto auto auto minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
     gap: 8px;
     padding: 10px;
 }
 
 .test-header-compact {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
     gap: 10px;
     min-height: 0;
 }
 
-.test-title-group {
-    min-width: 0;
-    justify-self: center;
-    text-align: center;
-    display: grid;
-    gap: 2px;
-}
-
 .test-title-row {
     display: flex;
     align-items: center;
-    flex-wrap: wrap;
-    justify-content: center;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
     gap: 6px 10px;
     min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
 }
 
 .test-title-compact {
     margin: 0;
     font-size: 1rem;
     line-height: 1.2;
-    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: min(70vw, 900px);
+    max-width: none;
+    min-width: 0;
+    flex: 1 1 auto;
 }
 
 .test-duration-pill {
@@ -80,6 +75,7 @@ body.test-detail-page {
     border: 1px solid #D7E1FF;
     color: #2C4D89;
     padding: 4px 8px;
+    flex: 0 0 auto;
 }
 
 .test-back-link {
@@ -102,11 +98,8 @@ body.test-detail-page {
     height: 14px;
 }
 
-.test-header-spacer {
-    justify-self: end;
-}
-
 .test-subtitle {
+    display: inline-block;
     color: #66758D;
     font-size: 0.76rem;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
@@ -114,7 +107,8 @@ body.test-detail-page {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: min(70vw, 980px);
+    max-width: min(42vw, 560px);
+    flex: 0 1 auto;
 }
 
 .test-error-box {
@@ -138,38 +132,37 @@ body.test-detail-page {
 }
 
 .test-meta-details {
-    border: 1px solid #DBE1EC;
-    border-radius: 8px;
-    background: #FFFFFF;
-    overflow: hidden;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    overflow: visible;
     min-height: 0;
     position: relative;
-    z-index: 30;
-}
-
-.test-meta-details[open] {
-    overflow: visible;
+    z-index: 40;
+    justify-self: end;
 }
 
 .test-meta-details > summary {
     cursor: pointer;
     list-style: none;
-    padding: 8px 10px;
-    font-size: 0.88rem;
+    padding: 5px 10px;
+    font-size: 0.82rem;
     font-weight: 600;
-    border-bottom: 1px solid transparent;
+    border: 1px solid #D4DEED;
+    background: #F6F9FF;
     display: flex;
     align-items: center;
-    gap: 8px;
-    border-radius: 8px;
+    gap: 6px;
+    border-radius: 999px;
     user-select: none;
-    width: 100%;
+    width: auto;
     box-sizing: border-box;
+    white-space: nowrap;
 }
 
 .test-meta-details > summary::before {
     content: "\25B6";
-    font-size: 0.72rem;
+    font-size: 0.68rem;
     color: #4D5C77;
 }
 
@@ -178,8 +171,8 @@ body.test-detail-page {
 }
 
 .test-meta-details[open] > summary {
-    background: #F8FAFD;
-    border-bottom-color: transparent;
+    background: #EDF3FF;
+    border-color: #C4D3EA;
 }
 
 .test-meta-details[open] > summary::before {
@@ -194,10 +187,11 @@ body.test-detail-page {
     display: block;
     position: absolute;
     top: calc(100% + 6px);
-    left: 0;
     right: 0;
+    left: auto;
+    width: min(940px, calc(100vw - 20px));
     padding: 10px 12px;
-    max-height: min(44vh, 460px);
+    max-height: min(56vh, 560px);
     overflow: auto;
     border: 1px solid #D6DEEC;
     border-radius: 8px;
@@ -215,7 +209,7 @@ body.test-detail-page {
     display: flex;
     flex-direction: column;
     flex: 1 1 auto;
-    grid-row: 4;
+    grid-row: auto;
 }
 
 .container {
@@ -2055,19 +2049,16 @@ button#toggle-all {
         font-variant-numeric: tabular-nums;
     }
 
+    .test-detail-page .test-title-row {
+        gap: 4px 8px;
+    }
+
     .test-detail-page .test-title-compact {
-        max-width: 100%;
-        white-space: normal;
-        overflow: visible;
-        text-overflow: clip;
-        overflow-wrap: anywhere;
+        max-width: min(42vw, 260px);
     }
 
     .test-detail-page .test-subtitle {
-        white-space: normal;
-        text-overflow: clip;
-        overflow: visible;
-        overflow-wrap: anywhere;
+        display: none;
     }
 
     .test-detail-page .timeline-tree-actions {
@@ -2136,7 +2127,7 @@ button#toggle-all {
     .test-detail-shell {
         height: auto;
         min-height: 100dvh;
-        grid-template-rows: auto auto auto auto;
+        grid-template-rows: auto auto auto;
     }
 
     .test-detail-page .test-main-content {
@@ -2180,30 +2171,21 @@ button#toggle-all {
     }
 
     .test-detail-page .test-header-compact {
-        grid-template-columns: auto 1fr;
-        align-items: start;
-        row-gap: 6px;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        align-items: center;
     }
 
     .test-detail-page .test-title-compact {
-        max-width: 100%;
-    }
-
-    .test-detail-page .test-title-group {
-        grid-column: 1 / -1;
-        justify-self: start;
-        text-align: left;
+        max-width: min(46vw, 260px);
     }
 
     .test-detail-page .test-title-row {
+        min-width: 0;
+        gap: 4px 8px;
         justify-content: flex-start;
     }
 
     .test-detail-page .test-subtitle {
-        max-width: 100%;
-    }
-
-    .test-detail-page .test-header-spacer {
         display: none;
     }
 
@@ -2305,8 +2287,14 @@ button#toggle-all {
         height: 19px;
     }
 
-    .test-detail-page .test-meta-content {
-        max-height: 24vh;
+    .test-detail-page .test-meta-details > summary {
+        padding: 5px 9px;
+        font-size: 0.79rem;
+    }
+
+    .test-detail-page .test-meta-details[open] > .test-meta-content {
+        width: min(900px, calc(100vw - 16px));
+        max-height: min(52vh, 520px);
     }
 }
 
@@ -2372,13 +2360,18 @@ button#toggle-all {
     }
 
     .test-meta-details {
-        background: #171717;
-        border-color: #424242;
+        background: transparent;
+    }
+
+    .test-meta-details > summary {
+        background: #1B2432;
+        border-color: #3C4A62;
+        color: #E1E8F5;
     }
 
     .test-meta-details[open] > summary {
-        background: #1f1f1f;
-        border-bottom-color: transparent;
+        background: #243349;
+        border-color: #4D6487;
     }
 
     .test-meta-details > summary::before {

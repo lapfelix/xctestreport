@@ -16,18 +16,15 @@
             </svg>
             <span>Back</span>
         </a>
-        <div class="test-title-group">
-            <div class="test-title-row">
-                <h1 class="test-title-compact">{{test_name}}</h1>
-                <span class="status-badge {{status_badge_class}}">{{status_text}}</span>
-                <span class="test-duration-pill">{{duration_text}}</span>
-            </div>
-            <div class="test-subtitle">{{test_subtitle}}</div>
+        <div class="test-title-row">
+            <h1 class="test-title-compact">{{test_name}}</h1>
+            <span class="status-badge {{status_badge_class}}">{{status_text}}</span>
+            <span class="test-duration-pill">{{duration_text}}</span>
+            <span class="test-subtitle">{{test_subtitle}}</span>
         </div>
-        <div class="test-header-spacer" aria-hidden="true"></div>
+        {{details_panel_html}}
     </header>
     {{compact_failure_box_html}}
-    {{details_panel_html}}
     <main class="test-main-content">
         {{timeline_and_video_section_html}}
     </main>

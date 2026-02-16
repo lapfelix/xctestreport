@@ -34,19 +34,6 @@ extension XCTestReport {
         }.joined(separator: "/")
     }
 
-    func xcodeURL(filePath: String, line: Int, column: Int?) -> String? {
-        var allowed = CharacterSet.urlQueryAllowed
-        allowed.remove(charactersIn: "&=?")
-        guard let encodedFilePath = filePath.addingPercentEncoding(withAllowedCharacters: allowed)
-        else { return nil }
-
-        var url = "xcode://open?file=\(encodedFilePath)&line=\(line)"
-        if let column {
-            url += "&column=\(column)"
-        }
-        return url
-    }
-
     func extractSourceLocations(from text: String) -> [SourceLocation] {
         let patterns = [
             #"([A-Za-z0-9_~\./\\-]+\.(?:swift|m|mm|c|cc|cpp|h|hpp|kt|java|js|ts|tsx|py|rb|go|rs)):(\d+)(?::(\d+))?"#,
@@ -488,14 +475,6 @@ extension XCTestReport {
                 let columnSuffix = location.column.map { ":\($0)" } ?? ""
                 let label = "\(location.filePath):\(location.line)\(columnSuffix)"
                 let escapedLabel = htmlEscape(label)
-                if let deepLink = xcodeURL(
-                    filePath: location.filePath,
-                    line: location.line,
-                    column: location.column
-                ) {
-                    return
-                        "<li><code>\(escapedName)</code><br><code>\(escapedLabel)</code> <a href=\"\(htmlEscape(deepLink))\">Open</a></li>"
-                }
                 return "<li><code>\(escapedName)</code><br><code>\(escapedLabel)</code></li>"
             }
 

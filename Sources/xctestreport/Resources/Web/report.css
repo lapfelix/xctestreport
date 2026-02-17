@@ -1052,7 +1052,13 @@ tr.failed {
 .timeline-controls {
     margin-top: 14px;
     display: grid;
-    gap: 7px;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    grid-template-areas:
+        "scrubber scrubber scrubber"
+        "legend buttons timebar";
+    column-gap: 10px;
+    row-gap: 7px;
+    align-items: center;
     border: 1px solid #DBE1EC;
     border-radius: 9px;
     background: #FFFFFF;
@@ -1064,6 +1070,7 @@ tr.failed {
 }
 
 .timeline-scrubber-wrap {
+    grid-area: scrubber;
     position: relative;
     display: flex;
     align-items: center;
@@ -1071,9 +1078,11 @@ tr.failed {
 }
 
 .timeline-buttons {
+    grid-area: buttons;
     display: flex;
     justify-content: center;
     gap: 8px;
+    justify-self: center;
 }
 
 .timeline-button {
@@ -1200,12 +1209,12 @@ tr.failed {
     position: absolute;
     top: 50%;
     transform: translate(-50%, var(--timeline-marker-y-shift));
-    width: 2px;
+    width: 1px;
     height: 8px;
-    border-radius: 999px;
+    border-radius: 1px;
     border: 0;
     background: #72819B;
-    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.45);
+    box-shadow: none;
     opacity: 0.95;
     pointer-events: auto;
     cursor: pointer;
@@ -1217,6 +1226,7 @@ tr.failed {
 
 .timeline-scrubber-marker.is-event {
     background: #72819B;
+    opacity: 0.5;
 }
 
 .timeline-scrubber-marker.is-tap {
@@ -1250,6 +1260,7 @@ tr.failed {
 }
 
 .timeline-marker-legend {
+    grid-area: legend;
     display: flex;
     align-items: center;
     flex-wrap: wrap;
@@ -1259,6 +1270,7 @@ tr.failed {
     line-height: 1;
     font-weight: 600;
     letter-spacing: 0.01em;
+    justify-self: start;
 }
 
 .timeline-marker-legend-item {
@@ -1277,6 +1289,10 @@ tr.failed {
 }
 
 .timeline-marker-swatch-event {
+    width: 1px;
+    height: 10px;
+    border-radius: 1px;
+    border: 0;
     background: #72819B;
 }
 
@@ -1298,13 +1314,21 @@ tr.failed {
 }
 
 .timeline-timebar {
+    grid-area: timebar;
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-end;
     align-items: center;
+    gap: 0;
     color: #5E6D86;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
     font-size: 0.81em;
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    justify-self: end;
+}
+
+.timeline-time-separator {
+    opacity: 0.78;
 }
 
 .timeline-status {
@@ -1971,7 +1995,7 @@ button#toggle-all {
 
     .collapsible {
         gap: 6px;
-        padding-right: 20px;
+        padding-right: 28px;
     }
 
     .collapsible::after {
@@ -1980,7 +2004,12 @@ button#toggle-all {
 
     .suite-name {
         margin-right: 0;
-        overflow-wrap: anywhere;
+        display: block;
+        padding-right: 4px;
+        max-width: 100%;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     .suite-stats {
@@ -2117,6 +2146,21 @@ button#toggle-all {
     }
 }
 
+@media (max-width: 1280px) {
+    .test-detail-page .timeline-controls {
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas:
+            "scrubber scrubber"
+            "legend legend"
+            "buttons timebar";
+        row-gap: 8px;
+    }
+
+    .test-detail-page .timeline-buttons {
+        justify-content: flex-start;
+    }
+}
+
 @media (max-width: 980px) {
     body.test-detail-page {
         height: auto;
@@ -2248,8 +2292,18 @@ button#toggle-all {
     }
 
     .test-detail-page .timeline-controls {
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas:
+            "scrubber scrubber"
+            "legend legend"
+            "buttons timebar";
         padding: 10px 10px 12px;
         gap: 10px;
+        align-items: center;
+    }
+
+    .test-detail-page .timeline-buttons {
+        justify-content: flex-start;
     }
 
     .test-detail-page .timeline-scrubber {
@@ -2295,6 +2349,21 @@ button#toggle-all {
     .test-detail-page .test-meta-details[open] > .test-meta-content {
         width: min(900px, calc(100vw - 16px));
         max-height: min(52vh, 520px);
+    }
+}
+
+@media (max-width: 360px) {
+    .test-detail-page .timeline-controls {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-areas:
+            "scrubber"
+            "legend"
+            "timebar"
+            "buttons";
+    }
+
+    .test-detail-page .timeline-buttons {
+        justify-content: center;
     }
 }
 
@@ -2459,9 +2528,16 @@ button#toggle-all {
     }
 
     .timeline-scrubber-marker {
-        border-color: rgba(207, 217, 233, 0.62);
+        border: 0;
         background: #8D9CB4;
-        box-shadow: 0 0 0 1px rgba(13, 21, 34, 0.45);
+        box-shadow: none;
+    }
+
+    .timeline-scrubber-marker.is-event {
+        width: 1px;
+        background: #8D9CB4;
+        box-shadow: none;
+        opacity: 0.5;
     }
 
     .timeline-scrubber-marker.is-tap {
@@ -2488,6 +2564,14 @@ button#toggle-all {
 
     .timeline-marker-swatch {
         border-color: rgba(207, 217, 233, 0.62);
+        background: #8D9CB4;
+    }
+
+    .timeline-marker-swatch-event {
+        width: 1px;
+        height: 10px;
+        border: 0;
+        border-radius: 1px;
         background: #8D9CB4;
     }
 

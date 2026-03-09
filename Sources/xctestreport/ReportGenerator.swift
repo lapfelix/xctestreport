@@ -235,7 +235,12 @@ extension XCTestReport {
                     let testPageName = "test_\(test.nodeIdentifier ?? test.name).html"
                         .replacingOccurrences(of: "/", with: "_")
                     let result = test.result ?? "Unknown"
-                    let statusBadgeClass = result == "Passed" ? "status-passed" : "status-failed"
+                    let statusBadgeClass: String
+                    switch result {
+                    case "Passed": statusBadgeClass = "status-passed"
+                    case "Skipped": statusBadgeClass = "status-skipped"
+                    default: statusBadgeClass = "status-failed"
+                    }
                     let duration = test.duration ?? "0s"
 
                     var failureInfo = ""
@@ -451,8 +456,9 @@ extension XCTestReport {
         // Initialize suite sections with headers
         for (suite, tests) in groupedTests {
             let succeeded = tests.filter { $0.result == "Passed" }.count
-            let total = tests.count
-            let percentagePassed = Double(succeeded) / Double(total) * 100.0
+            let skipped = tests.filter { $0.result == "Skipped" }.count
+            let total = tests.count - skipped
+            let percentagePassed = total > 0 ? Double(succeeded) / Double(total) * 100.0 : 100.0
 
             // Calculate total duration for the suite
             let totalDuration = tests.compactMap { test -> TimeInterval? in
@@ -515,9 +521,20 @@ extension XCTestReport {
                     let testPageName = "test_\(test.nodeIdentifier ?? test.name).html"
                         .replacingOccurrences(of: "/", with: "_")
                     let result = test.result ?? "Unknown"
-                    let statusClass = result == "Passed" ? "passed" : "failed"
+                    let statusClass: String
+                    let rowClass: String
+                    switch result {
+                    case "Passed":
+                        statusClass = "passed"
+                        rowClass = ""
+                    case "Skipped":
+                        statusClass = "skipped"
+                        rowClass = " class=\"skipped\""
+                    default:
+                        statusClass = "failed"
+                        rowClass = " class=\"failed\""
+                    }
                     let duration = test.duration ?? "0s"
-                    let rowClass = result == "Passed" ? "" : " class=\"failed\""
                     let escapedResult = htmlEscape(result)
                     let escapedDuration = htmlEscape(duration)
                     let escapedTestName = htmlEscape(test.name)

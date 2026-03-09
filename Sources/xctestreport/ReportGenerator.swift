@@ -179,6 +179,7 @@ extension XCTestReport {
         }
 
         collectTestNodes(fullResults.testNodes)
+        let overallCounts = Self.testCounts(for: allTests)
 
         let groupedTests = Dictionary(grouping: allTests) { test -> String in
             if let identifier = test.nodeIdentifier,
@@ -236,17 +237,20 @@ extension XCTestReport {
                         .replacingOccurrences(of: "/", with: "_")
                     let result = test.result ?? "Unknown"
                     let statusBadgeClass: String
-                    switch result {
-                    case "Passed": statusBadgeClass = "status-passed"
-                    case "Skipped": statusBadgeClass = "status-skipped"
-                    default: statusBadgeClass = "status-failed"
+                    if Self.isPassedTestResult(result) {
+                        statusBadgeClass = "status-passed"
+                    } else if Self.isSkippedTestResult(result) {
+                        statusBadgeClass = "status-skipped"
+                    } else {
+                        statusBadgeClass = "status-failed"
                     }
+                    let showsFailureDetails = Self.isFailureTestResult(result)
                     let duration = test.duration ?? "0s"
 
                     var failureInfo = ""
                     var primaryFailureMessage: String?
                     var sourceLocationCandidateTexts = [String]()
-                    if result != "Passed", let details = test.details {
+                    if showsFailureDetails, let details = test.details {
                         primaryFailureMessage = details
                         sourceLocationCandidateTexts.append(details)
                     }
@@ -265,7 +269,7 @@ extension XCTestReport {
                         } else {
                             print("No test identifier for test: \(test.name)")
                         }
-                    } else if result != "Passed" {
+                    } else if showsFailureDetails {
                         // For large files, only log failed tests
                         print("Skipping details for \(test.name) (large xcresult: \(String(format: "%.2f", sizeInGB)) GB)")
                     }
@@ -329,7 +333,7 @@ extension XCTestReport {
                         print("No test details for test: \(test.name)")
                     }
 
-                    if result != "Passed" {
+                    if showsFailureDetails {
                         let sourceLocationsHtml = renderSourceLocationSection(
                             candidateTexts: sourceLocationCandidateTexts)
                         if !sourceLocationsHtml.isEmpty {
@@ -356,7 +360,8 @@ extension XCTestReport {
                     }
 
                     let compactFailureBoxHtml: String
-                    if let primaryFailureMessage,
+                    if showsFailureDetails,
+                        let primaryFailureMessage,
                         !primaryFailureMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     {
                         compactFailureBoxHtml = """
@@ -455,10 +460,7 @@ extension XCTestReport {
 
         // Initialize suite sections with headers
         for (suite, tests) in groupedTests {
-            let succeeded = tests.filter { $0.result == "Passed" }.count
-            let skipped = tests.filter { $0.result == "Skipped" }.count
-            let total = tests.count - skipped
-            let percentagePassed = total > 0 ? Double(succeeded) / Double(total) * 100.0 : 100.0
+            let suiteCounts = Self.testCounts(for: tests)
 
             // Calculate total duration for the suite
             let totalDuration = tests.compactMap { test -> TimeInterval? in
@@ -498,8 +500,8 @@ extension XCTestReport {
                     <div class="suite"><h2 class="collapsible">
                         <span class="suite-name">\(suite)</span>
                         <span class="suite-stats">
-                            <span class="stats-number">\(succeeded)/\(total)</span> Passed
-                            <span class="stats-percent">(\(String(format: "%.1f", percentagePassed))%)</span>
+                            <span class="stats-number">\(suiteCounts.passedTests)/\(suiteCounts.totalTests)</span> Passed
+                            <span class="stats-percent">(\(String(format: "%.1f", suiteCounts.percentagePassed))%)</span>
                             <span class="suite-duration">\(durationText)</span>
                         </span>
                     </h2><div class="content">
@@ -523,14 +525,13 @@ extension XCTestReport {
                     let result = test.result ?? "Unknown"
                     let statusClass: String
                     let rowClass: String
-                    switch result {
-                    case "Passed":
+                    if Self.isPassedTestResult(result) {
                         statusClass = "passed"
                         rowClass = ""
-                    case "Skipped":
+                    } else if Self.isSkippedTestResult(result) {
                         statusClass = "skipped"
                         rowClass = " class=\"skipped\""
-                    default:
+                    } else {
                         statusClass = "failed"
                         rowClass = " class=\"failed\""
                     }
@@ -606,9 +607,7 @@ extension XCTestReport {
 
         var suiteExports = [SuiteExportItem]()
         for (suiteName, tests) in groupedTests {
-            let passedTests = tests.filter { $0.result == "Passed" }.count
-            let failedTests = tests.filter { $0.result == "Failed" }.count
-            let skippedTests = tests.filter { $0.result == "Skipped" }.count
+            let suiteCounts = Self.testCounts(for: tests)
 
             // Calculate total duration for the suite
             let totalDuration = tests.compactMap { test -> TimeInterval? in
@@ -628,10 +627,10 @@ extension XCTestReport {
 
             let suiteItem = SuiteExportItem(
                 name: suiteName,
-                totalTests: tests.count,
-                passedTests: passedTests,
-                failedTests: failedTests,
-                skippedTests: skippedTests,
+                totalTests: suiteCounts.totalTests,
+                passedTests: suiteCounts.passedTests,
+                failedTests: suiteCounts.failedTests,
+                skippedTests: suiteCounts.skippedTests,
                 duration: totalDuration,
                 tests: testItems
             )
@@ -641,10 +640,10 @@ extension XCTestReport {
 
         let exportSummary = ExportSummary(
             title: summary.title,
-            totalTestCount: summary.totalTestCount,
-            passedTests: summary.passedTests,
-            failedTests: summary.failedTests,
-            skippedTests: summary.skippedTests,
+            totalTestCount: overallCounts.totalTests,
+            passedTests: overallCounts.passedTests,
+            failedTests: overallCounts.failedTests,
+            skippedTests: overallCounts.skippedTests,
             timestamp: Date()
         )
 
@@ -714,10 +713,10 @@ extension XCTestReport {
             indexTemplate,
             values: [
                 "report_title": htmlEscape(summary.title),
-                "total_tests": String(summary.totalTestCount),
-                "passed_tests": String(summary.passedTests),
-                "failed_tests": String(summary.failedTests),
-                "skipped_tests": String(summary.skippedTests),
+                "total_tests": String(overallCounts.totalTests),
+                "passed_tests": String(overallCounts.passedTests),
+                "failed_tests": String(overallCounts.failedTests),
+                "skipped_tests": String(overallCounts.skippedTests),
                 "build_results_html": buildResultsHTML,
                 "comparison_info_html": comparisonInfoHTML,
                 "suite_sections_html": suiteSectionsHTML,

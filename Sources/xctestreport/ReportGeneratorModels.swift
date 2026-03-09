@@ -177,6 +177,24 @@ extension XCTestReport {
         let timestamp: Date
     }
 
+    struct TestCounts: Equatable {
+        let passedTests: Int
+        let failedTests: Int
+        let skippedTests: Int
+
+        var totalTests: Int {
+            return passedTests + failedTests
+        }
+
+        var rawTotalTests: Int {
+            return totalTests + skippedTests
+        }
+
+        var percentagePassed: Double {
+            return totalTests > 0 ? Double(passedTests) / Double(totalTests) * 100.0 : 100.0
+        }
+    }
+
     struct AttachmentManifestEntry: Codable {
         var attachments: [AttachmentManifestItem]
         let testIdentifier: String
@@ -326,6 +344,40 @@ extension XCTestReport {
         let events: [TimelineEventEntry]
         let touchGestures: [TouchGestureOverlay]
         let hierarchySnapshots: [UIHierarchySnapshot]
+    }
+
+    static func isPassedTestResult(_ result: String?) -> Bool {
+        return result == "Passed"
+    }
+
+    static func isSkippedTestResult(_ result: String?) -> Bool {
+        return result == "Skipped"
+    }
+
+    static func isFailureTestResult(_ result: String?) -> Bool {
+        return !isPassedTestResult(result) && !isSkippedTestResult(result)
+    }
+
+    static func testCounts(for tests: [TestNode]) -> TestCounts {
+        var passedTests = 0
+        var failedTests = 0
+        var skippedTests = 0
+
+        for test in tests {
+            if isPassedTestResult(test.result) {
+                passedTests += 1
+            } else if isSkippedTestResult(test.result) {
+                skippedTests += 1
+            } else {
+                failedTests += 1
+            }
+        }
+
+        return TestCounts(
+            passedTests: passedTests,
+            failedTests: failedTests,
+            skippedTests: skippedTests
+        )
     }
 
 }

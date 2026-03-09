@@ -257,7 +257,7 @@ body.test-detail-page {
 }
 
 .skipped {
-    color: #6c757d;
+    color: #8d6e00;
 }
 
 .failed-number {
@@ -269,7 +269,7 @@ body.test-detail-page {
 }
 
 .skipped-number {
-    color: #6c757d;
+    color: #8d6e00;
 }
 
 .details {
@@ -331,7 +331,7 @@ tr.failed {
 }
 
 tr.skipped {
-    background-color: #f5f5f5;
+    background-color: #fff8e1;
 }
 
 .status-badge {
@@ -353,8 +353,8 @@ tr.skipped {
 }
 
 .status-skipped {
-    background-color: #f5f5f5;
-    color: #6c757d;
+    background-color: #fff3cd;
+    color: #8d6e00;
 }
 
 .error-message {
@@ -2098,8 +2098,8 @@ button#toggle-all {
     }
 
     .suite-tests-table tr.skipped {
-        background: #F8F9FA;
-        border-color: #E0E0E0;
+        background: #FFF8E1;
+        border-color: #F2D28B;
     }
 
     .suite-tests-table td {
@@ -2456,7 +2456,7 @@ button#toggle-all {
     }
     
     .skipped-number {
-        color: #a8aaab;
+        color: #d8c27a;
     }
 
     .summary-stats {
@@ -3070,11 +3070,11 @@ button#toggle-all {
     }
 
     .skipped {
-        color: #8899aa;
+        color: #d8c27a;
     }
 
     tr.skipped {
-        background-color: #1a1d22;
+        background-color: #2a2416;
     }
 
     .new-failure {
@@ -3135,12 +3135,12 @@ button#toggle-all {
     }
 
     .suite-tests-table tr.skipped {
-        background: #1E2230;
-        border-color: #3A4560;
+        background: #2A2416;
+        border-color: #5A4E28;
     }
 
     .suite-tests-table td[data-label="Status"].skipped {
-        color: #8899aa;
+        color: #d8c27a;
     }
 
     .suite-tests-table td {

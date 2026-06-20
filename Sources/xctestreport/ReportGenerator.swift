@@ -10,6 +10,8 @@ extension XCTestReport {
         try copyWebAssets(to: webAssetsDirectoryPath)
         try? FileManager.default.createDirectory(
             atPath: testPagesDirectoryPath, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(
+            atPath: agentTestsDirectoryPath, withIntermediateDirectories: true)
 
         // Check xcresult file size
         let fileManager = FileManager.default
@@ -197,6 +199,8 @@ extension XCTestReport {
         let totalTests = allTests.count
         var processedTests = 0
         let processedTestsQueue = DispatchQueue(label: "processedTests")
+        var agentEntries = [AgentTestEntry]()
+        let agentEntriesQueue = DispatchQueue(label: "agentEntries")
         let preprocessingGroup = DispatchGroup()
         let preprocessingQueue = DispatchQueue(
             label: "testPreprocessing", attributes: .concurrent)
@@ -431,6 +435,34 @@ extension XCTestReport {
                     let minimizedTestDetailHTML = minifyHTMLInterTagWhitespace(testDetailHTML)
                     try? minimizedTestDetailHTML.write(
                         toFile: testPagePath, atomically: true, encoding: .utf8)
+
+                    let suiteName =
+                        test.nodeIdentifier?.split(separator: "/").first.map(String.init)
+                        ?? "Unknown Suite"
+                    let (testMarkdown, failureSummary) = renderTestMarkdown(
+                        test: test,
+                        result: result,
+                        suite: suiteName,
+                        testDetails: testDetails,
+                        testActivities: testActivities,
+                        attachmentsByTestIdentifier: attachmentsByTestIdentifier,
+                        primaryFailureMessage: primaryFailureMessage,
+                        sourceLocationCandidateTexts: sourceLocationCandidateTexts)
+                    let markdownFileName = agentMarkdownFileName(
+                        identifier: test.nodeIdentifier, name: test.name)
+                    let markdownPath = (agentTestsDirectoryPath as NSString)
+                        .appendingPathComponent(markdownFileName)
+                    try? testMarkdown.write(
+                        toFile: markdownPath, atomically: true, encoding: .utf8)
+                    let agentEntry = AgentTestEntry(
+                        name: test.name,
+                        suite: suiteName,
+                        identifier: test.nodeIdentifier,
+                        result: result,
+                        duration: test.duration,
+                        failureSummary: failureSummary,
+                        markdownRelativePath: "\(agentTestsDirectoryName)/\(markdownFileName)")
+                    agentEntriesQueue.sync { agentEntries.append(agentEntry) }
 
                     processedTestsQueue.sync {
                         processedTests += 1
@@ -671,6 +703,8 @@ extension XCTestReport {
         }
 
         var buildResultsHTML = ""
+        var buildErrorCount: Int?
+        var buildWarningCount: Int?
 
         let buildResultsCmd = [
             "xcrun", "xcresulttool", "get", "build-results", "--path", xcresultPath, "--format",
@@ -682,6 +716,8 @@ extension XCTestReport {
         {
             let buildResults = try? decoder.decode(BuildResults.self, from: bdData)
             if let buildResults = buildResults {
+                buildErrorCount = buildResults.errorCount
+                buildWarningCount = buildResults.warningCount
                 buildResultsHTML =
                     "<p>🛑 Errors: \(buildResults.errorCount) &nbsp; ⚠️ Warnings: \(buildResults.warningCount)</p>"
             }
@@ -726,6 +762,15 @@ extension XCTestReport {
         let indexPath = (outputDir as NSString).appendingPathComponent("index.html")
         let minimizedIndexHTML = minifyHTMLInterTagWhitespace(indexHTML)
         try minimizedIndexHTML.write(toFile: indexPath, atomically: true, encoding: .utf8)
+
+        writeAgentReport(
+            summaryTitle: summary.title,
+            counts: overallCounts,
+            result: summary.result,
+            entries: agentEntriesQueue.sync { agentEntries },
+            buildErrorCount: buildErrorCount,
+            buildWarningCount: buildWarningCount,
+            previousResultsDate: previousResults?.date)
 
         let overallDuration = Date().timeIntervalSince(overallStartTime)
         print("HTML report generated at \(indexPath)")

@@ -4,10 +4,27 @@ Generate static HTML reports from XCTest `.xcresult` bundles.
 
 ## Highlights
 - Builds an `index.html` suite overview and per-test detail pages.
+- Writes an agent/LLM-readable `report.md` + per-test Markdown (see below).
 - Renders timeline + scrubber + media previews for test activities.
 - Exports attachments and supports video, image, text, and plist preview flows.
 - Compares against previous report folders in the same parent directory.
 - Keeps heavy web payloads compressed to reduce output size.
+
+## Agent-readable report
+
+Alongside the HTML, every run writes a Markdown view meant for LLMs/agents to dig
+into failures without the `.xcresult`:
+
+- `report.md` — start here. Run result, counts, pass rate, build errors/warnings,
+  and a table of **failed tests** (each with a one-line reason), followed by every
+  suite and test.
+- `agent-tests/<test>.md` — one file per test: result, identifier, device, the
+  failure message, source locations, stack-trace preview, the full activity
+  **steps** tree (timestamps, `❌` marks the failing step), previous-run history,
+  and links to all attachments.
+
+All links are relative, so the output folder works the same whether read locally or
+hosted remotely. Point an agent at `report.md` and let it follow the links.
 
 ## Requirements
 - macOS with Xcode command-line tools (`xcrun xcresulttool`).
@@ -69,10 +86,12 @@ open ~/Desktop/xcresultout/index.html
 Typical output directory:
 
 - `index.html`
+- `report.md` (agent/LLM-readable index)
 - `summary.json`
 - `tests_full.json`
 - `tests_grouped.json`
 - `tests/test_<identifier>.html` (one per test case)
+- `agent-tests/<identifier>.md` (one per test case, agent/LLM-readable)
 - `web/report.css`, `web/index-page.js`, `web/timeline-view.js`, `web/plist-preview.js`
 - `attachments/` (exported media + previews)
 - `timeline_payloads/` (compressed timeline payload blobs)

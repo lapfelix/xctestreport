@@ -229,6 +229,20 @@ body.test-detail-page {
     margin-bottom: 20px;
 }
 
+.agent-report-link {
+    margin: -8px 0 0;
+    font-size: 0.8em;
+}
+
+.agent-report-link a {
+    color: #66758D;
+    text-decoration: none;
+}
+
+.agent-report-link a:hover {
+    text-decoration: underline;
+}
+
 .summary-stats {
     font-size: 1.2em;
     margin: 20px 0;
@@ -2461,6 +2475,10 @@ button#toggle-all {
 
     .summary-stats {
         background: #202020;
+    }
+
+    .agent-report-link a {
+        color: #9AA7BD;
     }
 
     table {

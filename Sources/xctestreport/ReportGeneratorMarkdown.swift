@@ -3,8 +3,12 @@ import Foundation
 // Agent/LLM-readable Markdown companion to the HTML report.
 //
 // Layout (all links relative so the folder works when hosted remotely):
-//   <output>/report.md                 — index: counts, failed tests, per-suite listing
-//   <output>/agent-tests/<id>.md       — one file per test: failure, source, steps, attachments
+//   <output>/report.md                 - index: counts, failed tests, per-suite listing
+//   <output>/agent-tests/<id>.md       - one file per test: failure, source, steps, attachments
+//
+// Output is intentionally ASCII-only so it renders the same regardless of how a
+// viewer guesses the charset (e.g. servers that send .md as latin-1 text/plain).
+// Test-supplied text (failure messages, step titles) is passed through verbatim.
 //
 // From a test file, attachments resolve via ../attachments/... (same depth as tests/),
 // so attachmentRelativePathForTestPage(fileName:) is reused as-is.
@@ -64,7 +68,7 @@ extension XCTestReport {
         lines.append("# \(test.name)")
         lines.append("")
         let htmlDetailDest = linkDestination("../\(testPagesDirectoryName)/\(htmlTestPageFileName(for: test))")
-        lines.append("[← Report index](../\(agentReportFileName)) · [HTML detail](\(htmlDetailDest))")
+        lines.append("[Report index](../\(agentReportFileName)) | [HTML detail](\(htmlDetailDest))")
         lines.append("")
 
         lines.append("- **Result:** \(result)")
@@ -111,7 +115,7 @@ extension XCTestReport {
                 attachmentsByTestIdentifier: attachmentsByTestIdentifier) {
                 lines.append("## Stack trace (preview)")
                 lines.append("")
-                lines.append("[\(markdownInline(stack.attachmentName))](\(linkDestination(stack.relativePath))) — \(stack.frameCount) frames")
+                lines.append("[\(markdownInline(stack.attachmentName))](\(linkDestination(stack.relativePath))) - \(stack.frameCount) frames")
                 lines.append("")
                 lines.append(fencedCodeBlock(stack.preview))
                 lines.append("")
@@ -120,11 +124,11 @@ extension XCTestReport {
             let previousRuns = test.nodeIdentifier.map { getPreviousRuns(for: $0) } ?? []
             if !previousRuns.isEmpty {
                 let history = previousRuns.prefix(10)
-                    .map { $0.result == "Passed" ? "✅" : "❌" }
-                    .joined()
+                    .map { $0.result == "Passed" ? "P" : "F" }
+                    .joined(separator: " ")
                 lines.append("## Previous runs")
                 lines.append("")
-                lines.append(history)
+                lines.append("`\(history)` (most recent first; P = passed, F = failed)")
                 lines.append("")
             }
         }
@@ -151,13 +155,13 @@ extension XCTestReport {
                 let name = attachment.suggestedHumanReadableName ?? attachment.exportedFileName
                 let offset = timeOffsetLabel(attachment.timestamp, base: base)
                 var suffix = ""
-                if attachment.isAssociatedWithFailure == true { suffix += " ⚠️ failure" }
+                if attachment.isAssociatedWithFailure == true { suffix += " (failure)" }
                 lines.append("- \(offset)[\(markdownInline(name))](\(linkDestination(relativePath)))\(suffix)")
             }
             lines.append("")
         }
 
-        return (lines.joined(separator: "\n"), failureSummary)
+        return (asciiFold(lines.joined(separator: "\n")), failureSummary.map(asciiFold))
     }
 
     private func htmlTestPageFileName(for test: TestNode) -> String {
@@ -208,7 +212,7 @@ extension XCTestReport {
         into lines: inout [String]
     ) {
         let indent = String(repeating: "  ", count: depth)
-        let marker = (activity.isAssociatedWithFailure == true) ? "❌ " : ""
+        let marker = (activity.isAssociatedWithFailure == true) ? "[FAIL] " : ""
         let offset = timeOffsetLabel(activity.startTime, base: base)
         let title = markdownInline(activity.title)
         lines.append("\(indent)- \(marker)\(offset)\(title)")
@@ -218,7 +222,7 @@ extension XCTestReport {
             guard let payloadId = attachment.payloadId,
                 let fileName = payloadToFile[payloadId] else { continue }
             let relativePath = attachmentRelativePathForTestPage(fileName: fileName)
-            lines.append("\(childIndent)- 📎 [\(markdownInline(attachment.name))](\(linkDestination(relativePath)))")
+            lines.append("\(childIndent)- attachment: [\(markdownInline(attachment.name))](\(linkDestination(relativePath)))")
         }
 
         for child in activity.childActivities ?? [] {
@@ -265,16 +269,16 @@ extension XCTestReport {
         previousResultsDate: Date?
     ) {
         var lines = [String]()
-        lines.append("# \(summaryTitle) — Test Report")
+        lines.append("# \(summaryTitle) - Test Report")
         lines.append("")
         lines.append("> Agent-readable companion to `index.html`. Every test links to a Markdown file with its failure, source locations, steps, and attachments. All paths are relative, so this folder works when hosted remotely.")
         lines.append("")
 
         lines.append("- **Result:** \(result)")
-        lines.append("- **Total:** \(counts.totalTests) · **Passed:** \(counts.passedTests) · **Failed:** \(counts.failedTests) · **Skipped:** \(counts.skippedTests)")
+        lines.append("- **Total:** \(counts.totalTests) | **Passed:** \(counts.passedTests) | **Failed:** \(counts.failedTests) | **Skipped:** \(counts.skippedTests)")
         lines.append("- **Pass rate:** \(String(format: "%.1f", counts.percentagePassed))%")
         if let errors = buildErrorCount, let warnings = buildWarningCount {
-            lines.append("- **Build:** 🛑 \(errors) errors · ⚠️ \(warnings) warnings")
+            lines.append("- **Build:** \(errors) errors, \(warnings) warnings")
         }
         if let date = previousResultsDate {
             let formatter = ISO8601DateFormatter()
@@ -292,7 +296,7 @@ extension XCTestReport {
         if failed.isEmpty {
             lines.append("## Failed tests")
             lines.append("")
-            lines.append("None. ✅")
+            lines.append("None.")
             lines.append("")
         } else {
             lines.append("## Failed tests (\(failed.count))")
@@ -310,7 +314,7 @@ extension XCTestReport {
             lines.append("## Skipped tests (\(skipped.count))")
             lines.append("")
             for entry in skipped {
-                lines.append("- [\(markdownInline(entry.name))](\(entry.markdownRelativePath)) — \(markdownInline(entry.suite))")
+                lines.append("- [\(markdownInline(entry.name))](\(entry.markdownRelativePath)) - \(markdownInline(entry.suite))")
             }
             lines.append("")
         }
@@ -323,17 +327,17 @@ extension XCTestReport {
                 .sorted { $0.name < $1.name }
             let passed = suiteEntries.filter { Self.isPassedTestResult($0.result) }.count
             let total = suiteEntries.filter { !Self.isSkippedTestResult($0.result) }.count
-            lines.append("### \(suite) — \(passed)/\(total) passed")
+            lines.append("### \(suite) - \(passed)/\(total) passed")
             lines.append("")
             for entry in suiteEntries {
                 let icon = statusIcon(entry.result)
-                let duration = entry.duration.map { " · \($0)" } ?? ""
+                let duration = entry.duration.map { " - \($0)" } ?? ""
                 lines.append("- \(icon) [\(markdownInline(entry.name))](\(entry.markdownRelativePath))\(duration)")
             }
             lines.append("")
         }
 
-        let markdown = lines.joined(separator: "\n")
+        let markdown = asciiFold(lines.joined(separator: "\n"))
         let path = (outputDir as NSString).appendingPathComponent(agentReportFileName)
         do {
             try markdown.write(toFile: path, atomically: true, encoding: .utf8)
@@ -344,9 +348,9 @@ extension XCTestReport {
     }
 
     private func statusIcon(_ result: String) -> String {
-        if Self.isPassedTestResult(result) { return "✅" }
-        if Self.isSkippedTestResult(result) { return "⏭️" }
-        return "❌"
+        if Self.isPassedTestResult(result) { return "[PASS]" }
+        if Self.isSkippedTestResult(result) { return "[SKIP]" }
+        return "[FAIL]"
     }
 
     // MARK: - Markdown helpers
@@ -358,7 +362,7 @@ extension XCTestReport {
             ?? text
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.count > 200 {
-            return String(trimmed.prefix(197)) + "…"
+            return String(trimmed.prefix(197)) + "..."
         }
         return trimmed
     }
@@ -379,6 +383,47 @@ extension XCTestReport {
         var fence = "```"
         while trimmed.contains(fence) { fence += "`" }
         return "\(fence)\n\(trimmed)\n\(fence)"
+    }
+
+    // Force ASCII so the file never mojibakes when a viewer guesses a non-UTF-8 charset.
+    // Common typographic punctuation is mapped to its ASCII equivalent; anything else
+    // outside ASCII becomes '?'.
+    private func asciiFold(_ text: String) -> String {
+        var result = String()
+        result.unicodeScalars.reserveCapacity(text.unicodeScalars.count)
+        for scalar in text.unicodeScalars {
+            if scalar.isASCII {
+                result.unicodeScalars.append(scalar)
+                continue
+            }
+            switch scalar {
+            case "\u{2018}", "\u{2019}", "\u{201A}", "\u{201B}", "\u{2032}":
+                result.append("'")
+            case "\u{201C}", "\u{201D}", "\u{201E}", "\u{201F}", "\u{2033}":
+                result.append("\"")
+            case "\u{2010}", "\u{2011}", "\u{2013}", "\u{2014}", "\u{2212}":
+                result.append("-")
+            case "\u{2026}":
+                result.append("...")
+            case "\u{00A0}", "\u{2007}", "\u{2009}", "\u{200A}", "\u{202F}":
+                result.append(" ")
+            case "\u{2022}", "\u{00B7}", "\u{2027}":
+                result.append("-")
+            case "\u{00D7}":
+                result.append("x")
+            case "\u{2192}", "\u{279C}", "\u{27A1}":
+                result.append("->")
+            case "\u{2190}":
+                result.append("<-")
+            case "\u{2194}":
+                result.append("<->")
+            case "\u{21D2}":
+                result.append("=>")
+            default:
+                result.append("?")
+            }
+        }
+        return result
     }
 
     private func linkDestination(_ path: String) -> String {

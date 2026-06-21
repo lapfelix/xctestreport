@@ -20,11 +20,14 @@ into failures without the `.xcresult`:
   suite and test.
 - `agent-tests/<test>.md` — one file per test: result, identifier, device, the
   failure message, source locations, stack-trace preview, the full activity
-  **steps** tree (timestamps, `❌` marks the failing step), previous-run history,
-  and links to all attachments.
+  **steps** tree (timestamps, `[FAIL]` marks the failing step), previous-run
+  history, and links to all attachments.
 
 All links are relative, so the output folder works the same whether read locally or
 hosted remotely. Point an agent at `report.md` and let it follow the links.
+
+The Markdown is ASCII-only (typographic punctuation is folded, anything else becomes
+`?`), so it never mojibakes when a host serves `.md` as non-UTF-8 `text/plain`.
 
 ## Requirements
 - macOS with Xcode command-line tools (`xcrun xcresulttool`).

@@ -43,7 +43,8 @@ final class AgentMarkdownTests: XCTestCase {
         XCTAssertTrue(markdown.contains("XCTAssertTrue failed - boom"))
         XCTAssertTrue(markdown.contains("`Foo.swift:42`"), "Source location should be extracted")
         XCTAssertTrue(markdown.contains("- [0.000s] Start Test"))
-        XCTAssertTrue(markdown.contains("  - ❌ [5.000s] Assertion Failure: boom"))
+        XCTAssertTrue(markdown.contains("  - [FAIL] [5.000s] Assertion Failure: boom"))
+        XCTAssertTrue(markdown.allSatisfy { $0.isASCII }, "Markdown must be ASCII-only")
         // Parens in the HTML detail filename must be angle-bracketed so the link parses.
         XCTAssertTrue(markdown.contains("[HTML detail](<../tests/test_Suite_testFoo().html>)"))
     }
@@ -75,10 +76,42 @@ final class AgentMarkdownTests: XCTestCase {
         XCTAssertTrue(markdown.contains("## Failed tests (1)"))
         XCTAssertTrue(markdown.contains("[testFoo()](agent-tests/Suite_testFoo__.md)"))
         XCTAssertTrue(markdown.contains("boom failed"))
-        XCTAssertTrue(markdown.contains("Suite — 1/2 passed"))
+        XCTAssertTrue(markdown.contains("Suite - 1/2 passed"))
+        XCTAssertTrue(markdown.allSatisfy { $0.isASCII }, "Report must be ASCII-only")
         XCTAssertFalse(
             markdown.contains("## Failed tests (1)\n\n| Test | Suite | Reason |\n| --- | --- | --- |\n|  |"),
             "Passed tests must not appear in the failed-tests table")
+    }
+
+    func testNonAsciiContentIsFoldedToAscii() {
+        let report = makeReport()
+        let message = "XCTAssertEqual failed \u{2014} expected \u{201C}caf\u{00E9}\u{201D} but got \u{2018}x\u{2019}\u{2026}"
+        let test = XCTestReport.TestNode(
+            name: "testUnicode()",
+            nodeType: "Test Case",
+            nodeIdentifier: "Suite/testUnicode()",
+            result: "Failed",
+            duration: "1s",
+            details: message,
+            children: nil,
+            startTime: nil
+        )
+
+        let (markdown, summary) = report.renderTestMarkdown(
+            test: test,
+            result: "Failed",
+            suite: "Suite",
+            testDetails: nil,
+            testActivities: nil,
+            attachmentsByTestIdentifier: [:],
+            primaryFailureMessage: message,
+            sourceLocationCandidateTexts: []
+        )
+
+        XCTAssertTrue(markdown.allSatisfy { $0.isASCII }, "Markdown must be ASCII-only")
+        XCTAssertTrue(summary?.allSatisfy { $0.isASCII } ?? false)
+        XCTAssertTrue(markdown.contains("expected \"caf?\" but got 'x'..."),
+            "Typographic punctuation folds to ASCII; other non-ASCII becomes '?'")
     }
 
     func testMarkdownFileNameIsFilesystemSafe() {

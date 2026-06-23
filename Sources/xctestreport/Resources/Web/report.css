@@ -230,7 +230,7 @@ body.test-detail-page {
 }
 
 .header-note {
-    margin: -10px 0 0;
+    margin: -8px 0 0;
     color: #66758D;
     font-size: 0.95em;
     font-weight: 500;
@@ -239,6 +239,10 @@ body.test-detail-page {
 .agent-report-link {
     margin: -8px 0 0;
     font-size: 0.8em;
+}
+
+.header-note + .agent-report-link {
+    margin-top: 4px;
 }
 
 .agent-report-link a {

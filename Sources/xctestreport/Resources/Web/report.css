@@ -229,6 +229,13 @@ body.test-detail-page {
     margin-bottom: 20px;
 }
 
+.header-note {
+    margin: -10px 0 0;
+    color: #66758D;
+    font-size: 0.95em;
+    font-weight: 500;
+}
+
 .agent-report-link {
     margin: -8px 0 0;
     font-size: 0.8em;
@@ -1961,7 +1968,14 @@ a:hover {
     margin-bottom: 1px;
 }
 
-button#toggle-all {
+.summary-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+button#toggle-all,
+button#toggle-failed {
     padding: 8px 16px;
     font-size: 14px;
     font-weight: 500;
@@ -1989,7 +2003,12 @@ button#toggle-all {
         justify-content: space-between;
     }
     
-    button#toggle-all {
+    .summary-actions {
+        flex-direction: row;
+    }
+
+    button#toggle-all,
+    button#toggle-failed {
         width: auto;
         white-space: nowrap;
     }
@@ -3065,7 +3084,8 @@ button#toggle-all {
         border-bottom: 1px solid #424242;
     }
 
-    button#toggle-all {
+    button#toggle-all,
+    button#toggle-failed {
         color: #e7e7e7;
         background-color: #4a4a4a;
         border: 1px solid rgba(255, 255, 255, 0.15);
@@ -3113,7 +3133,8 @@ button#toggle-all {
         box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03);
     }
 
-    button#toggle-all {
+    button#toggle-all,
+    button#toggle-failed {
         background-color: #2A3447;
         border-color: #4D6286;
         color: #DDE8FB;

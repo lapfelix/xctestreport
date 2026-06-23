@@ -745,10 +745,16 @@ extension XCTestReport {
             }
         }
 
+        var headerNoteHTML = ""
+        if let note = headerNote?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty {
+            headerNoteHTML = "<p class=\"header-note\">\(htmlEscape(note))</p>"
+        }
+
         let indexHTML = try renderTemplate(
             indexTemplate,
             values: [
                 "report_title": htmlEscape(summary.title),
+                "header_note_html": headerNoteHTML,
                 "total_tests": String(overallCounts.totalTests),
                 "passed_tests": String(overallCounts.passedTests),
                 "failed_tests": String(overallCounts.failedTests),

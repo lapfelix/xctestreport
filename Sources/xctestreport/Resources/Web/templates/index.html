@@ -9,6 +9,7 @@
 </head>
 <body>
 <h1>Test Report: {{report_title}}</h1>
+{{header_note_html}}
 <p class="agent-report-link"><a href="report.md">Agent-readable report (Markdown)</a></p>
 <div class="summary-stats">
     <div>
@@ -17,7 +18,10 @@
         Failed: <span class="stat-number failed-number">{{failed_tests}}</span>,
         Skipped: <span class="stat-number skipped-number">{{skipped_tests}}</span>
     </div>
-    <button id="toggle-all">Collapse All</button>
+    <div class="summary-actions">
+        <button id="toggle-failed">Show only failed</button>
+        <button id="toggle-all">Collapse All</button>
+    </div>
 </div>
 {{build_results_html}}
 {{comparison_info_html}}

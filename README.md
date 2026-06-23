@@ -4,6 +4,8 @@ Generate static HTML reports from XCTest `.xcresult` bundles.
 
 ## Highlights
 - Builds an `index.html` suite overview and per-test detail pages.
+- "Show only failed" button on the main page to hide passing/skipped tests and all-passing suites.
+- Optional custom header note under the title (`--header-note`), e.g. the branch under test.
 - Writes an agent/LLM-readable `report.md` + per-test Markdown (see below).
 - Renders timeline + scrubber + media previews for test activities.
 - Exports attachments and supports video, image, text, and plist preview flows.
@@ -45,7 +47,7 @@ cp .build/release/xctestreport /usr/local/bin/xctestreport
 
 ## CLI
 ```bash
-USAGE: xctestreport <xcresult-path> <output-dir> [--compress-video] [--video-height <video-height>]
+USAGE: xctestreport <xcresult-path> <output-dir> [--compress-video] [--video-height <video-height>] [--header-note <header-note>]
 
 ARGUMENTS:
   <xcresult-path>         Path to the .xcresult file.
@@ -54,6 +56,8 @@ ARGUMENTS:
 OPTIONS:
   --compress-video        Compress exported video attachments with ffmpeg (HEVC VideoToolbox).
   --video-height <n>      Maximum compressed video dimension (longest edge). Default: 1024.
+  --header-note <note>    Custom note shown under the title on the report's main
+                          page (e.g. "Branch: feature/new-thing").
   -h, --help              Show help information.
 ```
 
@@ -61,6 +65,12 @@ OPTIONS:
 ```bash
 swift run xctestreport /path/to/Test.xcresult ~/Desktop/xcresultout --compress-video --video-height 1024
 open ~/Desktop/xcresultout/index.html
+```
+
+Add a header note (shown under the title), handy in CI to label the run:
+
+```bash
+swift run xctestreport /path/to/Test.xcresult ~/Desktop/xcresultout --header-note "Branch: $(git rev-parse --abbrev-ref HEAD)"
 ```
 
 `index.html` is always written at `<output-dir>/index.html`.

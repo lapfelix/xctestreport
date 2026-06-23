@@ -29,6 +29,12 @@ struct XCTestReport: ParsableCommand {
     )
     var htmlOnly: Bool = false
 
+    @Option(
+        name: .customLong("header-note"),
+        help: "Custom note shown under the title on the report's main page (e.g. \"Branch: feature/new-thing\")."
+    )
+    var headerNote: String?
+
     struct RuntimeError: Error {
         let message: String
     }

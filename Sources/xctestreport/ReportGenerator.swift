@@ -461,7 +461,8 @@ extension XCTestReport {
                         result: result,
                         duration: test.duration,
                         failureSummary: failureSummary,
-                        markdownRelativePath: "\(agentTestsDirectoryName)/\(markdownFileName)")
+                        markdownRelativePath: "\(agentTestsDirectoryName)/\(markdownFileName)",
+                        markdown: testMarkdown)
                     agentEntriesQueue.sync { agentEntries.append(agentEntry) }
 
                     processedTestsQueue.sync {
@@ -538,7 +539,7 @@ extension XCTestReport {
                         </span>
                     </h2><div class="content">
                     <table class="data-table suite-tests-table" style="margin-top:0px">
-                    <thead><tr><th scope="col">Test Name</th><th scope="col">Status</th><th scope="col">Duration</th></tr></thead>
+                    <thead><tr><th scope="col">Test Name</th><th scope="col">Status</th><th scope="col" class="sortable-duration">Duration</th></tr></thead>
                     <tbody>
                     """))
             }
@@ -610,8 +611,9 @@ extension XCTestReport {
                             """
                     }
 
+                    let durationSeconds = parseDuration(duration) ?? 0
                     let testRow =
-                        "<tr\(rowClass)><td data-label=\"Test Name\"><a href=\"\(escapedPageName)\">\(escapedTestName)</a></td><td data-label=\"Status\" class=\"\(statusClass)\">\(escapedResult)\(statusEmoji)</td><td data-label=\"Duration\">\(escapedDuration)</td></tr>"
+                        "<tr\(rowClass) data-status=\"\(statusClass)\" data-duration=\"\(durationSeconds)\"><td data-label=\"Test Name\"><a href=\"\(escapedPageName)\">\(escapedTestName)</a></td><td data-label=\"Status\" class=\"\(statusClass)\">\(escapedResult)\(statusEmoji)</td><td data-label=\"Duration\">\(escapedDuration)</td></tr>"
 
                     suiteHTMLQueue.sync {
                         suiteSections[suite]?.append((index: testIndex, html: testRow))
@@ -770,6 +772,15 @@ extension XCTestReport {
         try minimizedIndexHTML.write(toFile: indexPath, atomically: true, encoding: .utf8)
 
         writeAgentReport(
+            summaryTitle: summary.title,
+            counts: overallCounts,
+            result: summary.result,
+            entries: agentEntriesQueue.sync { agentEntries },
+            buildErrorCount: buildErrorCount,
+            buildWarningCount: buildWarningCount,
+            previousResultsDate: previousResults?.date)
+
+        writeFailuresReport(
             summaryTitle: summary.title,
             counts: overallCounts,
             result: summary.result,

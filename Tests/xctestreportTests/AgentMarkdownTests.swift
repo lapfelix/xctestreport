@@ -56,11 +56,13 @@ final class AgentMarkdownTests: XCTestCase {
             XCTestReport.AgentTestEntry(
                 name: "testFoo()", suite: "Suite", identifier: "Suite/testFoo()",
                 result: "Failed", duration: "5s", failureSummary: "boom failed",
-                markdownRelativePath: "agent-tests/Suite_testFoo__.md"),
+                markdownRelativePath: "agent-tests/Suite_testFoo__.md",
+                markdown: "# testFoo()"),
             XCTestReport.AgentTestEntry(
                 name: "testBar()", suite: "Suite", identifier: "Suite/testBar()",
                 result: "Passed", duration: "1s", failureSummary: nil,
-                markdownRelativePath: "agent-tests/Suite_testBar__.md"),
+                markdownRelativePath: "agent-tests/Suite_testBar__.md",
+                markdown: "# testBar()"),
         ]
         report.writeAgentReport(
             summaryTitle: "My Suite",
@@ -81,6 +83,65 @@ final class AgentMarkdownTests: XCTestCase {
         XCTAssertFalse(
             markdown.contains("## Failed tests (1)\n\n| Test | Suite | Reason |\n| --- | --- | --- |\n|  |"),
             "Passed tests must not appear in the failed-tests table")
+    }
+
+    func testFailuresReportInlinesFailedTestsOnly() throws {
+        let directory = try makeTempDirectory()
+        let report = makeReport(outputDir: directory.path)
+        let entries = [
+            XCTestReport.AgentTestEntry(
+                name: "testFoo()", suite: "Suite", identifier: "Suite/testFoo()",
+                result: "Failed", duration: "5s", failureSummary: "boom failed",
+                markdownRelativePath: "agent-tests/Suite_testFoo__.md",
+                markdown: "# testFoo()\n\n## Failure\n\nboom\n\n- [shot](../attachments/foo.png)"),
+            XCTestReport.AgentTestEntry(
+                name: "testBar()", suite: "Suite", identifier: "Suite/testBar()",
+                result: "Passed", duration: "1s", failureSummary: nil,
+                markdownRelativePath: "agent-tests/Suite_testBar__.md",
+                markdown: "# testBar()\n\nall good"),
+        ]
+        report.writeFailuresReport(
+            summaryTitle: "My Suite",
+            counts: XCTestReport.TestCounts(passedTests: 1, failedTests: 1, skippedTests: 0),
+            result: "Failed",
+            entries: entries,
+            buildErrorCount: 0,
+            buildWarningCount: 2,
+            previousResultsDate: nil)
+
+        let markdown = try String(
+            contentsOf: directory.appendingPathComponent("failures.md"), encoding: .utf8)
+        XCTAssertTrue(markdown.contains("# My Suite - Failed Tests"))
+        XCTAssertTrue(markdown.contains("# testFoo()"), "Failed test detail must be inlined")
+        XCTAssertTrue(markdown.contains("boom"))
+        XCTAssertFalse(markdown.contains("all good"), "Passed tests must not appear")
+        XCTAssertTrue(markdown.contains("[shot](attachments/foo.png)"),
+            "Links must be rewritten relative to the output root")
+        XCTAssertTrue(markdown.allSatisfy { $0.isASCII }, "Report must be ASCII-only")
+    }
+
+    func testFailuresReportZeroFailures() throws {
+        let directory = try makeTempDirectory()
+        let report = makeReport(outputDir: directory.path)
+        let entries = [
+            XCTestReport.AgentTestEntry(
+                name: "testBar()", suite: "Suite", identifier: "Suite/testBar()",
+                result: "Passed", duration: "1s", failureSummary: nil,
+                markdownRelativePath: "agent-tests/Suite_testBar__.md",
+                markdown: "# testBar()"),
+        ]
+        report.writeFailuresReport(
+            summaryTitle: "My Suite",
+            counts: XCTestReport.TestCounts(passedTests: 1, failedTests: 0, skippedTests: 0),
+            result: "Passed",
+            entries: entries,
+            buildErrorCount: nil,
+            buildWarningCount: nil,
+            previousResultsDate: nil)
+
+        let markdown = try String(
+            contentsOf: directory.appendingPathComponent("failures.md"), encoding: .utf8)
+        XCTAssertTrue(markdown.contains("No failed tests. 1 tests passed."))
     }
 
     func testNonAsciiContentIsFoldedToAscii() {

@@ -21,6 +21,7 @@ extension XCTestReport {
     }
 
     var agentReportFileName: String { "report.md" }
+    var failuresReportFileName: String { "failures.md" }
 
     struct AgentTestEntry {
         let name: String
@@ -30,6 +31,7 @@ extension XCTestReport {
         let duration: String?
         let failureSummary: String?
         let markdownRelativePath: String  // relative to output root
+        let markdown: String  // full per-test Markdown (links relative to agent-tests/)
     }
 
     func agentMarkdownFileName(identifier: String?, name: String) -> String {
@@ -272,6 +274,8 @@ extension XCTestReport {
         lines.append("# \(summaryTitle) - Test Report")
         lines.append("")
         lines.append("> Agent-readable companion to `index.html`. Every test links to a Markdown file with its failure, source locations, steps, and attachments. All paths are relative, so this folder works when hosted remotely.")
+        lines.append(">")
+        lines.append("> For failures only, see [`failures.md`](\(failuresReportFileName)) - one self-contained file with the full detail of every failed test.")
         lines.append("")
 
         lines.append("- **Result:** \(result)")
@@ -345,6 +349,72 @@ extension XCTestReport {
         } catch {
             print("Error writing agent report: \(error)")
         }
+    }
+
+    // MARK: - Failures-only report
+
+    // Single self-contained file with the full detail of every failed test, so an
+    // agent can read one file without following links. Written every run.
+    func writeFailuresReport(
+        summaryTitle: String,
+        counts: TestCounts,
+        result: String,
+        entries: [AgentTestEntry],
+        buildErrorCount: Int?,
+        buildWarningCount: Int?,
+        previousResultsDate: Date?
+    ) {
+        var lines = [String]()
+        lines.append("# \(summaryTitle) - Failed Tests")
+        lines.append("")
+        lines.append("> Full detail of every failed test, inlined. For all tests see [`\(agentReportFileName)`](\(agentReportFileName)).")
+        lines.append("")
+
+        lines.append("- **Result:** \(result)")
+        lines.append("- **Total:** \(counts.totalTests) | **Passed:** \(counts.passedTests) | **Failed:** \(counts.failedTests) | **Skipped:** \(counts.skippedTests)")
+        lines.append("- **Pass rate:** \(String(format: "%.1f", counts.percentagePassed))%")
+        if let errors = buildErrorCount, let warnings = buildWarningCount {
+            lines.append("- **Build:** \(errors) errors, \(warnings) warnings")
+        }
+        if let date = previousResultsDate {
+            let formatter = ISO8601DateFormatter()
+            lines.append("- **Compared with previous run from:** \(formatter.string(from: date))")
+        }
+        lines.append("")
+
+        let failed = entries
+            .filter { Self.isFailureTestResult($0.result) }
+            .sorted { $0.suite == $1.suite ? $0.name < $1.name : $0.suite < $1.suite }
+
+        if failed.isEmpty {
+            lines.append("No failed tests. \(counts.passedTests) tests passed.")
+        } else {
+            for (index, entry) in failed.enumerated() {
+                if index > 0 {
+                    lines.append("")
+                    lines.append("---")
+                    lines.append("")
+                }
+                lines.append(rootRelativeLinks(entry.markdown))
+            }
+        }
+
+        let markdown = asciiFold(lines.joined(separator: "\n")) + "\n"
+        let path = (outputDir as NSString).appendingPathComponent(failuresReportFileName)
+        do {
+            try markdown.write(toFile: path, atomically: true, encoding: .utf8)
+            print("Failures report written to \(path)")
+        } catch {
+            print("Error writing failures report: \(error)")
+        }
+    }
+
+    // Per-test Markdown links are relative to agent-tests/ (one level deep). failures.md
+    // sits at the output root, so drop one ".." level from every Markdown link target.
+    private func rootRelativeLinks(_ markdown: String) -> String {
+        markdown
+            .replacingOccurrences(of: "](../", with: "](")
+            .replacingOccurrences(of: "](<../", with: "](<")
     }
 
     private func statusIcon(_ result: String) -> String {

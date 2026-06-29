@@ -19,13 +19,20 @@
         Skipped: <span class="stat-number skipped-number">{{skipped_tests}}</span>
     </div>
     <div class="summary-actions">
-        <button id="toggle-failed">Show only failed</button>
+        <input type="search" id="test-search" class="test-search" placeholder="Filter tests by name...">
+        <span class="status-chips">
+            <button type="button" class="status-chip" data-status="passed" aria-pressed="true">Passed</button>
+            <button type="button" class="status-chip" data-status="failed" aria-pressed="true">Failed</button>
+            <button type="button" class="status-chip" data-status="skipped" aria-pressed="true">Skipped</button>
+        </span>
         <button id="toggle-all">Collapse All</button>
     </div>
 </div>
 {{build_results_html}}
 {{comparison_info_html}}
+<div id="slowest-tests" class="slowest-tests"></div>
 {{suite_sections_html}}
+<p id="no-match" class="no-match" style="display:none">No tests match.</p>
 <script src="web/index-page.js"></script>
 </body>
 </html>

@@ -23,9 +23,10 @@ function testRow(test) {
   const statusClass = test.status; // "passed" | "failed" | "skipped"
   const rowClass = statusClass === 'passed' ? '' : ` class="${statusClass}"`;
   const result = statusClass.charAt(0).toUpperCase() + statusClass.slice(1);
-  return `<tr${rowClass}><td data-label="Test Name"><a href="tests/test_${htmlEscape(test.name)}.html">${htmlEscape(test.name)}</a></td>` +
+  const seconds = test.duration == null ? 1 : test.duration;
+  return `<tr${rowClass} data-status="${statusClass}" data-duration="${seconds}"><td data-label="Test Name"><a href="tests/test_${htmlEscape(test.name)}.html">${htmlEscape(test.name)}</a></td>` +
     `<td data-label="Status" class="${statusClass}">${result}</td>` +
-    `<td data-label="Duration">1.0 sec</td></tr>`;
+    `<td data-label="Duration">${seconds} sec</td></tr>`;
 }
 
 // Mirrors the suite-section markup in ReportGenerator.swift.
@@ -42,7 +43,7 @@ function suiteSection(suite) {
     </span>
 </h2><div class="content">
 <table class="data-table suite-tests-table" style="margin-top:0px">
-<thead><tr><th scope="col">Test Name</th><th scope="col">Status</th><th scope="col">Duration</th></tr></thead>
+<thead><tr><th scope="col">Test Name</th><th scope="col">Status</th><th scope="col" class="sortable-duration">Duration</th></tr></thead>
 <tbody>
 ${rows}
 </tbody></table></div></div>`;

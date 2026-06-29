@@ -1979,7 +1979,7 @@ a:hover {
 }
 
 button#toggle-all,
-button#toggle-failed {
+.status-chip {
     padding: 8px 16px;
     font-size: 14px;
     font-weight: 500;
@@ -1992,6 +1992,61 @@ button#toggle-failed {
     user-select: none;
     transition: all 0.2s ease;
     width: 100%;
+}
+
+.status-chip[aria-pressed="false"] {
+    opacity: 0.5;
+    text-decoration: line-through;
+}
+
+.status-chips {
+    display: flex;
+    gap: 8px;
+}
+
+.test-search {
+    padding: 8px 12px;
+    font-size: 14px;
+    color: #24292e;
+    background-color: #fff;
+    border: 1px solid rgba(27,31,35,0.15);
+    border-radius: 6px;
+    width: 100%;
+}
+
+th.sortable-duration {
+    cursor: pointer;
+    user-select: none;
+}
+
+th.sortable-duration::after {
+    content: " \2195";
+    opacity: 0.4;
+}
+
+th.sortable-duration[data-sort="desc"]::after { content: " \2193"; opacity: 1; }
+th.sortable-duration[data-sort="asc"]::after { content: " \2191"; opacity: 1; }
+
+.slowest-tests details {
+    margin: 12px 0;
+}
+
+.slowest-tests summary {
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.slowest-tests ol {
+    margin: 8px 0 0;
+}
+
+.slowest-duration {
+    color: #6a737d;
+}
+
+.no-match {
+    color: #6a737d;
+    font-style: italic;
 }
 
 [title]:not(.timeline-scrubber-marker) {
@@ -2012,9 +2067,14 @@ button#toggle-failed {
     }
 
     button#toggle-all,
-    button#toggle-failed {
+    .status-chip {
         width: auto;
         white-space: nowrap;
+    }
+
+    .test-search {
+        width: auto;
+        min-width: 220px;
     }
 
     .collapsible {
@@ -3089,10 +3149,21 @@ button#toggle-failed {
     }
 
     button#toggle-all,
-    button#toggle-failed {
+    .status-chip {
         color: #e7e7e7;
         background-color: #4a4a4a;
         border: 1px solid rgba(255, 255, 255, 0.15);
+    }
+
+    .test-search {
+        color: #e7e7e7;
+        background-color: #2a2a2a;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+    }
+
+    .slowest-duration,
+    .no-match {
+        color: #9aa0a6;
     }
     
     a {

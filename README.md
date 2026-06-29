@@ -4,9 +4,10 @@ Generate static HTML reports from XCTest `.xcresult` bundles.
 
 ## Highlights
 - Builds an `index.html` suite overview and per-test detail pages.
-- "Show only failed" button on the main page to hide passing/skipped tests and all-passing suites.
+- Search box, per-status chips (passed/failed/skipped), and Duration-column sort
+  on the main page, plus a collapsible "Slowest tests" section.
 - Optional custom header note under the title (`--header-note`), e.g. the branch under test.
-- Writes an agent/LLM-readable `report.md` + per-test Markdown (see below).
+- Writes an agent/LLM-readable `report.md`, a failures-only `failures.md`, and per-test Markdown (see below).
 - Renders timeline + scrubber + media previews for test activities.
 - Exports attachments and supports video, image, text, and plist preview flows.
 - Compares against previous report folders in the same parent directory.
@@ -20,6 +21,9 @@ into failures without the `.xcresult`:
 - `report.md` — start here. Run result, counts, pass rate, build errors/warnings,
   and a table of **failed tests** (each with a one-line reason), followed by every
   suite and test.
+- `failures.md` — the cheap entry point. Every failed test's full detail inlined
+  into one self-contained file, so an agent reads one file without following
+  links. Always written; says so plainly when nothing failed.
 - `agent-tests/<test>.md` — one file per test: result, identifier, device, the
   failure message, source locations, stack-trace preview, the full activity
   **steps** tree (timestamps, `[FAIL]` marks the failing step), previous-run
@@ -100,6 +104,7 @@ Typical output directory:
 
 - `index.html`
 - `report.md` (agent/LLM-readable index)
+- `failures.md` (agent/LLM-readable, failures only, full detail inlined)
 - `summary.json`
 - `tests_full.json`
 - `tests_grouped.json`

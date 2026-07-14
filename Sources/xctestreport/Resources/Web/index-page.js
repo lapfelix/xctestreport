@@ -117,6 +117,68 @@
     });
   });
 
+  // Sort the top-level list of suites by name/failed/total/percent/duration/avg.
+  (function suiteSort() {
+    if (suites.length === 0) { return; }
+    var container = suites[0].parentNode;
+    var buttons = Array.prototype.slice.call(document.getElementsByClassName('suite-sort-btn'));
+    if (buttons.length === 0) { return; }
+
+    var extractors = {
+      name: function(suite) { return (suite.getAttribute('data-suite-name') || '').toLowerCase(); },
+      failed: function(suite) { return parseFloat(suite.getAttribute('data-failed-tests')) || 0; },
+      total: function(suite) { return parseFloat(suite.getAttribute('data-total-tests')) || 0; },
+      percent: function(suite) { return parseFloat(suite.getAttribute('data-percent-passed')) || 0; },
+      duration: function(suite) { return parseFloat(suite.getAttribute('data-suite-duration')) || 0; },
+      avg: function(suite) { return parseFloat(suite.getAttribute('data-avg-duration')) || 0; }
+    };
+
+    var activeKey = 'name';
+    var activeDirection = 'asc';
+
+    function applySort() {
+      var extractor = extractors[activeKey];
+      var direction = activeDirection;
+      var sorted = suites.slice().sort(function(a, b) {
+        var va = extractor(a);
+        var vb = extractor(b);
+        var cmp;
+        if (typeof va === 'string') {
+          cmp = va < vb ? -1 : (va > vb ? 1 : 0);
+        } else {
+          cmp = va - vb;
+        }
+        if (cmp === 0) {
+          var na = extractors.name(a);
+          var nb = extractors.name(b);
+          cmp = na < nb ? -1 : (na > nb ? 1 : 0);
+        } else if (direction === 'desc') {
+          cmp = -cmp;
+        }
+        return cmp;
+      });
+      sorted.forEach(function(suite) { container.appendChild(suite); });
+    }
+
+    buttons.forEach(function(button) {
+      button.addEventListener('click', function() {
+        var key = button.getAttribute('data-sort-key');
+        if (key === activeKey) {
+          activeDirection = activeDirection === 'asc' ? 'desc' : 'asc';
+        } else {
+          activeKey = key;
+          activeDirection = key === 'name' ? 'asc' : 'desc';
+        }
+        buttons.forEach(function(btn) {
+          var isActive = btn === button;
+          btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+          btn.setAttribute('data-sort', isActive ? activeDirection : '');
+        });
+        applySort();
+      });
+    });
+  })();
+
   // Top 10 slowest tests across all suites, in a collapsed section.
   (function buildSlowest() {
     var container = document.getElementById('slowest-tests');

@@ -31,15 +31,21 @@ function testRow(test) {
 
 // Mirrors the suite-section markup in ReportGenerator.swift.
 function suiteSection(suite) {
-  const total = suite.tests.length;
-  const passed = suite.tests.filter((t) => t.status === 'passed').length;
-  const rows = suite.tests.map(testRow).join('\n');
-  return `<div class="suite"><h2 class="collapsible">
+  const allTests = suite.tests;
+  const passed = allTests.filter((t) => t.status === 'passed').length;
+  const failed = allTests.filter((t) => t.status === 'failed').length;
+  // Mirrors TestCounts.totalTests: passed + failed, excluding skipped.
+  const totalExcludingSkipped = allTests.filter((t) => t.status !== 'skipped').length;
+  const percentPassed = totalExcludingSkipped > 0 ? (passed / totalExcludingSkipped) * 100 : 100;
+  const suiteDuration = allTests.reduce((sum, t) => sum + (t.duration == null ? 1 : t.duration), 0);
+  const avgDuration = suiteDuration / Math.max(allTests.length, 1);
+  const rows = allTests.map(testRow).join('\n');
+  return `<div class="suite" data-suite-name="${htmlEscape(suite.name.toLowerCase())}" data-total-tests="${totalExcludingSkipped}" data-failed-tests="${failed}" data-percent-passed="${percentPassed}" data-suite-duration="${suiteDuration}" data-avg-duration="${avgDuration}"><h2 class="collapsible">
     <span class="suite-name">${htmlEscape(suite.name)}</span>
     <span class="suite-stats">
-        <span class="stats-number">${passed}/${total}</span> Passed
-        <span class="stats-percent">(0.0%)</span>
-        <span class="suite-duration">1.0 sec</span>
+        <span class="stats-number">${passed}/${totalExcludingSkipped}</span> Passed
+        <span class="stats-percent">(${percentPassed.toFixed(1)}%)</span>
+        <span class="suite-duration">${suiteDuration.toFixed(1)} sec</span>
     </span>
 </h2><div class="content">
 <table class="data-table suite-tests-table" style="margin-top:0px">

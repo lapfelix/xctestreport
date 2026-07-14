@@ -30,6 +30,17 @@
 </div>
 {{build_results_html}}
 {{comparison_info_html}}
+<div class="suite-sort-bar">
+    <span class="suite-sort-label">Sort suites by:</span>
+    <span class="suite-sort-options">
+        <button type="button" class="suite-sort-btn" data-sort-key="name" aria-pressed="true" data-sort="asc">Name</button>
+        <button type="button" class="suite-sort-btn" data-sort-key="failed" aria-pressed="false">Failed</button>
+        <button type="button" class="suite-sort-btn" data-sort-key="total" aria-pressed="false">Total</button>
+        <button type="button" class="suite-sort-btn" data-sort-key="percent" aria-pressed="false">% Passed</button>
+        <button type="button" class="suite-sort-btn" data-sort-key="duration" aria-pressed="false">Time</button>
+        <button type="button" class="suite-sort-btn" data-sort-key="avg" aria-pressed="false">Avg Time</button>
+    </span>
+</div>
 <div id="slowest-tests" class="slowest-tests"></div>
 {{suite_sections_html}}
 <p id="no-match" class="no-match" style="display:none">No tests match.</p>

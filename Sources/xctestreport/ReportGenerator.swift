@@ -526,11 +526,13 @@ extension XCTestReport {
                 durationText = String(format: "%.1f sec", totalDuration)
             }
 
+            let avgDuration = totalDuration / Double(max(tests.count, 1))
+
             suiteHTMLQueue.sync {
                 suiteSections[suite] = []
                 suiteSections[suite]?.append((index: -1, html:
                     """
-                    <div class="suite"><h2 class="collapsible">
+                    <div class="suite" data-suite-name="\(htmlEscape(suite.lowercased()))" data-total-tests="\(suiteCounts.totalTests)" data-failed-tests="\(suiteCounts.failedTests)" data-percent-passed="\(suiteCounts.percentagePassed)" data-suite-duration="\(totalDuration)" data-avg-duration="\(avgDuration)"><h2 class="collapsible">
                         <span class="suite-name">\(suite)</span>
                         <span class="suite-stats">
                             <span class="stats-number">\(suiteCounts.passedTests)/\(suiteCounts.totalTests)</span> Passed

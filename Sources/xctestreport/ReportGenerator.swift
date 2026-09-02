@@ -168,19 +168,47 @@ extension XCTestReport {
             throw RuntimeError(message: "Failed to decode full results.")
         }
 
-        var allTests = [TestNode]()
-        func collectTestNodes(_ nodes: [TestNode]) {
+        func collectTestCases(_ nodes: [TestNode]) -> [TestNode] {
+            var testCases = [TestNode]()
             for node in nodes {
                 if node.nodeType == "Test Case" {
-                    allTests.append(node)
+                    testCases.append(node)
                 }
                 if let childNodes = node.children {
-                    collectTestNodes(childNodes)
+                    testCases.append(contentsOf: collectTestCases(childNodes))
                 }
+            }
+            return testCases
+        }
+
+        var allTests = collectTestCases(fullResults.testNodes)
+
+        // Tests from additional bundles are only enumerated here; details, activities and
+        // attachments still resolve against the main bundle, which contains every plan.
+        if !additionalTestsFrom.isEmpty {
+            var knownTestIdentifiers = Set(allTests.compactMap { $0.nodeIdentifier })
+            for bundlePath in additionalTestsFrom {
+                let testsCmd = [
+                    "xcrun", "xcresulttool", "get", "test-results", "tests", "--path", bundlePath,
+                    "--compact",
+                ]
+                let (json, exitCode) = shell(testsCmd)
+                guard exitCode == 0, let data = json?.data(using: .utf8),
+                    let additionalResults = try? decoder.decode(FullTestResults.self, from: data)
+                else {
+                    print("Warning: could not read tests from \(bundlePath); skipping.")
+                    continue
+                }
+                let additionalTests = collectTestCases(additionalResults.testNodes).filter { test in
+                    guard let identifier = test.nodeIdentifier else { return true }
+                    return !knownTestIdentifiers.contains(identifier)
+                }
+                knownTestIdentifiers.formUnion(additionalTests.compactMap { $0.nodeIdentifier })
+                allTests.append(contentsOf: additionalTests)
+                print("Appended \(additionalTests.count) tests from \(bundlePath)")
             }
         }
 
-        collectTestNodes(fullResults.testNodes)
         let overallCounts = Self.testCounts(for: allTests)
 
         let groupedTests = Dictionary(grouping: allTests) { test -> String in

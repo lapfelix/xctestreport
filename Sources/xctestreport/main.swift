@@ -35,6 +35,18 @@ struct XCTestReport: ParsableCommand {
     )
     var headerNote: String?
 
+    @Option(
+        name: .customLong("additional-tests-from"),
+        help: """
+        Additional .xcresult bundle whose tests are appended to the report. May be repeated. \
+        Works around `xcresulttool get test-results tests` listing only the first test plan of a \
+        bundle merged from different test plans: pass the merged bundle as the main argument \
+        (per-test details, activities and attachments resolve fine there) and the dropped plan's \
+        bundle here so its tests appear in the report.
+        """
+    )
+    var additionalTestsFrom: [String] = []
+
     struct RuntimeError: Error {
         let message: String
     }

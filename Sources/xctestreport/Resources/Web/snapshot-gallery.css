@@ -1,0 +1,378 @@
+/* ---------------------------------------------------------------------------
+   Snapshot gallery (snapshots.html). Loaded after report.css, which supplies the
+   page chrome and the snapshot-diff viewer styling.
+   --------------------------------------------------------------------------- */
+
+.snapshot-gallery-page h1 {
+    font-size: 1.35rem;
+    margin-bottom: 6px;
+}
+
+.sg-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.sg-summary-counts {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+}
+
+.sg-device {
+    color: #66758D;
+    font-size: 0.85rem;
+}
+
+.sg-filters {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.sg-filters .test-search {
+    flex: 1 1 220px;
+    min-width: 0;
+}
+
+.sg-suite-chips {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.sg-chips-label {
+    color: #66758D;
+    font-size: 0.82rem;
+}
+
+.sg-toggle,
+.sg-chip {
+    font: inherit;
+    font-size: 0.82rem;
+    line-height: 1.2;
+    padding: 5px 10px;
+    border-radius: 999px;
+    border: 1px solid #C6CEDA;
+    background: #FFFFFF;
+    color: #46506A;
+    cursor: pointer;
+}
+
+.sg-toggle:hover,
+.sg-chip:hover {
+    border-color: #8C9AB4;
+}
+
+.sg-toggle[aria-pressed="true"],
+.sg-chip[aria-pressed="true"] {
+    background: #2F6FEB;
+    border-color: #2F6FEB;
+    color: #FFFFFF;
+}
+
+.sg-chip-count {
+    margin-left: 6px;
+    opacity: 0.75;
+}
+
+.sg-readout {
+    margin: 0;
+    color: #66758D;
+    font-size: 0.85rem;
+}
+
+.sg-note {
+    margin: 10px 0 16px;
+    padding: 8px 12px;
+    border-left: 3px solid #C6CEDA;
+    color: #55617A;
+    font-size: 0.85rem;
+    background: #FFFFFF;
+    border-radius: 0 6px 6px 0;
+}
+
+/* Suites */
+
+.sg-suite[hidden],
+.sg-item[hidden],
+.sg-empty[hidden] {
+    display: none !important;
+}
+
+.sg-suite {
+    margin-bottom: 18px;
+}
+
+.snapshot-gallery-page h2.sg-suite-head {
+    margin: 0;
+    padding: 0;
+    background: none;
+    border-radius: 6px 6px 0 0;
+    overflow: hidden;
+}
+
+.sg-suite-toggle {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    width: 100%;
+    padding: 10px 12px;
+    border: 0;
+    background: lightgrey;
+    color: inherit;
+    font: inherit;
+    font-size: 1rem;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+}
+
+.sg-caret {
+    display: inline-block;
+    width: 0;
+    height: 0;
+    border-left: 6px solid currentColor;
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    transform: rotate(90deg);
+    transition: transform 0.15s;
+}
+
+.sg-suite-toggle[aria-expanded="false"] .sg-caret {
+    transform: rotate(0deg);
+}
+
+.sg-suite-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.sg-suite-count,
+.sg-suite-changed {
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: #46506A;
+}
+
+.sg-suite-body {
+    border: 1px solid #DDD;
+    border-top: 0;
+    border-radius: 0 0 6px 6px;
+    padding: 10px;
+    background: #FFFFFF;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* Items */
+
+.sg-item {
+    border: 1px solid #E2E6EE;
+    border-radius: 6px;
+    padding: 10px 12px;
+    background: #FCFCFD;
+}
+
+.sg-item-head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+}
+
+.sg-item-name {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.sg-item-meta {
+    color: #66758D;
+    font-size: 0.82rem;
+}
+
+.sg-item-link {
+    margin-left: auto;
+    font-size: 0.82rem;
+}
+
+.sg-badge {
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+}
+
+.sg-badge-changed {
+    background: #FCE8E8;
+    border-color: #E7B0B0;
+    color: #8E2222;
+}
+
+.sg-badge-failed {
+    background: #FFF1E2;
+    border-color: #E7C39B;
+    color: #8A4C10;
+}
+
+.sg-badge-matched {
+    background: #E6F4EA;
+    border-color: #A8D5B5;
+    color: #1E6B36;
+}
+
+.sg-badge-skipped {
+    background: #F0F0F0;
+    border-color: #D0D0D0;
+    color: #555555;
+}
+
+.sg-item-body {
+    margin-top: 8px;
+}
+
+.sg-item-body .snapshot-diffs {
+    margin-top: 0;
+}
+
+/* Server-rendered fallback shown until snapshot-diff.js takes over (and forever without JS):
+   the raw figures carry pixel widths, so they need containing. */
+
+.snapshot-gallery-page .snapshot-comparison {
+    margin: 8px 0 0;
+}
+
+.snapshot-gallery-page .snapshot-comparison-images {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.snapshot-gallery-page .snapshot-image {
+    flex: 1 1 180px;
+    min-width: 0;
+}
+
+.snapshot-gallery-page .snapshot-image img {
+    max-width: 100%;
+    height: auto;
+}
+
+.snapshot-gallery-page .snapshot-image-label {
+    margin: 0 0 4px;
+    font-size: 0.78rem;
+}
+
+.snapshot-gallery-page .snapshot-comparison-stats {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+}
+
+/* Empty spans that only exist as deep-link targets, sitting at the top of their item. */
+.sg-anchor {
+    display: block;
+    height: 0;
+    scroll-margin-top: 16px;
+}
+
+@media (max-width: 560px) {
+    .sg-filters .test-search {
+        flex-basis: 100%;
+    }
+
+    .sg-item-link {
+        margin-left: 0;
+    }
+
+    .sg-suite-body {
+        padding: 8px 6px;
+    }
+
+    .sg-item {
+        padding: 8px;
+    }
+}
+
+@media (prefers-color-scheme: dark) {
+    .sg-device,
+    .sg-chips-label,
+    .sg-readout,
+    .sg-item-meta {
+        color: #9AA7BD;
+    }
+
+    .sg-toggle,
+    .sg-chip {
+        background: #1C1C1C;
+        border-color: #3C4A62;
+        color: #D8E0EE;
+    }
+
+    .sg-toggle[aria-pressed="true"],
+    .sg-chip[aria-pressed="true"] {
+        background: #2F6FEB;
+        border-color: #4B86F5;
+        color: #FFFFFF;
+    }
+
+    .sg-note {
+        background: #171717;
+        border-left-color: #3C4A62;
+        color: #B9C4D6;
+    }
+
+    .sg-suite-toggle {
+        background: rgb(59, 59, 59);
+        color: #FFFFFF;
+    }
+
+    .sg-suite-count,
+    .sg-suite-changed {
+        color: #D0D8E6;
+    }
+
+    .sg-suite-body {
+        background: #171717;
+        border-color: #333333;
+    }
+
+    .sg-item {
+        background: #1B1B1B;
+        border-color: #303030;
+    }
+
+    .sg-badge-changed {
+        background: #3A1E1E;
+        border-color: #7A3B3B;
+        color: #F4B8B8;
+    }
+
+    .sg-badge-failed {
+        background: #3A2A16;
+        border-color: #7C5A2E;
+        color: #F3CB9B;
+    }
+
+    .sg-badge-matched {
+        background: #17301F;
+        border-color: #3C6B4B;
+        color: #A8DCBA;
+    }
+
+    .sg-badge-skipped {
+        background: #262626;
+        border-color: #444444;
+        color: #CCCCCC;
+    }
+}

@@ -61,7 +61,8 @@ extension XCTestReport {
         testActivities: TestActivities?,
         attachmentsByTestIdentifier: [String: [AttachmentManifestItem]],
         primaryFailureMessage: String?,
-        sourceLocationCandidateTexts: [String]
+        sourceLocationCandidateTexts: [String],
+        snapshotComparisons: [SnapshotComparison] = []
     ) -> (markdown: String, failureSummary: String?) {
         let isFailure = Self.isFailureTestResult(result)
         let attachments = test.nodeIdentifier.flatMap { attachmentsByTestIdentifier[$0] } ?? []
@@ -142,6 +143,34 @@ extension XCTestReport {
             lines.append("## Steps")
             lines.append("")
             lines.append(contentsOf: stepsMarkdown)
+            lines.append("")
+        }
+
+        if !snapshotComparisons.isEmpty {
+            lines.append("## Snapshot comparisons")
+            lines.append("")
+            lines.append("| Snapshot | Expected | Actual | Changed | Max delta | Images |")
+            lines.append("| --- | --- | --- | --- | --- | --- |")
+            for comparison in snapshotComparisons {
+                var imageLinks = [
+                    "[expected](\(linkDestination(comparison.expected.src)))",
+                    "[actual](\(linkDestination(comparison.actual.src)))",
+                ]
+                if let diff = comparison.diff {
+                    let label = comparison.diffSynthesized ? "diff (generated)" : "diff"
+                    imageLinks.append("[\(label)](\(linkDestination(diff.src)))")
+                }
+                let percent = String(format: "%.2f%%", comparison.changedFraction * 100)
+                let cells = [
+                    markdownTableCell(comparison.name),
+                    "\(comparison.expected.width)x\(comparison.expected.height)",
+                    "\(comparison.actual.width)x\(comparison.actual.height)",
+                    percent,
+                    "\(comparison.maxChannelDelta)",
+                    imageLinks.joined(separator: " / "),
+                ]
+                lines.append("| \(cells.joined(separator: " | ")) |")
+            }
             lines.append("")
         }
 

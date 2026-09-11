@@ -213,12 +213,29 @@ extension XCTestReport {
         return String(data: encoded, encoding: .utf8) ?? "[]"
     }
 
+    /// A leaf whose only content is imagery the snapshot comparison section already renders, so it
+    /// gives the scrubber nothing of its own to show.
+    private func timelineNodeIsSnapshotOnly(
+        _ node: TimelineNode, snapshotComparisonSources: Set<String>
+    ) -> Bool {
+        guard node.children.isEmpty, !node.failureAssociated, !node.failureBranchStyle,
+            !node.attachments.isEmpty
+        else { return false }
+        return node.attachments.allSatisfy { attachment in
+            guard let relativePath = attachment.relativePath else { return false }
+            return snapshotComparisonSources.contains(relativePath)
+        }
+    }
+
+    /// Sources already rendered by the snapshot comparison section, so the timeline showing them
+    /// again is not a reason to keep it on the page.
     func renderTimelineVideoSection(
         for testIdentifier: String?, activities: TestActivities?,
         attachmentsByTestIdentifier: [String: [AttachmentManifestItem]],
         sourceLocationBySymbol: [String: SourceLocation] = [:],
         template: String,
-        payloadBaseName: String?
+        payloadBaseName: String?,
+        snapshotComparisonSources: Set<String> = []
     ) -> String {
         guard let testIdentifier else { return "" }
 
@@ -275,6 +292,10 @@ extension XCTestReport {
             activityTimestampRange: activityTimestampRange)
 
         var nextId = 1
+        var hasTouchGestures = false
+        var hasHierarchySnapshots = false
+        var hasFailureNodes = false
+        var hasScrubbableActivity = false
         let fallbackTimelineBase =
             videoSources.first?.startTime ?? screenshotSources.first?.time ?? Date()
             .timeIntervalSince1970
@@ -313,6 +334,14 @@ extension XCTestReport {
                 includeManifestFallback: includeManifestTouchFallback
             )
             let hierarchySnapshots = buildUIHierarchySnapshots(from: collapsedTimelineNodes)
+            hasTouchGestures = hasTouchGestures || !touchGestures.isEmpty
+            hasHierarchySnapshots = hasHierarchySnapshots || !hierarchySnapshots.isEmpty
+            hasFailureNodes = hasFailureNodes || !terminalFailureIDs.isEmpty
+            hasScrubbableActivity =
+                hasScrubbableActivity
+                || collapsedTimelineNodes.contains {
+                    !timelineNodeIsSnapshotOnly($0, snapshotComparisonSources: snapshotComparisonSources)
+                }
             let events = timestampedNodes.map { node in
                 let startTime = node.timestamp ?? timelineBaseTime
                 let endTime = max(startTime, node.endTimestamp ?? startTime)
@@ -372,6 +401,14 @@ extension XCTestReport {
                 """
             )
         }
+
+        let hasUnexplainedScreenshots = screenshotSources.contains {
+            !snapshotComparisonSources.contains($0.src)
+        }
+        let timelineHasSomethingToShow =
+            !videoSources.isEmpty || hasUnexplainedScreenshots || hasTouchGestures
+            || hasHierarchySnapshots || hasFailureNodes || hasScrubbableActivity
+        guard timelineHasSomethingToShow else { return "" }
 
         if runStates.isEmpty {
             runStates = [

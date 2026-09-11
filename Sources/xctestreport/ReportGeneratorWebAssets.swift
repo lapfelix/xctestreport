@@ -15,6 +15,7 @@ extension XCTestReport {
         let indexTemplate: String
         let testDetailTemplate: String
         let timelineSectionTemplate: String
+        let snapshotGalleryTemplate: String
     }
 
     func loadWebTemplates() throws -> WebTemplates {
@@ -24,7 +25,9 @@ extension XCTestReport {
             testDetailTemplate: try loadWebTextResource(
                 named: "test-detail", withExtension: "html", subdirectory: "Web/templates"),
             timelineSectionTemplate: try loadWebTextResource(
-                named: "timeline-section", withExtension: "html", subdirectory: "Web/templates")
+                named: "timeline-section", withExtension: "html", subdirectory: "Web/templates"),
+            snapshotGalleryTemplate: try loadWebTextResource(
+                named: "snapshots", withExtension: "html", subdirectory: "Web/templates")
         )
     }
 
@@ -39,6 +42,12 @@ extension XCTestReport {
             named: "plist-preview", withExtension: "js", subdirectory: "Web", to: directory)
         try copyWebAsset(
             named: "timeline-view", withExtension: "js", subdirectory: "Web", to: directory)
+        try copyWebAsset(
+            named: "snapshot-diff", withExtension: "js", subdirectory: "Web", to: directory)
+        try copyWebAsset(
+            named: "snapshot-gallery", withExtension: "js", subdirectory: "Web", to: directory)
+        try copyWebAsset(
+            named: "snapshot-gallery", withExtension: "css", subdirectory: "Web", to: directory)
     }
 
     func renderTemplate(_ template: String, values: [String: String], templateName: String) throws -> String {

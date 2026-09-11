@@ -229,6 +229,12 @@ extension XCTestReport {
         let processedTestsQueue = DispatchQueue(label: "processedTests")
         var agentEntries = [AgentTestEntry]()
         let agentEntriesQueue = DispatchQueue(label: "agentEntries")
+        let summaryDevice = summary.devicesAndConfigurations.first?.device
+        var snapshotReportEntries = [SnapshotReportTestEntry]()
+        // Every test in a snapshot-producing class, comparisons or not; the gallery lists the
+        // passing ones too, since images only exist for failures.
+        var snapshotGalleryEntries = [SnapshotReportTestEntry]()
+        let snapshotReportQueue = DispatchQueue(label: "snapshotReportEntries")
         let preprocessingGroup = DispatchGroup()
         let preprocessingQueue = DispatchQueue(
             label: "testPreprocessing", attributes: .concurrent)
@@ -413,13 +419,43 @@ extension XCTestReport {
                         timelineSourceLocationMap = [:]
                     }
 
+                    let snapshotComparisons = buildSnapshotComparisons(
+                        attachments: attachmentsByTestIdentifier[test.nodeIdentifier ?? ""] ?? [])
+                    let snapshotDevice = snapshotDeviceInfo(
+                        testDetails: testDetails, fallbackDevice: summaryDevice)
+                    let snapshotSuiteName =
+                        test.nodeIdentifier?.split(separator: "/").first.map(String.init)
+                        ?? "Unknown Suite"
+                    var snapshotGalleryLinkHTML = ""
+                    if let firstComparison = snapshotComparisons.first {
+                        let anchor = snapshotGalleryComparisonElementID(
+                            suite: snapshotSuiteName,
+                            testName: test.name,
+                            comparisonName: firstComparison.name)
+                        snapshotGalleryLinkHTML =
+                            " <a class=\"snapshot-gallery-link\" "
+                            + "href=\"../\(snapshotGalleryFileName)#\(anchor)\">All snapshots</a>"
+                    }
+                    let snapshotDiffHtml = renderSnapshotDiffSection(
+                        comparisons: snapshotComparisons, device: snapshotDevice,
+                        titleExtraHTML: snapshotGalleryLinkHTML)
+                    var snapshotComparisonSources = Set<String>()
+                    for comparison in snapshotComparisons {
+                        snapshotComparisonSources.insert(comparison.expected.src)
+                        snapshotComparisonSources.insert(comparison.actual.src)
+                        if let diffSrc = comparison.diff?.src {
+                            snapshotComparisonSources.insert(diffSrc)
+                        }
+                    }
+
                     let timelineAndVideoSection = renderTimelineVideoSection(
                         for: test.nodeIdentifier,
                         activities: testActivities,
                         attachmentsByTestIdentifier: attachmentsByTestIdentifier,
                         sourceLocationBySymbol: timelineSourceLocationMap,
                         template: timelineTemplate,
-                        payloadBaseName: (testPageName as NSString).deletingPathExtension
+                        payloadBaseName: (testPageName as NSString).deletingPathExtension,
+                        snapshotComparisonSources: snapshotComparisonSources
                     )
 
                     let detailsPanelHtml: String
@@ -451,6 +487,7 @@ extension XCTestReport {
                                 "compact_failure_box_html": compactFailureBoxHtml,
                                 "details_panel_html": detailsPanelHtml,
                                 "timeline_and_video_section_html": timelineAndVideoSection,
+                                "snapshot_diff_html": snapshotDiffHtml,
                             ],
                             templateName: "test-detail.html")
                     } catch {
@@ -467,6 +504,25 @@ extension XCTestReport {
                     let suiteName =
                         test.nodeIdentifier?.split(separator: "/").first.map(String.init)
                         ?? "Unknown Suite"
+                    if snapshotDiffEnabled {
+                        let snapshotEntry = SnapshotReportTestEntry(
+                            testIdentifier: test.nodeIdentifier,
+                            testName: test.name,
+                            suiteName: suiteName,
+                            testPagePath: "\(testPagesDirectoryName)/\(testPageName)",
+                            result: result,
+                            failureMessage: primaryFailureMessage?
+                                .trimmingCharacters(in: .whitespacesAndNewlines),
+                            device: snapshotDevice,
+                            comparisons: snapshotComparisons)
+                        snapshotReportQueue.sync {
+                            snapshotGalleryEntries.append(snapshotEntry)
+                            if !snapshotComparisons.isEmpty {
+                                snapshotReportEntries.append(snapshotEntry)
+                            }
+                        }
+                    }
+
                     let (testMarkdown, failureSummary) = renderTestMarkdown(
                         test: test,
                         result: result,
@@ -475,7 +531,8 @@ extension XCTestReport {
                         testActivities: testActivities,
                         attachmentsByTestIdentifier: attachmentsByTestIdentifier,
                         primaryFailureMessage: primaryFailureMessage,
-                        sourceLocationCandidateTexts: sourceLocationCandidateTexts)
+                        sourceLocationCandidateTexts: sourceLocationCandidateTexts,
+                        snapshotComparisons: snapshotComparisons)
                     let markdownFileName = agentMarkdownFileName(
                         identifier: test.nodeIdentifier, name: test.name)
                     let markdownPath = (agentTestsDirectoryPath as NSString)
@@ -509,6 +566,15 @@ extension XCTestReport {
 
         preprocessingGroup.wait()
         print("\n")
+
+        var snapshotGalleryIndexLinkHTML = ""
+        if snapshotDiffEnabled {
+            writeSnapshotReport(entries: snapshotReportEntries)
+            snapshotGalleryIndexLinkHTML = writeSnapshotGalleryPage(
+                entries: snapshotGalleryEntries,
+                reportTitle: summary.title,
+                template: webTemplates.snapshotGalleryTemplate)
+        }
 
         let previousResults = findPreviousResults()
 
@@ -794,6 +860,7 @@ extension XCTestReport {
                 "build_results_html": buildResultsHTML,
                 "comparison_info_html": comparisonInfoHTML,
                 "suite_sections_html": suiteSectionsHTML,
+                "snapshot_gallery_link_html": snapshotGalleryIndexLinkHTML,
             ],
             templateName: "index.html")
 

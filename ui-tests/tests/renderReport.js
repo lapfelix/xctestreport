@@ -77,6 +77,7 @@ function renderReport(opts = {}) {
     build_results_html: '',
     comparison_info_html: '',
     suite_sections_html: suites.map(suiteSection).join('\n'),
+    snapshot_gallery_link_html: opts.snapshotGalleryLinkHTML || '',
   };
 
   let html = fs.readFileSync(TEMPLATE_PATH, 'utf8');

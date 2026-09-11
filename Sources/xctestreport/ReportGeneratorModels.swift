@@ -47,6 +47,7 @@ extension XCTestReport {
         let modelName: String
         let platform: String?
         let osVersion: String
+        let osBuildNumber: String?
     }
 
     struct Configuration: Decodable {

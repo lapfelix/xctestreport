@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Snapshots: {{report_title}}</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="web/report.css">
+<link rel="stylesheet" href="web/snapshot-gallery.css">
+</head>
+<body class="snapshot-gallery-page">
+<h1>Snapshot gallery: {{report_title}}</h1>
+{{header_note_html}}
+<p class="agent-report-link"><a href="index.html">&#8592; Back to test report</a></p>
+<div class="summary-stats sg-summary">
+    <div class="sg-summary-counts">
+        Snapshots: <span class="stat-number">{{total_comparisons}}</span>,
+        Matched: <span class="stat-number passed-number">{{matched_comparisons}}</span>,
+        Changed: <span class="stat-number failed-number">{{changed_comparisons}}</span>
+        <span class="sg-device">{{device_label}}</span>
+    </div>
+    <div class="sg-filters">
+        <input type="search" id="sg-search" class="test-search" placeholder="Filter by snapshot or test name...">
+        <button type="button" id="sg-failed-only" class="sg-toggle" aria-pressed="{{failed_only_pressed}}">Failed only</button>
+        <button type="button" id="sg-toggle-all" class="sg-toggle" aria-pressed="false">Collapse all</button>
+    </div>
+    <div class="sg-suite-chips" id="sg-suite-chips">
+        <span class="sg-chips-label">Class:</span>
+        {{suite_chips_html}}
+        <button type="button" class="sg-chip sg-chip-all" id="sg-chip-all">All</button>
+    </div>
+    <p class="sg-readout" id="sg-readout">Showing {{visible_items}} of {{total_items}} tests</p>
+</div>
+{{limitation_note_html}}
+{{suite_sections_html}}
+<p id="sg-empty" class="no-match sg-empty" hidden>No snapshots match the current filters.</p>
+<script src="web/snapshot-gallery.js" defer></script>
+</body>
+</html>

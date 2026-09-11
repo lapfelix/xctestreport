@@ -47,6 +47,18 @@ struct XCTestReport: ParsableCommand {
     )
     var additionalTestsFrom: [String] = []
 
+    @Flag(
+        name: .customLong("no-snapshot-diff"),
+        help: "Disable snapshot visual-diff detection and rendering (enabled by default)."
+    )
+    var noSnapshotDiff: Bool = false
+
+    @Option(
+        name: .customLong("snapshot-tolerance"),
+        help: "Per-channel tolerance (0-255) below which a snapshot pixel counts as unchanged."
+    )
+    var snapshotTolerance: Int = 12
+
     struct RuntimeError: Error {
         let message: String
     }
@@ -55,6 +67,9 @@ struct XCTestReport: ParsableCommand {
         do {
             if compressVideo, videoHeight <= 0 {
                 throw RuntimeError(message: "--video-height must be greater than 0.")
+            }
+            if !(0...255).contains(snapshotTolerance) {
+                throw RuntimeError(message: "--snapshot-tolerance must be between 0 and 255.")
             }
             try generateHTMLReport()
         } catch {

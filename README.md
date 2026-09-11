@@ -51,7 +51,7 @@ cp .build/release/xctestreport /usr/local/bin/xctestreport
 
 ## CLI
 ```bash
-USAGE: xctestreport <xcresult-path> <output-dir> [--compress-video] [--video-height <video-height>] [--header-note <header-note>]
+USAGE: xctestreport <xcresult-path> <output-dir> [--compress-video] [--video-height <video-height>] [--header-note <header-note>] [--no-snapshot-diff] [--snapshot-tolerance <snapshot-tolerance>]
 
 ARGUMENTS:
   <xcresult-path>         Path to the .xcresult file.
@@ -62,6 +62,11 @@ OPTIONS:
   --video-height <n>      Maximum compressed video dimension (longest edge). Default: 1024.
   --header-note <note>    Custom note shown under the title on the report's main
                           page (e.g. "Branch: feature/new-thing").
+  --no-snapshot-diff      Disable snapshot visual-diff detection and rendering
+                          (enabled by default).
+  --snapshot-tolerance <n>
+                          Per-channel tolerance (0-255) below which a snapshot
+                          pixel counts as unchanged. Default: 12.
   -h, --help              Show help information.
 ```
 
@@ -103,14 +108,17 @@ swift run xctestreport /path/to/Test.xcresult ~/Desktop/xcresultout --header-not
 Typical output directory:
 
 - `index.html`
+- `snapshots.html` (snapshot gallery; written when the run produced at least one comparison)
 - `report.md` (agent/LLM-readable index)
 - `failures.md` (agent/LLM-readable, failures only, full detail inlined)
+- `snapshots.json` (machine-readable snapshot comparison index; written whenever snapshot diffing is enabled, even with zero comparisons)
 - `summary.json`
 - `tests_full.json`
 - `tests_grouped.json`
 - `tests/test_<identifier>.html` (one per test case)
 - `agent-tests/<identifier>.md` (one per test case, agent/LLM-readable)
-- `web/report.css`, `web/index-page.js`, `web/timeline-view.js`, `web/plist-preview.js`
+- `web/report.css`, `web/index-page.js`, `web/timeline-view.js`, `web/plist-preview.js`, `web/snapshot-diff.js`,
+  `web/snapshot-gallery.js`, `web/snapshot-gallery.css`
 - `attachments/` (exported media + previews)
 - `timeline_payloads/` (compressed timeline payload blobs)
 - `test_details/*.json`
@@ -121,6 +129,35 @@ Typical output directory:
 - JS: `Sources/xctestreport/Resources/Web/index-page.js`
 - JS: `Sources/xctestreport/Resources/Web/timeline-view.js`
 - JS: `Sources/xctestreport/Resources/Web/plist-preview.js`
+- JS: `Sources/xctestreport/Resources/Web/snapshot-diff.js`
+- JS/CSS: `Sources/xctestreport/Resources/Web/snapshot-gallery.js`, `snapshot-gallery.css`
+
+## Snapshot Comparisons
+Attachments named `<name>.expected.png` / `<name>.actual.png` (aliases: `reference` / `failure`, plus an
+optional `<name>.diff.png` or `<name>.difference.png`) are grouped into a visual comparison on the test
+page, in the per-test Markdown, and in `snapshots.json`.
+
+- Images of different sizes are compared top-left aligned over their union rect; area present in only
+  one image counts as changed and is hatched in the diff.
+- When no diff image was attached, one is synthesized next to the attachments as
+  `<counter>.synth-diff.png` (unchanged pixels dimmed to grayscale, changed pixels magenta).
+- In `snapshots.json`, every image carries `src` (relative to a test page, `../attachments/...`) and
+  `rootSrc` (relative to the report root, `attachments/...`). External consumers should use `rootSrc`.
+- Each test entry carries a `device` object since reference images are OS-version specific: `name`
+  (hardware model), `deviceName` (simulator instance, which on a watchOS run is the paired host
+  iPhone), `osVersion`, `osBuildNumber`, `platform` and `identifier`. Unresolved fields are null.
+
+### Snapshot gallery (`snapshots.html`)
+Every snapshot comparison in the run on one page, grouped by test class, linked from `index.html`
+and from the back-link in each test page's snapshot section (anchored at that comparison).
+
+- Filter bar: search over snapshot and test/suite names, a "Failed only" toggle (on by default when
+  anything failed), per-class chips, a "showing N of M" readout and an empty state.
+- Each comparison uses the same viewer as the test page; viewers are built only as items scroll into
+  view, so a gallery with dozens of comparisons stays cheap to open.
+- Xcode only attaches images when a snapshot assertion fails. A test that passed in a class that
+  produced comparisons is still listed, as a compact "matched, no images" row - the result bundle
+  carries no record of what it captured. The page says so; nothing is inferred from test names.
 
 ## Notes
 - Very large `.xcresult` bundles can still take time due to attachment export and test detail extraction.

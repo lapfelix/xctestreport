@@ -8,6 +8,10 @@ extension XCTestReport {
         (outputDir as NSString).appendingPathComponent(webAssetsDirectoryName)
     }
 
+    var attachmentsDirectoryPath: String {
+        (outputDir as NSString).appendingPathComponent("attachments")
+    }
+
     var testPagesDirectoryPath: String {
         (outputDir as NSString).appendingPathComponent(testPagesDirectoryName)
     }

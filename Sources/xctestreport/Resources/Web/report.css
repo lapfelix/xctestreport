@@ -3341,3 +3341,741 @@ th.sortable-duration[data-sort="asc"]::after { content: " \2191"; opacity: 1; }
         color: #A8BAD6;
     }
 }
+
+/* ---------------------------------------------------------------------------
+   Snapshot visual-diff viewer (snapshot-diff.js)
+   --------------------------------------------------------------------------- */
+
+.snapshot-diffs {
+    margin-top: 24px;
+}
+
+.snapshot-diffs-title {
+    margin-bottom: 10px;
+}
+
+.snapshot-diffs-enhanced [hidden] {
+    display: none !important;
+}
+
+/* The detail page is a fixed-height overflow:hidden shell, so the section has to
+   claim a share of it and scroll internally instead of being clipped away. */
+.test-detail-page .snapshot-diffs {
+    min-height: 0;
+    max-height: 100%;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.snapdiff-sectionhead {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.snapdiff-sectioncount {
+    color: #66758D;
+    font-size: 0.82rem;
+}
+
+.snapdiff-device {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: #66758D;
+    font-size: 0.78rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.snapdiff {
+    border: 1px solid #DBE1EC;
+    border-radius: 10px;
+    background: #FFFFFF;
+    margin-bottom: 12px;
+    overflow: hidden;
+}
+
+.snapdiff:focus-visible {
+    outline: 2px solid #2e6bd6;
+    outline-offset: 2px;
+}
+
+.snapdiff-head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 6px 10px;
+    background: #F3F6FB;
+    border-bottom: 1px solid transparent;
+}
+
+.snapdiff.is-open .snapdiff-head {
+    border-bottom-color: #DBE1EC;
+}
+
+.snapdiff-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 4px 2px;
+    border: 0;
+    background: transparent;
+    color: #22304A;
+    font: inherit;
+    font-weight: 600;
+    font-size: 0.9rem;
+    text-align: left;
+    cursor: pointer;
+}
+
+.snapdiff-caret {
+    flex: 0 0 auto;
+    width: 0;
+    height: 0;
+    border-left: 5px solid currentColor;
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    transition: transform 0.15s ease;
+}
+
+.snapdiff.is-open .snapdiff-caret {
+    transform: rotate(90deg);
+}
+
+.snapdiff-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: 0.82rem;
+}
+
+.snapdiff-badges {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.snapdiff-badge {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    border: 1px solid #D7E1FF;
+    background: #EFF4FF;
+    color: #2C4D89;
+    font-size: 0.74rem;
+    line-height: 1;
+    padding: 4px 8px;
+    white-space: nowrap;
+}
+
+.snapdiff-badge-size {
+    background: #FFF4E0;
+    border-color: #E7CC96;
+    color: #7A5310;
+}
+
+.snapdiff-badge-fail {
+    background: #ffebee;
+    border-color: #E6C9C9;
+    color: #c62828;
+}
+
+.snapdiff-body {
+    padding: 10px;
+    display: grid;
+    gap: 10px;
+}
+
+.snapdiff-sizebanner {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    border: 1px solid #E7CC96;
+    border-left: 4px solid #D98E12;
+    border-radius: 8px;
+    background: #FFF8EC;
+    color: #7A5310;
+    padding: 8px 10px;
+    font-size: 0.84rem;
+}
+
+.snapdiff-sizebanner-icon {
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.snapdiff-sizebanner-text {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: 0.92rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.snapdiff-sizebanner-delta {
+    font-weight: 600;
+}
+
+.snapdiff-sizebanner-note {
+    flex: 1 1 240px;
+    color: #8A6A2E;
+    font-size: 0.76rem;
+}
+
+.snapdiff-toolbar {
+    display: grid;
+    gap: 8px;
+}
+
+.snapdiff-modes,
+.snapdiff-zoom,
+.snapdiff-nav,
+.snapdiff-modeopts,
+.snapdiff-tools {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.snapdiff-tools {
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.snapdiff-mode,
+.snapdiff-btn {
+    border: 1px solid #CBD5E3;
+    border-radius: 6px;
+    background: #FAFAFA;
+    color: #334155;
+    font: inherit;
+    font-size: 0.8rem;
+    line-height: 1;
+    padding: 6px 10px;
+    cursor: pointer;
+}
+
+.snapdiff-mode:hover:not(:disabled),
+.snapdiff-btn:hover:not(:disabled) {
+    background: #F0F0F0;
+}
+
+.snapdiff-mode[aria-pressed="true"],
+.snapdiff-btn[aria-pressed="true"] {
+    background: #2e6bd6;
+    border-color: #2559b4;
+    color: #FFFFFF;
+}
+
+.snapdiff-mode[aria-pressed="true"]:hover,
+.snapdiff-btn[aria-pressed="true"]:hover {
+    background: #2559b4;
+    color: #FFFFFF;
+}
+
+.snapdiff-mode:disabled,
+.snapdiff-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.snapdiff-btn-icon {
+    width: 28px;
+    padding: 6px 0;
+    text-align: center;
+}
+
+.snapdiff-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.78rem;
+    color: #4A5A74;
+}
+
+.snapdiff-field.is-disabled {
+    opacity: 0.5;
+}
+
+.snapdiff-fieldvalue {
+    min-width: 42px;
+    font-variant-numeric: tabular-nums;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: 0.74rem;
+}
+
+.snapdiff-range {
+    width: 150px;
+    max-width: 40vw;
+    accent-color: #2e6bd6;
+}
+
+.snapdiff-range-short {
+    width: 110px;
+}
+
+.snapdiff-hint,
+.snapdiff-counter,
+.snapdiff-zoomlabel {
+    font-size: 0.76rem;
+    color: #66758D;
+}
+
+.snapdiff-counter,
+.snapdiff-zoomlabel {
+    min-width: 52px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+.snapdiff-stage {
+    position: relative;
+    display: flex;
+    gap: 8px;
+    /* Replaced by an aspect-derived inline height once the viewer measures itself. */
+    height: clamp(200px, 42vh, 620px);
+    min-height: 140px;
+    touch-action: none;
+    cursor: grab;
+    overscroll-behavior: contain;
+}
+
+.snapdiff-stage.is-panning {
+    cursor: grabbing;
+}
+
+.snapdiff-pane {
+    position: relative;
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid #D5DCE7;
+    border-radius: 8px;
+    background-color: #F4F7FC;
+    background-image:
+        linear-gradient(45deg, #E4EAF4 25%, transparent 25%),
+        linear-gradient(-45deg, #E4EAF4 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #E4EAF4 75%),
+        linear-gradient(-45deg, transparent 75%, #E4EAF4 75%);
+    background-size: 16px 16px;
+    background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+
+.snapdiff.is-broken .snapdiff-world {
+    display: none;
+}
+
+.snapdiff-world {
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform-origin: 0 0;
+    will-change: transform;
+}
+
+.snapdiff-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    display: block;
+    max-width: none;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+
+.snapdiff-canvasslot {
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+.snapdiff-swipeclip {
+    position: absolute;
+    top: 0;
+    overflow: hidden;
+}
+
+.snapdiff-pane.is-pixelated img,
+.snapdiff-pane.is-pixelated canvas {
+    image-rendering: pixelated;
+}
+
+.snapdiff-oob {
+    position: absolute;
+    background-image: repeating-linear-gradient(
+        45deg,
+        rgba(196, 118, 8, 0.92) 0,
+        rgba(196, 118, 8, 0.92) 3px,
+        rgba(255, 240, 208, 0.92) 3px,
+        rgba(255, 240, 208, 0.92) 7px);
+    outline: var(--snapdiff-hair, 1px) solid rgba(136, 78, 4, 0.95);
+}
+
+.snapdiff-boxlayer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+}
+
+.snapdiff-box {
+    position: absolute;
+    outline: var(--snapdiff-hair, 1px) solid rgba(230, 0, 160, 0.85);
+}
+
+.snapdiff-box.is-active {
+    outline-color: #00E5FF;
+    background: rgba(0, 229, 255, 0.16);
+}
+
+.snapdiff-panelabel {
+    position: absolute;
+    left: 8px;
+    top: 8px;
+    z-index: 4;
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.74);
+    color: #F2F6FF;
+    font-size: 0.7rem;
+    line-height: 1;
+    padding: 4px 8px;
+    pointer-events: none;
+    white-space: nowrap;
+    max-width: calc(100% - 16px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.snapdiff-swipehandle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 5;
+    width: 22px;
+    margin-left: -11px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: ew-resize;
+    touch-action: none;
+}
+
+.snapdiff-swipehandle::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 10px;
+    width: 2px;
+    background: rgba(255, 255, 255, 0.9);
+    box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.55);
+}
+
+.snapdiff-swipehandle::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 20px;
+    height: 20px;
+    margin: -10px 0 0 -10px;
+    border-radius: 50%;
+    border: 1px solid rgba(15, 23, 42, 0.55);
+    background: rgba(255, 255, 255, 0.95);
+}
+
+.snapdiff-swipehandle:focus-visible {
+    outline: 2px solid #2e6bd6;
+    outline-offset: -2px;
+}
+
+.snapdiff-message {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 6;
+    max-width: min(90%, 460px);
+    border: 1px solid #E6C9C9;
+    border-radius: 8px;
+    background: #FFF6F6;
+    color: #8A1E1E;
+    padding: 10px 12px;
+    font-size: 0.82rem;
+    text-align: center;
+}
+
+.snapdiff-footer {
+    display: grid;
+    gap: 8px;
+}
+
+.snapdiff-stats,
+.snapdiff-inspector,
+.snapdiff-links {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    font-size: 0.78rem;
+    color: #4A5A74;
+}
+
+.snapdiff-stat {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+}
+
+.snapdiff-stat-label {
+    color: #66758D;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.snapdiff-stat-value {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-variant-numeric: tabular-nums;
+    color: #2B3951;
+}
+
+.snapdiff-inspector {
+    min-height: 24px;
+    border: 1px solid #DBE1EC;
+    border-radius: 8px;
+    background: #FBFDFF;
+    padding: 6px 10px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.snapdiff-inspector-coord {
+    color: #2B3951;
+    min-width: 72px;
+}
+
+.snapdiff-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.snapdiff-chip-label {
+    color: #66758D;
+}
+
+.snapdiff-swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    border: 1px solid #CBD5E3;
+    background: #FFFFFF;
+}
+
+.snapdiff-swatch.is-empty {
+    background-image: repeating-linear-gradient(
+        45deg,
+        #C9D4E5 0,
+        #C9D4E5 2px,
+        #FFFFFF 2px,
+        #FFFFFF 4px);
+}
+
+.snapdiff-inspector-delta.is-outside {
+    color: #A0630B;
+}
+
+.snapdiff-link {
+    color: #2559b4;
+    text-decoration: none;
+    border: 1px solid #CBD5E3;
+    border-radius: 6px;
+    background: #FAFAFA;
+    padding: 4px 9px;
+    font-size: 0.76rem;
+}
+
+.snapdiff-link:hover {
+    background: #F0F0F0;
+}
+
+.snapdiff-note {
+    border: 1px solid #E7CC96;
+    border-radius: 8px;
+    background: #FFF8EC;
+    color: #7A5310;
+    padding: 6px 10px;
+    font-size: 0.76rem;
+}
+
+.snapdiff-legend {
+    font-size: 0.76rem;
+    color: #66758D;
+}
+
+.snapdiff-legend > summary {
+    cursor: pointer;
+}
+
+.snapdiff-legend-list {
+    margin: 6px 0 0;
+    padding-left: 18px;
+    display: grid;
+    gap: 2px;
+}
+
+@media (max-width: 767px) {
+    .snapdiff-stage.is-split {
+        flex-direction: column;
+    }
+
+    .snapdiff-range {
+        width: 120px;
+    }
+
+    .snapdiff-tools {
+        justify-content: flex-start;
+    }
+}
+
+@media (prefers-color-scheme: dark) {
+    .snapdiff {
+        background: #171717;
+        border-color: #424242;
+    }
+
+    .snapdiff-head {
+        background: #1B2432;
+    }
+
+    .snapdiff.is-open .snapdiff-head {
+        border-bottom-color: #3C4A62;
+    }
+
+    .snapdiff-toggle {
+        color: #E1E8F5;
+    }
+
+    .snapdiff-sectioncount,
+    .snapdiff-hint,
+    .snapdiff-counter,
+    .snapdiff-zoomlabel,
+    .snapdiff-stat-label,
+    .snapdiff-chip-label,
+    .snapdiff-legend {
+        color: #A8BAD6;
+    }
+
+    .snapdiff-badge {
+        background: #1F2B42;
+        border-color: #355590;
+        color: #CFDAF8;
+    }
+
+    .snapdiff-badge-size {
+        background: #514116;
+        border-color: #7A6425;
+        color: #f5d7a1;
+    }
+
+    .snapdiff-badge-fail {
+        background: #3A232D;
+        border-color: #8A596A;
+        color: #FF9A93;
+    }
+
+    .snapdiff-device {
+        color: #A8BAD6;
+    }
+
+    .snapdiff-sizebanner {
+        background: #2A2416;
+        border-color: #5A4E28;
+        border-left-color: #C08A1E;
+        color: #f5d7a1;
+    }
+
+    .snapdiff-sizebanner-note {
+        color: #D2BE8C;
+    }
+
+    .snapdiff-mode,
+    .snapdiff-btn,
+    .snapdiff-link {
+        background: #1F2733;
+        border-color: #3C4A62;
+        color: #D7E2F6;
+    }
+
+    .snapdiff-mode:hover:not(:disabled),
+    .snapdiff-btn:hover:not(:disabled),
+    .snapdiff-link:hover {
+        background: #26344D;
+    }
+
+    .snapdiff-mode[aria-pressed="true"],
+    .snapdiff-btn[aria-pressed="true"] {
+        background: #2e6bd6;
+        border-color: #4D82E3;
+        color: #FFFFFF;
+    }
+
+    .snapdiff-field {
+        color: #C0CCE2;
+    }
+
+    .snapdiff-pane {
+        border-color: #424242;
+        background-color: #1A2028;
+        background-image:
+            linear-gradient(45deg, #222A35 25%, transparent 25%),
+            linear-gradient(-45deg, #222A35 25%, transparent 25%),
+            linear-gradient(45deg, transparent 75%, #222A35 75%),
+            linear-gradient(-45deg, transparent 75%, #222A35 75%);
+    }
+
+    .snapdiff-inspector {
+        background: #151D28;
+        border-color: #3C4A62;
+        color: #D7E2F6;
+    }
+
+    .snapdiff-inspector-coord,
+    .snapdiff-stat-value,
+    .snapdiff-stats {
+        color: #D7E2F6;
+    }
+
+    .snapdiff-swatch {
+        border-color: #3C4A62;
+    }
+
+    .snapdiff-message {
+        background: #2A1D1D;
+        border-color: #5A3030;
+        color: #FFBABA;
+    }
+
+    .snapdiff-note {
+        background: #2A2416;
+        border-color: #5A4E28;
+        color: #f5d7a1;
+    }
+}

@@ -180,3 +180,43 @@ test('malformed payload preserves the static comparison and missing diff can be 
   await page.getByRole('button',{name:'Highlight (key 6)',exact:true}).click();
   await expect(page.locator('.snapdiff-canvas')).toBeVisible();
 });
+
+
+test('single-device reports keep the compact header and inspector device details', async ({page}) => {
+  await inspect(page);
+  await expect(page.locator('#sg-device-filter')).toHaveCount(0);
+  await expect(page.locator('.sg-card-device')).toHaveCount(0);
+  await expect(page.locator('.sg-inspector .snapdiff-device')).toContainText('Apple Watch Series 11');
+  await expect(page.locator('.sg-inspector .snapdiff-device')).toContainText('watchOS Simulator 27.0');
+});
+
+test('mixed devices filter cards and inspector navigation, and deep links reveal another device', async ({page}) => {
+  await server.close(); server = await serveSnapshots({mixedDevices:true});
+  await page.goto(server.url);
+  const filter = page.getByRole('combobox', {name:'Filter by device'});
+  await expect(filter.locator('option')).toHaveCount(3);
+  await expect(filter).toHaveValue('');
+  await expect(page.locator('.sg-card-device:visible').first()).toContainText('Apple Watch');
+  await filter.selectOption({label:'iPhone 17 Pro - iOS Simulator 27.0 (24A123)'});
+  await expect(page.locator('.sg-preview:visible')).toHaveCount(3);
+  await page.locator('.sg-preview:visible').first().click();
+  await expect(page.locator('.sg-position')).toHaveText('1 of 3');
+  await expect(page.locator('.sg-inspector .snapdiff-device')).toContainText('iPhone 17 Pro');
+  await page.getByRole('button',{name:'Next snapshot',exact:true}).click();
+  await expect(page.locator('.sg-inspector .snapdiff-device')).toContainText('iOS Simulator');
+  await page.keyboard.press('Escape');
+  await page.getByRole('searchbox').fill('pinbutton');
+  await expect(page.locator('.sg-preview:visible')).toHaveCount(2);
+  await page.evaluate(() => { location.hash = 'cmp-routedetailsviewsnapshottests-testdepartureswithoutseparators-routedetailsdepartures-noseparators'; });
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(filter).toHaveValue('');
+  await expect(page.locator('.sg-inspector .snapdiff-device')).toContainText('Apple Watch');
+});
+
+test('mixed-device labels fit a narrow viewport', async ({page}) => {
+  await server.close(); server = await serveSnapshots({mixedDevices:true});
+  await page.setViewportSize({width:390,height:844});
+  await page.goto(server.url);
+  await expect(page.getByRole('combobox', {name:'Filter by device'})).toBeVisible();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});

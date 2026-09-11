@@ -68,6 +68,28 @@ final class SnapshotGalleryTests: XCTestCase {
         XCTAssertTrue(html.contains("Showing 1 of 1 tests"))
     }
 
+    func testMixedDeviceHeaderAndItemMetadata() throws {
+        let report = makeReport()
+        let watch = XCTestReport.SnapshotDeviceInfo(
+            name: "Apple Watch Series 11", deviceName: "Paired iPhone", osVersion: "27.0",
+            osBuildNumber: "24R1", platform: "watchOS Simulator", identifier: "WATCH")
+        let entries = [
+            makeEntry(suite: "PhoneTests", test: "testPhone()", result: "Failed", comparisons: 1),
+            makeEntry(suite: "PhoneTests", test: "testOtherPhone()", result: "Failed", comparisons: 1),
+            makeEntry(suite: "WatchTests", test: "testWatch()", result: "Failed", comparisons: 1, device: watch),
+        ]
+        let html = try report.renderSnapshotGalleryPage(
+            suites: report.buildSnapshotGallerySuites(entries: entries),
+            reportTitle: "Mixed targets", template: try loadTemplate())
+        XCTAssertTrue(html.contains("All devices · 2"))
+        XCTAssertTrue(html.contains("data-device-label=\"\(watch.displayLabel!)\""))
+        XCTAssertTrue(html.contains("data-device-label=\"\(entries[0].device.displayLabel!)\""))
+        let single = try report.renderSnapshotGalleryPage(
+            suites: report.buildSnapshotGallerySuites(entries: [entries[2]]),
+            reportTitle: "Watch only", template: try loadTemplate())
+        XCTAssertTrue(single.contains("<span class=\"sg-device\">\(watch.displayLabel!)</span>"))
+    }
+
     // MARK: - Helpers
 
     private func loadTemplate() throws -> String {
@@ -90,7 +112,8 @@ final class SnapshotGalleryTests: XCTestCase {
     }
 
     private func makeEntry(
-        suite: String, test: String, result: String, comparisons: Int, changedPixels: Int = 12
+        suite: String, test: String, result: String, comparisons: Int, changedPixels: Int = 12,
+        device: XCTestReport.SnapshotDeviceInfo? = nil
     ) -> XCTestReport.SnapshotReportTestEntry {
         XCTestReport.SnapshotReportTestEntry(
             testIdentifier: "\(suite)/\(test)",
@@ -99,7 +122,7 @@ final class SnapshotGalleryTests: XCTestCase {
             testPagePath: "tests/test_\(suite)_\(test).html",
             result: result,
             failureMessage: nil,
-            device: XCTestReport.SnapshotDeviceInfo(
+            device: device ?? XCTestReport.SnapshotDeviceInfo(
                 name: "iPhone 17", deviceName: "iPhone 17", osVersion: "26.0",
                 osBuildNumber: "23A1", platform: "iOS Simulator", identifier: "ABC"),
             comparisons: (0..<comparisons).map { _ in makeComparison(changedPixels: changedPixels) })

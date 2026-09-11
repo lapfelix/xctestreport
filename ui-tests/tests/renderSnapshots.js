@@ -8,8 +8,12 @@ const withoutImages = ['Passed', 'Skipped', 'Failed'].map(result => ({suiteName:
 const escape = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const slug = value => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
-function renderSnapshots({ repeat = 1, malformed = false, noDiff = false } = {}) {
+function renderSnapshots({ repeat = 1, malformed = false, noDiff = false, mixedDevices = false } = {}) {
   const tests = Array.from({length: repeat}, (_, n) => source.concat(withoutImages).map(t => ({...t, testName: t.testName + (n ? `-${n}` : '')}))).flat();
+  const watch = source[0].device;
+  const phone = { name: 'iPhone 17 Pro', platform: 'iOS Simulator', osVersion: '27.0', osBuildNumber: '24A123' };
+  tests.forEach((t, index) => { t.device = mixedDevices && index % 2 ? phone : watch; });
+  const deviceLabel = d => `${d.name} - ${d.platform} ${d.osVersion} (${d.osBuildNumber})`;
   const names = [...new Set(tests.map(t => t.suiteName))];
   const sections = names.map(name => {
     const members = tests.filter(t => t.suiteName === name);
@@ -20,7 +24,7 @@ function renderSnapshots({ repeat = 1, malformed = false, noDiff = false } = {})
       const failed = t.result === 'Failed';
       const payload = malformed ? 'invalid' : encodeURIComponent(JSON.stringify(comparisons));
       const fallback = comparisons.map(c => `<figure class="snapshot-comparison"><figcaption>${escape(c.name)}</figcaption><div class="snapshot-comparison-images">${['expected','actual'].map(role => `<div class="snapshot-image"><img loading="lazy" src="${escape(c[role].src)}" width="${c[role].width}" height="${c[role].height}" alt="${role} ${escape(c.name)}"></div>`).join('')}</div></figure>`).join('');
-      return `<article class="sg-item" id="${id}" data-suite="${name}" data-failed="${failed}" data-has-viewer="${!!comparisons.length}" data-search="${escape([name,t.testName,...comparisons.map(c=>c.name)].join(' ').toLowerCase())}">${anchors}<header class="sg-item-head"><span class="sg-item-name">${escape(t.testName)}</span><span class="sg-badge">${failed?'Changed':'Matched'}</span><span class="sg-item-meta">${comparisons.length} comparisons</span><a class="sg-item-link" href="${escape(t.testPagePath)}">Test page</a></header>${comparisons.length ? `<div class="sg-item-body"><section class="snapshot-diffs" data-snapshot-comparisons-pending="${payload}">${fallback}</section></div>`:''}</article>`;
+      return `<article class="sg-item" id="${id}" data-suite="${name}" data-device-label="${escape(deviceLabel(t.device))}" data-failed="${failed}" data-has-viewer="${!!comparisons.length}" data-search="${escape([name,t.testName,...comparisons.map(c=>c.name)].join(' ').toLowerCase())}">${anchors}<header class="sg-item-head"><span class="sg-item-name">${escape(t.testName)}</span><span class="sg-badge">${failed?'Changed':'Matched'}</span><span class="sg-item-meta">${comparisons.length} comparisons</span><a class="sg-item-link" href="${escape(t.testPagePath)}">Test page</a></header>${comparisons.length ? `<div class="sg-item-body"><section class="snapshot-diffs" data-snapshot-device="${encodeURIComponent(JSON.stringify(t.device))}" data-snapshot-comparisons-pending="${payload}">${fallback}</section></div>`:''}</article>`;
     }).join('');
     return `<section class="sg-suite" data-suite="${name}"><h2 class="sg-suite-head"><button class="sg-suite-toggle" aria-expanded="true"><span class="sg-caret"></span><span class="sg-suite-name">${name}</span><span data-sg-visible>${members.length}</span></button></h2><div class="sg-suite-body">${items}</div></section>`;
   }).join('');

@@ -94,3 +94,8 @@
 
 /* Keep navigation and analysis within reach even for portrait screenshots. */
 .sg-inspector .snapdiff-stage { max-height: max(180px, calc(100dvh - 520px)); }
+
+#sg-device-filter { max-width: min(560px, 100%); padding: 8px 30px 8px 10px; border: 1px solid var(--report-line); border-radius: 7px; background: var(--report-surface); color: var(--report-ink); font: inherit; }
+.sg-card-device { flex-basis: 100%; color: var(--report-muted); font-size: 11px; overflow-wrap: anywhere; }
+.sg-summary .sg-device { min-width: 0; max-width: 100%; }
+.sg-inspector .snapdiff-device { white-space: normal; overflow-wrap: anywhere; font-family: inherit; }

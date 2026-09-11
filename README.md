@@ -153,6 +153,8 @@ and from the back-link in each test page's snapshot section (anchored at that co
 
 - Expected/actual previews let you scan failures without opening an inspector. **Show differences**
   switches the actual previews to their diff images. Grouping by test class is optional.
+- Mixed-device reports show an **All devices** filter and device/OS labels on each card.
+  The inspector shows the selected snapshot’s full device details. Single-device reports keep a compact header label.
 - Search snapshot, test, or suite names; **Failed only** starts enabled when failures exist.
   Expand **Filter test classes** to narrow the sheet further.
 - Click a preview to inspect it with all six comparison modes, synchronized zoom/pan, difference

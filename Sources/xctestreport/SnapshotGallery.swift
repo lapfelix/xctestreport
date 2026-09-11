@@ -170,9 +170,10 @@ extension XCTestReport {
             headerNoteHTML = "<p class=\"header-note\">\(htmlEscape(note))</p>"
         }
 
-        let deviceLabel =
-            items.compactMap { $0.entry.device.displayLabel }.first
-            ?? "Device unknown"
+        let deviceLabels = Set(items.map { $0.entry.device.displayLabel ?? "Device unknown" })
+        let deviceLabel = deviceLabels.count > 1
+            ? "All devices · \(deviceLabels.count)"
+            : (deviceLabels.first ?? "Device unknown")
 
         var limitationNote =
             "Snapshot images are only attached to a test that failed, so only changed comparisons "
@@ -275,6 +276,7 @@ extension XCTestReport {
         return """
             <article class="sg-item" id="\(item.elementID)" \
             data-suite="\(htmlEscape(entry.suiteName))" \
+            data-device-label="\(htmlEscape(entry.device.displayLabel ?? "Device unknown"))" \
             data-failed="\(item.failed ? "true" : "false")" \
             data-has-viewer="\(item.hasImages ? "true" : "false")" \
             data-search="\(htmlEscape(searchText))">\(anchors)

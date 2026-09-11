@@ -18,6 +18,24 @@
     var toggleAllButton = document.getElementById("sg-toggle-all");
     var readout = document.getElementById("sg-readout");
     var empty = document.getElementById("sg-empty");
+    var deviceFilter = null;
+    var deviceLabels = Array.from(new Set(items.map(function(item) {
+        return item.getAttribute("data-device-label") || "Device unknown";
+    }))).sort(function(a, b) { return a.localeCompare(b); });
+    if (deviceLabels.length > 1) {
+        var deviceHeader = document.querySelector(".sg-device");
+        deviceFilter = document.createElement("select");
+        deviceFilter.id = "sg-device-filter";
+        deviceFilter.setAttribute("aria-label", "Filter by device");
+        deviceFilter.appendChild(new Option("All devices · " + deviceLabels.length, ""));
+        deviceLabels.forEach(function(label) { deviceFilter.appendChild(new Option(label, label)); });
+        if (deviceHeader) { deviceHeader.replaceChildren(deviceFilter); }
+        deviceFilter.addEventListener("change", applyFilter);
+        items.forEach(function(item) {
+            var label = node("span", "sg-card-device", item.getAttribute("data-device-label") || "Device unknown");
+            item.querySelector(".sg-item-head").appendChild(label);
+        });
+    }
 
     function toArray(list) { return Array.prototype.slice.call(list); }
 
@@ -91,6 +109,7 @@
         }
         host.appendChild(context);
         var section = node("section", "snapshot-diffs");
+        if (entry.device) { section.setAttribute("data-snapshot-device", entry.device); }
         section.setAttribute("data-snapshot-mode", mode);
         section.setAttribute("data-snapshot-analysis-open", String(analysisOpen));
         section.setAttribute(LIVE_ATTRIBUTE, encodeURIComponent(JSON.stringify([entry.data])));
@@ -145,7 +164,7 @@
             var card = node("button", "sg-preview");
             card.type = "button";
             card.setAttribute("aria-label", "Inspect " + comparison.name);
-            var entry = { item: item, data: comparison, button: card, anchor: item.querySelectorAll(".sg-anchor")[index] };
+            var entry = { item: item, data: comparison, device: section.getAttribute("data-snapshot-device"), button: card, anchor: item.querySelectorAll(".sg-anchor")[index] };
             comparisons.push(entry);
             card.appendChild(node("span", "sg-preview-name", comparison.name));
             var pair = node("span", "sg-preview-pair");
@@ -277,7 +296,9 @@
                 var matchesFailed = !failedOnly || item.getAttribute("data-failed") === "true";
                 var matchesQuery = query === ""
                     || (item.getAttribute("data-search") || "").indexOf(query) !== -1;
-                var visible = matchesSuite && matchesFailed && matchesQuery;
+                var matchesDevice = !deviceFilter || !deviceFilter.value
+                    || deviceFilter.value === (item.getAttribute("data-device-label") || "Device unknown");
+                var visible = matchesSuite && matchesFailed && matchesQuery && matchesDevice;
                 item.hidden = !visible;
                 if (visible) { visibleInSuite += 1; }
             });
@@ -337,6 +358,7 @@
         // A deep-linked comparison must win over whatever the filters are currently hiding.
         if (item.hidden) {
             if (searchInput) { searchInput.value = ""; }
+            if (deviceFilter) { deviceFilter.value = ""; }
             setPressed(failedOnlyButton, false);
             chips.forEach(function(chip) { setPressed(chip, true); });
             applyFilter();

@@ -861,6 +861,8 @@ extension XCTestReport {
                 "comparison_info_html": comparisonInfoHTML,
                 "suite_sections_html": suiteSectionsHTML,
                 "snapshot_gallery_link_html": snapshotGalleryIndexLinkHTML,
+                "snapshot_gallery_nav_html": snapshotGalleryIndexLinkHTML.isEmpty
+                    ? "" : "<a href=\"\(snapshotGalleryFileName)\">Snapshots</a>",
             ],
             templateName: "index.html")
 

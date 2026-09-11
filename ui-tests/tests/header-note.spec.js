@@ -31,3 +31,21 @@ test('header note is HTML-escaped', async ({ page }) => {
   // The injected markup must not have created a real <script> element.
   await expect(page.locator('.header-note script')).toHaveCount(0);
 });
+
+for (const javaScriptEnabled of [true, false]) {
+  test(`snapshot navigation appears beside test results (JavaScript ${javaScriptEnabled})`, async ({ browser }) => {
+    const context = await browser.newContext({ javaScriptEnabled });
+    const page = await context.newPage();
+    await page.goto(renderReport({ suites, snapshotGalleryLinkHTML: '<p class="snapshot-gallery-link"><a href="snapshots.html">Snapshot gallery (6 changed of 6)</a></p>' }));
+    const nav = page.locator('.report-nav');
+    await expect(nav.getByRole('link')).toHaveText(['Test results', 'Snapshots', 'Markdown']);
+    await expect(nav.getByRole('link', { name: 'Snapshots', exact: true })).toHaveAttribute('href', 'snapshots.html');
+    await expect(nav.getByRole('link', { name: 'Test results', exact: true })).toHaveAttribute('aria-current', 'page');
+    await context.close();
+  });
+}
+
+test('reports without comparisons do not show a broken snapshots tab', async ({ page }) => {
+  await page.goto(renderReport({ suites }));
+  await expect(page.locator('.report-nav').getByRole('link')).toHaveText(['Test results', 'Markdown']);
+});

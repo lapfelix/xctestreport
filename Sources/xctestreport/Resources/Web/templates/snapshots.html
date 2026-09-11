@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -9,30 +9,33 @@
 <link rel="stylesheet" href="web/snapshot-gallery.css">
 </head>
 <body class="snapshot-gallery-page">
-<h1>Snapshot gallery: {{report_title}}</h1>
+<header class="report-heading"><a class="report-brand" href="index.html">xctestreport</a><h1>Snapshots <span>{{report_title}}</span></h1>
 {{header_note_html}}
-<p class="agent-report-link"><a href="index.html">&#8592; Back to test report</a></p>
+<nav class="report-nav"><a href="index.html">Test results</a><a href="snapshots.html" aria-current="page">Snapshots</a><a href="report.md">Markdown</a></nav></header>
 <div class="summary-stats sg-summary">
     <div class="sg-summary-counts">
-        Snapshots: <span class="stat-number">{{total_comparisons}}</span>,
-        Matched: <span class="stat-number passed-number">{{matched_comparisons}}</span>,
-        Changed: <span class="stat-number failed-number">{{changed_comparisons}}</span>
+        Comparisons <span class="stat-number">{{total_comparisons}}</span>
+        Matched <span class="stat-number passed-number">{{matched_comparisons}}</span>
+        Changed <span class="stat-number failed-number">{{changed_comparisons}}</span>
         <span class="sg-device">{{device_label}}</span>
     </div>
     <div class="sg-filters">
-        <input type="search" id="sg-search" class="test-search" placeholder="Filter by snapshot or test name...">
+        <input type="search" id="sg-search" class="test-search" aria-label="Search snapshots" placeholder="Search snapshots or tests…">
         <button type="button" id="sg-failed-only" class="sg-toggle" aria-pressed="{{failed_only_pressed}}">Failed only</button>
-        <button type="button" id="sg-toggle-all" class="sg-toggle" aria-pressed="false">Collapse all</button>
+        <button type="button" id="sg-diff-preview" class="sg-toggle" aria-pressed="false">Show differences</button>
+        <button type="button" id="sg-group" class="sg-toggle" aria-pressed="false">Group by class</button>
+        <button type="button" id="sg-toggle-all" hidden class="sg-toggle" aria-pressed="false">Collapse all</button>
     </div>
-    <div class="sg-suite-chips" id="sg-suite-chips">
-        <span class="sg-chips-label">Class:</span>
+    <details class="sg-class-filter"><summary>Filter test classes</summary><div class="sg-suite-chips" id="sg-suite-chips">
+        <span class="sg-chips-label">Test classes</span>
         {{suite_chips_html}}
         <button type="button" class="sg-chip sg-chip-all" id="sg-chip-all">All</button>
     </div>
-    <p class="sg-readout" id="sg-readout">Showing {{visible_items}} of {{total_items}} tests</p>
+    </details>
+    <p role="status" class="sg-readout" id="sg-readout">Showing {{visible_items}} of {{total_items}} tests</p>
 </div>
-{{limitation_note_html}}
-{{suite_sections_html}}
+<main class="sg-results">{{suite_sections_html}}</main>
+<details class="sg-about"><summary>About these snapshots</summary>{{limitation_note_html}}</details>
 <p id="sg-empty" class="no-match sg-empty" hidden>No snapshots match the current filters.</p>
 <script src="web/snapshot-gallery.js" defer></script>
 </body>

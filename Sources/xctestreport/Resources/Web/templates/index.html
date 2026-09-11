@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,20 +7,21 @@
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="web/report.css">
 </head>
-<body>
-<h1>Test Report: {{report_title}}</h1>
+<body class="report-index-page">
+<header class="report-heading"><span class="report-brand">xctestreport</span><h1>Test results <span>{{report_title}}</span></h1>
 {{header_note_html}}
-<p class="agent-report-link"><a href="report.md">Agent-readable report (Markdown)</a></p>
+<nav class="report-nav"><a href="index.html" aria-current="page">Test results</a><a href="report.md">Markdown</a></nav></header>
 {{snapshot_gallery_link_html}}
 <div class="summary-stats">
-    <div>
-        Total (excl. skipped): <span class="stat-number">{{total_tests}}</span>,
-        Passed: <span class="stat-number passed-number">{{passed_tests}}</span>,
-        Failed: <span class="stat-number failed-number">{{failed_tests}}</span>,
-        Skipped: <span class="stat-number skipped-number">{{skipped_tests}}</span>
+    <div class="report-counts">
+        <div><span class="stat-number">{{total_tests}}</span><span>Tests <small>excluding skipped</small></span></div>
+        <div><span class="stat-number passed-number">{{passed_tests}}</span><span>Passed</span></div>
+        <div><span class="stat-number failed-number">{{failed_tests}}</span><span>Failed</span></div>
+        <div><span class="stat-number skipped-number">{{skipped_tests}}</span><span>Skipped</span></div>
+        <button type="button" id="review-failures">Review failures</button>
     </div>
     <div class="summary-actions">
-        <input type="search" id="test-search" class="test-search" placeholder="Filter tests by name...">
+        <input type="search" id="test-search" class="test-search" aria-label="Search tests" placeholder="Search tests…">
         <span class="status-chips">
             <button type="button" class="status-chip" data-status="passed" aria-pressed="true">Passed</button>
             <button type="button" class="status-chip" data-status="failed" aria-pressed="true">Failed</button>
@@ -44,7 +45,7 @@
 </div>
 <div id="slowest-tests" class="slowest-tests"></div>
 {{suite_sections_html}}
-<p id="no-match" class="no-match" style="display:none">No tests match.</p>
+<p role="status" id="no-match" class="no-match" style="display:none">No tests match.</p>
 <script src="web/index-page.js"></script>
 </body>
 </html>

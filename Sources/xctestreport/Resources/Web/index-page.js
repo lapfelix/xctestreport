@@ -10,8 +10,15 @@
   }
 
   for (i = 0; i < coll.length; i++) {
+    coll[i].tabIndex = 0;
+    coll[i].setAttribute('role', 'button');
+    coll[i].setAttribute('aria-expanded', 'true');
+    coll[i].addEventListener('keydown', function(event) {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.click(); }
+    });
     coll[i].addEventListener('click', function() {
       this.classList.toggle('collapsed');
+      this.setAttribute('aria-expanded', String(!this.classList.contains('collapsed')));
     });
   }
 
@@ -27,6 +34,7 @@
           coll[j].classList.remove('collapsed');
         }
       }
+      Array.prototype.forEach.call(coll, function(head) { head.setAttribute('aria-expanded', String(!expanded)); });
       toggleAllBtn.textContent = expanded ? 'Expand All' : 'Collapse All';
     });
   }
@@ -91,6 +99,20 @@
       applyFilter();
     });
   });
+
+  var reviewFailures = document.getElementById('review-failures');
+  if (reviewFailures) {
+    reviewFailures.hidden = !document.querySelector('tr[data-status="failed"]');
+    reviewFailures.addEventListener('click', function() {
+      if (searchInput) { searchInput.value = ''; }
+      chips.forEach(function(chip) { chip.setAttribute('aria-pressed', String(chip.dataset.status === 'failed')); });
+      Array.prototype.forEach.call(coll, function(head) {
+        head.classList.remove('collapsed'); head.setAttribute('aria-expanded', 'true');
+      });
+      if (toggleAllBtn) { toggleAllBtn.textContent = 'Collapse All'; }
+      applyFilter();
+    });
+  }
 
   // Click the Duration header to sort that suite's rows: desc -> asc -> original.
   suites.forEach(function(suite) {

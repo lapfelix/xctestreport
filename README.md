@@ -148,13 +148,21 @@ page, in the per-test Markdown, and in `snapshots.json`.
   iPhone), `osVersion`, `osBuildNumber`, `platform` and `identifier`. Unresolved fields are null.
 
 ### Snapshot gallery (`snapshots.html`)
-Every snapshot comparison in the run on one page, grouped by test class, linked from `index.html`
+Every snapshot comparison in the run on one contact sheet, linked from `index.html`
 and from the back-link in each test page's snapshot section (anchored at that comparison).
 
-- Filter bar: search over snapshot and test/suite names, a "Failed only" toggle (on by default when
-  anything failed), per-class chips, a "showing N of M" readout and an empty state.
-- Each comparison uses the same viewer as the test page; viewers are built only as items scroll into
-  view, so a gallery with dozens of comparisons stays cheap to open.
+- Expected/actual previews let you scan failures without opening an inspector. **Show differences**
+  switches the actual previews to their diff images. Grouping by test class is optional.
+- Search snapshot, test, or suite names; **Failed only** starts enabled when failures exist.
+  Expand **Filter test classes** to narrow the sheet further.
+- Click a preview to inspect it with all six comparison modes, synchronized zoom/pan, difference
+  navigation, original-image downloads, and expandable **Pixel analysis** (statistics and tolerance).
+- **Previous/Next** or **[ / ]** moves through the currently visible comparisons and preserves the
+  comparison mode. **Escape** closes the inspector and restores focus to the preview.
+- The gallery loads the viewer script only when inspection starts. One viewer is active at a time;
+  closing it releases pixel buffers, blink timers, and resize observers. Preview images load lazily.
+- Serve the report over HTTP to enable canvas-based heatmaps, tolerance, and pixel inspection.
+  Static image comparisons remain available without JavaScript.
 - Xcode only attaches images when a snapshot assertion fails. A test that passed in a class that
   produced comparisons is still listed, as a compact "matched, no images" row - the result bundle
   carries no record of what it captured. The page says so; nothing is inferred from test names.
@@ -162,3 +170,10 @@ and from the back-link in each test page's snapshot section (anchored at that co
 ## Notes
 - Very large `.xcresult` bundles can still take time due to attachment export and test detail extraction.
 - Decompressed plist preview in-browser requires `DecompressionStream` support.
+
+### Browser regression checks
+
+Run `npm --prefix ui-tests test`. The Playwright suite uses the shipping templates and assets,
+with real watchOS failure images served over HTTP. It covers gallery filtering, all comparison
+modes, synthesized diffs, tolerance, keyboard navigation, mobile light/dark layouts, unavailable
+images, no-JavaScript fallbacks, viewer cleanup, and a 180-comparison contact sheet.

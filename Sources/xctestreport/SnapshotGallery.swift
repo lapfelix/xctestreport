@@ -262,8 +262,8 @@ extension XCTestReport {
 
         var body = ""
         if item.hasImages {
-            // The payload attribute is renamed by snapshot-gallery.js when the item scrolls into
-            // view, so snapshot-diff.js only builds viewers for what is actually being looked at.
+            // The gallery reads the parked payload to build lightweight previews. It creates
+            // a live section for just the selected comparison when the inspector opens.
             let section = renderSnapshotDiffSection(
                 comparisons: item.comparisons,
                 device: entry.device,

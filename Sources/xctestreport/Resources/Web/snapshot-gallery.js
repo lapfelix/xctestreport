@@ -1,12 +1,5 @@
-/*
- * snapshot-gallery.js
- * Filtering, suite grouping and lazy viewer boot for snapshots.html.
- *
- * Every comparison is server-rendered as the usual <section class="snapshot-diffs"> contract, but
- * with the payload parked in data-snapshot-comparisons-pending. This page renames the attribute
- * and re-runs snapshot-diff.js only for the items that scroll into view, so a gallery holding
- * dozens of comparisons does not build every viewer up front.
- */
+/* Contact-sheet browsing and one on-demand inspector. Static comparisons remain
+ * usable without JavaScript; gallery browsing does not create canvas buffers. */
 (function() {
     "use strict";
 
@@ -36,67 +29,185 @@
         if (node) { node.setAttribute("aria-pressed", value ? "true" : "false"); }
     }
 
-    // MARK: - Lazy viewer boot
+    // A contact sheet never decodes pixels or constructs a viewer. Only the selected
+    // comparison enters the inspector; closing it releases observers and pixel buffers.
+    var comparisons = [];
+    var current = null;
+    var opener = null;
+    var viewerPromise;
+    var dialog = document.createElement("dialog");
+    dialog.className = "sg-inspector";
+    dialog.setAttribute("aria-label", "Snapshot inspector");
+    dialog.innerHTML = '<header class="sg-inspector-head"><div><strong>Snapshot inspector</strong><span class="sg-position" role="status"></span></div><nav aria-label="Snapshot navigation"><button type="button" data-step="-1" aria-label="Previous snapshot">Previous</button><button type="button" data-step="1" aria-label="Next snapshot">Next</button><button type="button" class="sg-close" aria-label="Close inspector">Close <kbd>Esc</kbd></button></nav></header><div class="sg-inspector-content"></div>';
+    document.body.appendChild(dialog);
+    var host = dialog.querySelector(".sg-inspector-content");
 
-    var runnerQueued = false;
-    var runnerRunning = false;
-
-    function runViewerScript() {
-        runnerQueued = false;
-        if (runnerRunning) { queueViewerScript(60); return; }
-        runnerRunning = true;
-        var script = document.createElement("script");
-        script.src = VIEWER_SCRIPT;
-        script.setAttribute("data-sg-runner", "");
-        script.onload = script.onerror = function() {
-            runnerRunning = false;
-            if (script.parentNode) { script.parentNode.removeChild(script); }
-        };
-        document.body.appendChild(script);
+    function node(tag, className, text) {
+        var result = document.createElement(tag);
+        result.className = className;
+        if (text) { result.textContent = text; }
+        return result;
     }
-
-    // Re-executing the viewer script runs its own init(), which enhances every section that now
-    // carries a payload and skips the ones already enhanced.
-    function queueViewerScript(delay) {
-        if (runnerQueued) { return; }
-        runnerQueued = true;
-        setTimeout(runViewerScript, delay || 0);
+    function loadViewer() {
+        if (!viewerPromise) {
+            viewerPromise = new Promise(function(resolve, reject) {
+                var script = document.createElement("script");
+                script.src = VIEWER_SCRIPT;
+                script.onload = resolve;
+                script.onerror = function() { viewerPromise = null; script.remove(); reject(new Error("Viewer unavailable")); };
+                document.body.appendChild(script);
+            });
+        }
+        return viewerPromise;
     }
+    function dispose() {
+        var section = host.querySelector("section");
+        if (section) { section.dispatchEvent(new Event("snapshot-dispose")); }
+        host.replaceChildren();
+    }
+    function visibleComparisons() {
+        return comparisons.filter(function(entry) { return !entry.item.hidden && !isSuiteCollapsed(entry.item); });
+    }
+    function openComparison(entry, source) {
+        if (!entry) { return; }
+        if (source) { opener = source; }
+        current = entry;
+        var previousViewer = host.querySelector(".snapdiff");
+        var mode = previousViewer ? previousViewer.getAttribute("data-mode") : "side";
+        var analysisOpen = !!host.querySelector(".snapdiff-analysis[open]");
+        dispose();
+        var visible = visibleComparisons();
+        var index = visible.indexOf(entry);
+        dialog.querySelector(".sg-position").textContent = (index + 1) + " of " + visible.length;
+        toArray(dialog.querySelectorAll("[data-step]")).forEach(function(button) { button.disabled = visible.length < 2; });
+        var context = node("div", "sg-inspector-context", entry.item.querySelector(".sg-item-name").textContent);
+        var link = entry.item.querySelector(".sg-item-link").cloneNode(true);
+        link.textContent = "Open test details";
+        context.appendChild(link);
+        if (entry.anchor) {
+            var permalink = node("a", "sg-permalink", "Link to snapshot");
+            permalink.href = "#" + entry.anchor.id;
+            context.appendChild(permalink);
+        }
+        host.appendChild(context);
+        var section = node("section", "snapshot-diffs");
+        section.setAttribute("data-snapshot-mode", mode);
+        section.setAttribute("data-snapshot-analysis-open", String(analysisOpen));
+        section.setAttribute(LIVE_ATTRIBUTE, encodeURIComponent(JSON.stringify([entry.data])));
+        host.appendChild(section);
+        if (!dialog.open) { dialog.showModal(); document.body.classList.add("sg-inspecting"); }
+        var loading = node("p", "sg-loading", "Loading comparison…");
+        section.appendChild(loading);
+        loadViewer().then(function() {
+            if (!section.isConnected) { return; }
+            window.SnapshotDiff.enhance(section);
+            var viewer = section.querySelector(".snapdiff");
+            if (viewer) { viewer.focus({ preventScroll: true }); }
+        }).catch(function() {
+            if (!section.isConnected) { return; }
+            loading.textContent = "Could not load the inspector. Open test details or try again.";
+        });
+    }
+    function step(direction) {
+        var visible = visibleComparisons();
+        var index = visible.indexOf(current);
+        openComparison(visible[(index + direction + visible.length) % visible.length]);
+    }
+    dialog.querySelector(".sg-close").addEventListener("click", function() { dialog.close(); });
+    dialog.addEventListener("close", function() {
+        dispose(); current = null;
+        document.body.classList.remove("sg-inspecting");
+        if (opener && opener.isConnected) { opener.focus({ preventScroll: true }); }
+    });
+    dialog.addEventListener("click", function(event) {
+        if (event.target === dialog) { dialog.close(); }
+    });
+    toArray(dialog.querySelectorAll("[data-step]")).forEach(function(button) {
+        button.addEventListener("click", function() { step(Number(button.dataset.step)); });
+    });
+    dialog.addEventListener("keydown", function(event) {
+        if (/input|select|textarea/i.test(event.target.tagName) || event.metaKey || event.ctrlKey || event.altKey) { return; }
+        if (event.key === "[" || event.key === "]") {
+            event.preventDefault(); step(event.key === "]" ? 1 : -1);
+        }
+    });
 
-    function enhance(item) {
-        if (!item || item.getAttribute("data-sg-enhanced") === "true") { return; }
+    items.forEach(function(item) {
         var section = item.querySelector("section.snapshot-diffs");
         if (!section) { return; }
-        var payload = section.getAttribute(PENDING_ATTRIBUTE);
-        if (payload !== null) {
-            section.setAttribute(LIVE_ATTRIBUTE, payload);
-            section.removeAttribute(PENDING_ATTRIBUTE);
-        }
-        item.setAttribute("data-sg-enhanced", "true");
-        queueViewerScript(0);
-    }
-
-    var observer = null;
-    if (typeof IntersectionObserver === "function") {
-        observer = new IntersectionObserver(function(entries) {
-            entries.forEach(function(entry) {
-                if (!entry.isIntersecting) { return; }
-                observer.unobserve(entry.target);
-                enhance(entry.target);
+        var data;
+        try { data = JSON.parse(decodeURIComponent(section.getAttribute(PENDING_ATTRIBUTE))); }
+        catch (_) { return; }
+        if (!Array.isArray(data) || !data.length) { return; }
+        var sheet = node("div", "sg-previews");
+        data.forEach(function(comparison, index) {
+            if (!comparison.expected || !comparison.actual) { return; }
+            var card = node("button", "sg-preview");
+            card.type = "button";
+            card.setAttribute("aria-label", "Inspect " + comparison.name);
+            var entry = { item: item, data: comparison, button: card, anchor: item.querySelectorAll(".sg-anchor")[index] };
+            comparisons.push(entry);
+            card.appendChild(node("span", "sg-preview-name", comparison.name));
+            var pair = node("span", "sg-preview-pair");
+            ["expected", "actual"].forEach(function(role) {
+                var frame = node("span", "sg-preview-frame");
+                frame.dataset.role = role;
+                frame.appendChild(node("span", "sg-preview-label", role === "expected" ? "Expected" : "Actual"));
+                var img = node("img", "");
+                img.src = comparison[role].src;
+                img.alt = role + " snapshot for " + comparison.name;
+                img.loading = "lazy"; img.decoding = "async";
+                img.width = comparison[role].width; img.height = comparison[role].height;
+                img.addEventListener("error", function() { frame.classList.add("sg-image-error"); img.alt = "Image unavailable"; });
+                frame.appendChild(img); pair.appendChild(frame);
             });
-        }, { rootMargin: "300px 0px" });
+            card.appendChild(pair);
+            var percent = (comparison.changedFraction * 100).toFixed(2) + "% changed";
+            var caption = node("span", "sg-preview-caption");
+            caption.appendChild(node("span", comparison.sizeMismatch ? "sg-size-changed" : "", comparison.sizeMismatch ? "Size changed · " + percent : percent));
+            caption.appendChild(node("span", "sg-inspect-label", "Inspect"));
+            card.appendChild(caption);
+            card.addEventListener("click", function() { openComparison(entry, card); });
+            sheet.appendChild(card);
+        });
+        if (sheet.childElementCount) {
+            section.hidden = true;
+            item.querySelector(".sg-item-body").appendChild(sheet);
+        }
+    });
+    function enhance(item, target) {
+        var entry = comparisons.find(function(candidate) { return candidate.item === item && candidate.anchor === target; })
+            || comparisons.find(function(candidate) { return candidate.item === item; });
+        openComparison(entry, entry && entry.button);
     }
 
-    function observeVisible() {
-        items.forEach(function(item) {
-            if (item.getAttribute("data-has-viewer") !== "true") { return; }
-            if (item.getAttribute("data-sg-enhanced") === "true") { return; }
-            if (item.hidden || isSuiteCollapsed(item)) { return; }
-            if (observer) {
-                observer.observe(item);
-            } else {
-                enhance(item);
-            }
+    var diffPreviewButton = document.getElementById("sg-diff-preview");
+    if (diffPreviewButton) {
+        diffPreviewButton.addEventListener("click", function() {
+            var showDiff = !pressed(diffPreviewButton);
+            setPressed(diffPreviewButton, showDiff);
+            comparisons.forEach(function(entry) {
+                var frame = entry.button.querySelector('[data-role="actual"]');
+                var img = frame.querySelector("img");
+                var role = showDiff && entry.data.diff ? "diff" : "actual";
+                frame.querySelector(".sg-preview-label").textContent = role === "diff" ? "Difference" : "Actual";
+                img.src = entry.data[role].src;
+                img.alt = role + " snapshot for " + entry.data.name;
+            });
+        });
+    }
+
+    var groupButton = document.getElementById("sg-group");
+    if (groupButton) {
+        document.body.classList.add("sg-contact-sheet");
+        groupButton.addEventListener("click", function() {
+            var grouped = !pressed(groupButton);
+            setPressed(groupButton, grouped);
+            document.body.classList.toggle("sg-contact-sheet", !grouped);
+            toggleAllButton.hidden = !grouped;
+            suites.forEach(function(suite) { setSuiteExpanded(suite, true); });
+            setPressed(toggleAllButton, false);
+            toggleAllButton.textContent = "Collapse all";
         });
     }
 
@@ -123,7 +234,6 @@
         if (!toggle || !body) { return; }
         toggle.setAttribute("aria-expanded", expandedValue ? "true" : "false");
         body.hidden = !expandedValue;
-        if (expandedValue) { observeVisible(); }
     }
 
     suites.forEach(function(suite) {
@@ -181,7 +291,6 @@
             readout.textContent = "Showing " + visibleTotal + " of " + items.length + " tests";
         }
         if (empty) { empty.hidden = visibleTotal !== 0; }
-        observeVisible();
     }
 
     if (searchInput) {
@@ -234,7 +343,7 @@
         }
         var suite = suiteOf(item);
         if (suite) { setSuiteExpanded(suite, true); }
-        enhance(item);
+        enhance(item, target);
         window.requestAnimationFrame(function() {
             target.scrollIntoView({ block: "start" });
         });

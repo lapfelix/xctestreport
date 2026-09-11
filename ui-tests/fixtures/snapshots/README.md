@@ -1,0 +1,1 @@
+Real watchOS snapshot failures from the supplied snapshot kit, extracted from its September 2026 run. Covers size mismatch with synthesized diff, near-threshold text changes, and broad button tint drift. Images and metrics are unchanged. Paths are normalized for the HTTP test server.

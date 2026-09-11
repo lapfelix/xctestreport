@@ -1,0 +1,338 @@
+[
+  {
+    "comparisons": [
+      {
+        "actual": {
+          "height": 113,
+          "src": "images/NearbyRouteDisplayName-text.actual.png",
+          "width": 312
+        },
+        "boundingBoxes": [
+          {
+            "h": 10,
+            "w": 15,
+            "x": 100,
+            "y": 50
+          }
+        ],
+        "changedFraction": 0.004255,
+        "changedPixels": 150,
+        "diff": {
+          "height": 113,
+          "src": "images/NearbyRouteDisplayName-text.diff.png",
+          "width": 312
+        },
+        "diffSynthesized": false,
+        "expected": {
+          "height": 113,
+          "src": "images/NearbyRouteDisplayName-text.expected.png",
+          "width": 312
+        },
+        "failureAssociated": false,
+        "heightDelta": 0,
+        "maxChannelDelta": 195,
+        "name": "NearbyRouteDisplayName-text",
+        "sizeMismatch": false,
+        "totalPixels": 35256,
+        "widthDelta": 0
+      }
+    ],
+    "device": {
+      "deviceName": "iPhone 17 Pro Max",
+      "identifier": "10B307D8-5095-4186-A3F1-53AC4F252057",
+      "name": "Apple Watch Series 11",
+      "osBuildNumber": "24R5355a",
+      "osVersion": "27.0",
+      "platform": "watchOS Simulator"
+    },
+    "failureMessage": "failed - 'NearbyRouteDisplayName-text' does not match its reference: 0.32% of channels differ (worst 195/255)",
+    "result": "Failed",
+    "suiteName": "NearbyViewSnapshotTests",
+    "testName": "testNearbyRouteDisplayNameText()",
+    "testPagePath": "tests/test_NearbyViewSnapshotTests_testNearbyRouteDisplayNameText().html"
+  },
+  {
+    "comparisons": [
+      {
+        "actual": {
+          "height": 238,
+          "src": "images/NearbyRow-pinned.actual.png",
+          "width": 438
+        },
+        "boundingBoxes": [
+          {
+            "h": 60,
+            "w": 120,
+            "x": 60,
+            "y": 90
+          }
+        ],
+        "changedFraction": 0.069069,
+        "changedPixels": 7200,
+        "diff": {
+          "height": 238,
+          "src": "images/NearbyRow-pinned.diff.png",
+          "width": 438
+        },
+        "diffSynthesized": false,
+        "expected": {
+          "height": 238,
+          "src": "images/NearbyRow-pinned.expected.png",
+          "width": 438
+        },
+        "failureAssociated": false,
+        "heightDelta": 0,
+        "maxChannelDelta": 255,
+        "name": "NearbyRow-pinned",
+        "sizeMismatch": false,
+        "totalPixels": 104244,
+        "widthDelta": 0
+      }
+    ],
+    "device": {
+      "deviceName": "iPhone 17 Pro Max",
+      "identifier": "10B307D8-5095-4186-A3F1-53AC4F252057",
+      "name": "Apple Watch Series 11",
+      "osBuildNumber": "24R5355a",
+      "osVersion": "27.0",
+      "platform": "watchOS Simulator"
+    },
+    "failureMessage": "failed - 'NearbyRow-pinned' does not match its reference: 4.84% of channels differ (worst 255/255)",
+    "result": "Failed",
+    "suiteName": "NearbyViewSnapshotTests",
+    "testName": "testNearbyRowPinned()",
+    "testPagePath": "tests/test_NearbyViewSnapshotTests_testNearbyRowPinned().html"
+  },
+  {
+    "comparisons": [
+      {
+        "actual": {
+          "height": 217,
+          "src": "images/RouteDetailsDepartures-noSeparators.actual.png",
+          "width": 438
+        },
+        "boundingBoxes": [
+          {
+            "h": 4,
+            "w": 438,
+            "x": 0,
+            "y": 217
+          },
+          {
+            "h": 1,
+            "w": 1,
+            "x": 204,
+            "y": 46
+          },
+          {
+            "h": 1,
+            "w": 1,
+            "x": 214,
+            "y": 46
+          },
+          {
+            "h": 1,
+            "w": 1,
+            "x": 234,
+            "y": 142
+          },
+          {
+            "h": 1,
+            "w": 1,
+            "x": 244,
+            "y": 142
+          }
+        ],
+        "changedFraction": 0.018141,
+        "changedPixels": 1756,
+        "diff": {
+          "height": 221,
+          "src": "images/RouteDetailsDepartures-noSeparators.synth-diff.png",
+          "width": 438
+        },
+        "diffSynthesized": true,
+        "expected": {
+          "height": 221,
+          "src": "images/RouteDetailsDepartures-noSeparators.expected.png",
+          "width": 438
+        },
+        "failureAssociated": false,
+        "heightDelta": -4,
+        "maxChannelDelta": 255,
+        "name": "RouteDetailsDepartures-noSeparators",
+        "sizeMismatch": true,
+        "totalPixels": 96798,
+        "widthDelta": 0
+      }
+    ],
+    "device": {
+      "deviceName": "iPhone 17 Pro Max",
+      "identifier": "10B307D8-5095-4186-A3F1-53AC4F252057",
+      "name": "Apple Watch Series 11",
+      "osBuildNumber": "24R5355a",
+      "osVersion": "27.0",
+      "platform": "watchOS Simulator"
+    },
+    "failureMessage": "failed - 'RouteDetailsDepartures-noSeparators' does not match its reference: size 438x217 vs 438x221",
+    "result": "Failed",
+    "suiteName": "RouteDetailsViewSnapshotTests",
+    "testName": "testDeparturesWithoutSeparators()",
+    "testPagePath": "tests/test_RouteDetailsViewSnapshotTests_testDeparturesWithoutSeparators().html"
+  },
+  {
+    "comparisons": [
+      {
+        "actual": {
+          "height": 97,
+          "src": "images/RouteDetailsPinButton-pinned.actual.png",
+          "width": 438
+        },
+        "boundingBoxes": [
+          {
+            "h": 65,
+            "w": 406,
+            "x": 16,
+            "y": 16
+          }
+        ],
+        "changedFraction": 0.368568,
+        "changedPixels": 15659,
+        "diff": {
+          "height": 97,
+          "src": "images/RouteDetailsPinButton-pinned.diff.png",
+          "width": 438
+        },
+        "diffSynthesized": false,
+        "expected": {
+          "height": 97,
+          "src": "images/RouteDetailsPinButton-pinned.expected.png",
+          "width": 438
+        },
+        "failureAssociated": false,
+        "heightDelta": 0,
+        "maxChannelDelta": 31,
+        "name": "RouteDetailsPinButton-pinned",
+        "sizeMismatch": false,
+        "totalPixels": 42486,
+        "widthDelta": 0
+      }
+    ],
+    "device": {
+      "deviceName": "iPhone 17 Pro Max",
+      "identifier": "10B307D8-5095-4186-A3F1-53AC4F252057",
+      "name": "Apple Watch Series 11",
+      "osBuildNumber": "24R5355a",
+      "osVersion": "27.0",
+      "platform": "watchOS Simulator"
+    },
+    "failureMessage": "failed - 'RouteDetailsPinButton-pinned' does not match its reference: 27.15% of channels differ (worst 31/255)",
+    "result": "Failed",
+    "suiteName": "RouteDetailsViewSnapshotTests",
+    "testName": "testPinButtonPinned()",
+    "testPagePath": "tests/test_RouteDetailsViewSnapshotTests_testPinButtonPinned().html"
+  },
+  {
+    "comparisons": [
+      {
+        "actual": {
+          "height": 97,
+          "src": "images/RouteDetailsPinButton-unpinned.actual.png",
+          "width": 438
+        },
+        "boundingBoxes": [
+          {
+            "h": 65,
+            "w": 406,
+            "x": 16,
+            "y": 16
+          }
+        ],
+        "changedFraction": 0.373558,
+        "changedPixels": 15871,
+        "diff": {
+          "height": 97,
+          "src": "images/RouteDetailsPinButton-unpinned.diff.png",
+          "width": 438
+        },
+        "diffSynthesized": false,
+        "expected": {
+          "height": 97,
+          "src": "images/RouteDetailsPinButton-unpinned.expected.png",
+          "width": 438
+        },
+        "failureAssociated": false,
+        "heightDelta": 0,
+        "maxChannelDelta": 31,
+        "name": "RouteDetailsPinButton-unpinned",
+        "sizeMismatch": false,
+        "totalPixels": 42486,
+        "widthDelta": 0
+      }
+    ],
+    "device": {
+      "deviceName": "iPhone 17 Pro Max",
+      "identifier": "10B307D8-5095-4186-A3F1-53AC4F252057",
+      "name": "Apple Watch Series 11",
+      "osBuildNumber": "24R5355a",
+      "osVersion": "27.0",
+      "platform": "watchOS Simulator"
+    },
+    "failureMessage": "failed - 'RouteDetailsPinButton-unpinned' does not match its reference: 27.54% of channels differ (worst 31/255)",
+    "result": "Failed",
+    "suiteName": "RouteDetailsViewSnapshotTests",
+    "testName": "testPinButtonUnpinned()",
+    "testPagePath": "tests/test_RouteDetailsViewSnapshotTests_testPinButtonUnpinned().html"
+  },
+  {
+    "comparisons": [
+      {
+        "actual": {
+          "height": 175,
+          "src": "images/RouteDetailsPinButton-wrapping.actual.png",
+          "width": 192
+        },
+        "boundingBoxes": [
+          {
+            "h": 143,
+            "w": 160,
+            "x": 16,
+            "y": 16
+          }
+        ],
+        "changedFraction": 0.018333,
+        "changedPixels": 616,
+        "diff": {
+          "height": 175,
+          "src": "images/RouteDetailsPinButton-wrapping.diff.png",
+          "width": 192
+        },
+        "diffSynthesized": false,
+        "expected": {
+          "height": 175,
+          "src": "images/RouteDetailsPinButton-wrapping.expected.png",
+          "width": 192
+        },
+        "failureAssociated": false,
+        "heightDelta": 0,
+        "maxChannelDelta": 44,
+        "name": "RouteDetailsPinButton-wrapping",
+        "sizeMismatch": false,
+        "totalPixels": 33600,
+        "widthDelta": 0
+      }
+    ],
+    "device": {
+      "deviceName": "iPhone 17 Pro Max",
+      "identifier": "10B307D8-5095-4186-A3F1-53AC4F252057",
+      "name": "Apple Watch Series 11",
+      "osBuildNumber": "24R5355a",
+      "osVersion": "27.0",
+      "platform": "watchOS Simulator"
+    },
+    "failureMessage": "failed - 'RouteDetailsPinButton-wrapping' does not match its reference: 1.37% of channels differ (worst 44/255)",
+    "result": "Failed",
+    "suiteName": "RouteDetailsViewSnapshotTests",
+    "testName": "testPinButtonWrappingLabel()",
+    "testPagePath": "tests/test_RouteDetailsViewSnapshotTests_testPinButtonWrappingLabel().html"
+  }
+]

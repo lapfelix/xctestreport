@@ -410,7 +410,10 @@
         toleranceWrap.appendChild(toleranceValue);
         state.toleranceWrap = toleranceWrap;
         state.toleranceSlider = toleranceSlider;
-        options.appendChild(toleranceWrap);
+        var analysis = el("details", "snapdiff-analysis");
+        analysis.appendChild(el("summary", null, "Pixel analysis"));
+        analysis.appendChild(toleranceWrap);
+        state.analysis = analysis;
 
         state.swipeHint = el("span", "snapdiff-hint", "Drag the divider, or focus it and press ← →.");
         options.appendChild(state.swipeHint);
@@ -419,7 +422,6 @@
 
         bar.appendChild(options);
 
-        var tools = el("div", "snapdiff-tools");
 
         var zoomGroup = el("div", "snapdiff-zoom");
         zoomGroup.setAttribute("role", "group");
@@ -443,7 +445,7 @@
         zoomGroup.appendChild(zoomIn);
         state.zoomLabel = el("span", "snapdiff-zoomlabel", "100%");
         zoomGroup.appendChild(state.zoomLabel);
-        tools.appendChild(zoomGroup);
+        bar.appendChild(zoomGroup);
 
         var navGroup = el("div", "snapdiff-nav");
         navGroup.setAttribute("role", "group");
@@ -470,9 +472,9 @@
         state.previousButton = previous;
         state.nextButton = next;
         state.counter = counter;
-        tools.appendChild(navGroup);
+        state.navigation = navGroup;
+        navGroup.prepend(el("span", "snapdiff-nav-label", "Differences"));
 
-        bar.appendChild(tools);
         return bar;
     }
 
@@ -591,6 +593,7 @@
 
     function buildFooter(state, data) {
         var footer = el("div", "snapdiff-footer");
+        footer.appendChild(state.navigation);
 
         var stats = el("div", "snapdiff-stats");
         state.statChanged = addStat(stats, "Changed", "—");
@@ -600,10 +603,11 @@
             + (data.sizeMismatch ? " → " + state.actW + "×" + state.actH : ""));
         addStat(stats, "Diff image",
             data.diff ? (data.diffSynthesized ? "synthesized" : "attached") : "none");
-        footer.appendChild(stats);
+        state.analysis.appendChild(stats);
+        footer.appendChild(state.analysis);
 
         state.inspector = el("div", "snapdiff-inspector");
-        footer.appendChild(state.inspector);
+        state.analysis.appendChild(state.inspector);
         clearInspector(state);
 
         state.pixelNote = el("div", "snapdiff-note",
@@ -616,6 +620,7 @@
         addLink(links, "Expected", data.expected.src);
         addLink(links, "Actual", data.actual.src);
         if (data.diff && data.diff.src) { addLink(links, "Diff", data.diff.src); }
+        links.prepend(el("span", "snapdiff-download-label", "Download originals"));
         footer.appendChild(links);
 
         var legend = el("details", "snapdiff-legend");
@@ -685,6 +690,7 @@
         var failed = [];
 
         function finish() {
+            if (state.disposed || !state.loaded || state.body.hidden) { return; }
             if (failed.length) {
                 state.broken = true;
                 state.pixelsOK = false;
@@ -1093,7 +1099,7 @@
         var paneWidth = (split && !column) ? (width - gap) / 2 : width;
         var maxPane = Math.min(MAX_PANE_HEIGHT, Math.round(window.innerHeight * 0.7));
         var paneHeight = clamp(
-            Math.round(paneWidth * (state.unionH / state.unionW)) + 24,
+            Math.round(Math.min(paneWidth, state.unionW) * (state.unionH / state.unionW)) + 48,
             MIN_PANE_HEIGHT,
             Math.max(MIN_PANE_HEIGHT, maxPane));
         var height = ((split && column) ? paneHeight * 2 + gap : paneHeight) + "px";
@@ -1597,6 +1603,10 @@
             updateStats(state);
             updateCounter(state);
             state.body.setAttribute("hidden", "");
+            if (section.closest("dialog")) { state.toggle.disabled = true; }
+            state.analysis.open = section.getAttribute("data-snapshot-analysis-open") === "true";
+            var preferredMode = section.getAttribute("data-snapshot-mode");
+            if (preferredMode) { setMode(state, preferredMode); }
             states.push(state);
             fragment.appendChild(state.root);
         }
@@ -1613,9 +1623,19 @@
             states.forEach(function(s) { setExpanded(s, true); });
         }
 
-        document.addEventListener("visibilitychange", function() {
+        function pauseHidden() {
             if (document.hidden) { states.forEach(function(s) { setBlink(s, false); }); }
-        });
+        }
+        document.addEventListener("visibilitychange", pauseHidden);
+        section.addEventListener("snapshot-dispose", function() {
+            document.removeEventListener("visibilitychange", pauseHidden);
+            states.forEach(function(s) {
+                s.disposed = true;
+                setBlink(s, false);
+                if (s.resizeObserver) { s.resizeObserver.disconnect(); }
+                releaseBuffers(s);
+            });
+        }, { once: true });
     }
 
     function init() {
@@ -1631,6 +1651,8 @@
             }
         }
     }
+
+    window.SnapshotDiff = { enhance: enhance };
 
     if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", init);

@@ -95,3 +95,22 @@ test('slowest-tests lists the top tests by duration', async ({ page }) => {
   await expect(items.first()).toHaveText('testInvalidLogin'); // 10s is slowest
   await expect(items.nth(1)).toHaveText('testBeta'); // 7s next
 });
+
+test('review failures clears search and opens only failing suites', async ({page}) => {
+  await page.goto(renderReport({suites}));
+  await page.locator('#toggle-all').click();
+  await page.locator('#test-search').fill('nothing');
+  await page.getByRole('button',{name:'Review failures',exact:true}).click();
+  await expect(page.locator('#test-search')).toHaveValue('');
+  await expect(page.locator('tr[data-status="passed"]:visible')).toHaveCount(0);
+  await expect(page.locator('tr[data-status="failed"]:visible')).toHaveCount(1);
+});
+
+test('suite headings can be collapsed and expanded with the keyboard', async ({page}) => {
+  await page.goto(renderReport({suites}));
+  const head=page.locator('.collapsible').first();
+  await head.focus(); await page.keyboard.press('Enter');
+  await expect(head).toHaveAttribute('aria-expanded','false');
+  await page.keyboard.press('Space');
+  await expect(head).toHaveAttribute('aria-expanded','true');
+});

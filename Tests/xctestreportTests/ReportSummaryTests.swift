@@ -32,7 +32,7 @@ final class ReportSummaryTests: XCTestCase {
         let template = try loadProjectFile("Sources/xctestreport/Resources/Web/templates/index.html")
 
         XCTAssertTrue(
-            template.contains("Total (excl. skipped): <span class=\"stat-number\">{{total_tests}}</span>"),
+            template.contains("<span class=\"stat-number\">{{total_tests}}</span><span>Tests <small>excluding skipped</small></span>"),
             "Index summary should explain that the displayed total excludes skipped tests."
         )
     }

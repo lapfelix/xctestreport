@@ -91,7 +91,7 @@
         if (source) { opener = source; }
         current = entry;
         var previousViewer = host.querySelector(".snapdiff");
-        var mode = previousViewer ? previousViewer.getAttribute("data-mode") : "side";
+        var mode = previousViewer ? previousViewer.getAttribute("data-mode") : (window.matchMedia("(max-width: 767px)").matches ? "swipe" : "side");
         var analysisOpen = !!host.querySelector(".snapdiff-analysis[open]");
         dispose();
         var visible = visibleComparisons();

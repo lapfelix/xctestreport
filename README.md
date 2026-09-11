@@ -159,6 +159,8 @@ and from the back-link in each test page's snapshot section (anchored at that co
   Expand **Filter test classes** to narrow the sheet further.
 - Click a preview to inspect it with all six comparison modes, synchronized zoom/pan, difference
   navigation, original-image downloads, and expandable **Pixel analysis** (statistics and tolerance).
+- Comparisons default to side-by-side on desktop and Swipe on narrow screens. On touch devices,
+  pinch to zoom, drag to pan, or use the zoom menu for precise magnification.
 - **Previous/Next** or **[ / ]** moves through the currently visible comparisons and preserves the
   comparison mode. **Escape** closes the inspector and restores focus to the preview.
 - The gallery loads the viewer script only when inspection starts. One viewer is active at a time;

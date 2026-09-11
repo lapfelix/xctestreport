@@ -220,3 +220,75 @@ test('mixed-device labels fit a narrow viewport', async ({page}) => {
   await expect(page.getByRole('combobox', {name:'Filter by device'})).toBeVisible();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
+
+for (const width of [320, 390, 667]) {
+  test(`compact inspector defaults and touch controls at ${width}px`, async ({page}) => {
+    await page.setViewportSize({width,height:width === 667 ? 375 : 844});
+    await inspect(page);
+    await expect(page.locator('.snapdiff')).toHaveAttribute('data-mode','swipe');
+    await page.getByRole('combobox',{name:'Zoom level'}).selectOption('2');
+    await expect(page.locator('.snapdiff-zoomlabel')).toHaveText('200%');
+    await page.getByRole('combobox',{name:'Zoom level'}).selectOption('0');
+    for (const control of await page.locator('.snapdiff-mode, .sg-close, .sg-inspector-head [data-step]').all()) {
+      expect((await control.boundingBox()).height).toBeGreaterThanOrEqual(44);
+    }
+    expect(await page.getByRole('dialog').evaluate(d=>d.scrollWidth<=d.clientWidth)).toBe(true);
+    await page.getByRole('button',{name:'Next snapshot',exact:true}).click();
+    await expect(page.locator('.snapdiff')).toHaveAttribute('data-mode','swipe');
+    await page.getByRole('button',{name:'Close inspector'}).click();
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  });
+}
+
+test('dark secondary text and selected modes have readable contrast', async ({page}) => {
+  await page.emulateMedia({colorScheme:'dark'});
+  await inspect(page);
+  const contrast = await page.locator('.snapdiff-mode[aria-pressed="true"]').evaluate(element => {
+    function luminance(color) {
+      const rgb=color.match(/[\d.]+/g).slice(0,3).map(Number).map(n=>{n/=255;return n<=.04045?n/12.92:((n+.055)/1.055)**2.4;});
+      return rgb[0]*.2126+rgb[1]*.7152+rgb[2]*.0722;
+    }
+    function ratio(a,b) {a=luminance(a);b=luminance(b);return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);}
+    const selected=getComputedStyle(element);
+    const label=getComputedStyle(document.querySelector('.sg-preview-label'));
+    const frame=getComputedStyle(document.querySelector('.sg-preview-frame'));
+    return [ratio(selected.color,selected.backgroundColor),ratio(label.color,frame.backgroundColor)];
+  });
+  for (const ratio of contrast) expect(ratio).toBeGreaterThanOrEqual(4.5);
+});
+
+test('two-finger pinch zooms an image without zooming the page', async ({browser}) => {
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
+  const page=await context.newPage();
+  await inspect(page);
+  await page.locator('.snapdiff-stage').scrollIntoViewIfNeeded();
+  const bounds=await page.locator('.snapdiff-stage').boundingBox();
+  const y=bounds.y+bounds.height/2;
+  const session=await context.newCDPSession(page);
+  const before=await page.locator('.snapdiff-zoomlabel').textContent();
+  await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:bounds.x+30,y,id:1},{x:bounds.x+100,y,id:2}]});
+  await session.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:bounds.x+10,y,id:1},{x:bounds.x+160,y,id:2}]});
+  await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  await expect(page.locator('.snapdiff-zoomlabel')).not.toHaveText(before);
+  expect(await page.evaluate(()=>visualViewport.scale)).toBe(1);
+  await page.getByRole('combobox',{name:'Zoom level'}).selectOption('0');
+  await expect(page.locator('.snapdiff-zoomlabel')).toHaveText(before);
+  await context.close();
+});
+
+for (const width of [320, 390, 667]) {
+  test(`test detail stays readable and scrollable at ${width}px`, async ({page}) => {
+    await page.setViewportSize({width,height:width === 667 ? 375 : 844});
+    await page.emulateMedia({colorScheme:'dark'});
+    await page.goto(new URL('/tests/detail.html',server.url).href);
+    await expect(page.locator('.snapdiff')).toHaveAttribute('data-mode','swipe');
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    await expect(page.locator('.test-title-compact')).toHaveCSS('white-space','normal');
+    await page.getByRole('combobox',{name:'Zoom level'}).selectOption('4');
+    await expect(page.locator('.snapdiff-zoomlabel')).toHaveText('400%');
+    await page.getByText('Pixel analysis',{exact:true}).click();
+    await expect(page.locator('.snapdiff-inspector')).toBeVisible();
+    await page.getByRole('link',{name:'Download actual image'}).scrollIntoViewIfNeeded();
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  });
+}

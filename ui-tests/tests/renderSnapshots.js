@@ -35,10 +35,31 @@ function renderSnapshots({ repeat = 1, malformed = false, noDiff = false, mixedD
   return html;
 }
 
+function renderSnapshotDetail() {
+  const comparison = JSON.parse(JSON.stringify(source[5].comparisons[0]));
+  for (const role of ['expected', 'actual', 'diff']) {
+    if (comparison[role]) comparison[role].src = '/' + comparison[role].src;
+  }
+  const values = {
+    page_title: 'Snapshot detail', test_name: 'testPinButtonWrappingLabelWithALongDescriptiveName()',
+    status_badge_class: 'status-failed', status_text: 'Failed', duration_text: '0.04s',
+    test_subtitle: 'RouteDetailsViewSnapshotTests',
+    details_panel_html: '<details class="test-meta-details"><summary>Summary</summary><div class="test-meta-content">Test metadata</div></details>',
+    compact_failure_box_html: '<div class="test-error-box"><pre>Snapshot differs from its reference.</pre></div>',
+    timeline_and_video_section_html: '',
+    snapshot_diff_html: `<section class="snapshot-diffs" data-snapshot-device="${encodeURIComponent(JSON.stringify(source[5].device))}" data-snapshot-comparisons="${encodeURIComponent(JSON.stringify([comparison]))}"></section>`
+  };
+  let html = fs.readFileSync(path.join(web, 'templates/test-detail.html'), 'utf8');
+  for (const [key, value] of Object.entries(values)) html = html.split(`{{${key}}}`).join(value);
+  if (/{{\w+}}/.test(html)) throw new Error('Unsubstituted detail template placeholder');
+  return html;
+}
+
 async function serveSnapshots(options) {
   const html = renderSnapshots(options);
   const server = http.createServer((req,res) => {
     const url = decodeURIComponent(req.url.split('?')[0]);
+    if (url === '/tests/detail.html') { res.setHeader('Content-Type','text/html'); res.end(renderSnapshotDetail()); return; }
     if (url === '/' || url === '/snapshots.html') { res.setHeader('Content-Type','text/html'); res.end(html); return; }
     const root = url.startsWith('/web/') ? web : fixtures;
     const relative = url.startsWith('/web/') ? url.slice(5) : url.replace(/^\/images\//,'');

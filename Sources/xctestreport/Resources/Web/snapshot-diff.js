@@ -221,7 +221,7 @@
 
         var state = {
             data: data,
-            mode: "side",
+            mode: window.matchMedia("(max-width: 767px)").matches ? "swipe" : "side",
             zoom: 1,
             fitZoom: 1,
             panX: 0,
@@ -415,7 +415,8 @@
         analysis.appendChild(toleranceWrap);
         state.analysis = analysis;
 
-        state.swipeHint = el("span", "snapdiff-hint", "Drag the divider, or focus it and press ← →.");
+        state.swipeHint = el("span", "snapdiff-hint", window.matchMedia("(max-width: 767px)").matches
+            ? "Drag the divider. Pinch to zoom." : "Drag the divider, or focus it and press ← →.");
         options.appendChild(state.swipeHint);
         state.sideHint = el("span", "snapdiff-hint", "Expected left, actual right. Zoom and pan stay in sync.");
         options.appendChild(state.sideHint);
@@ -426,6 +427,18 @@
         var zoomGroup = el("div", "snapdiff-zoom");
         zoomGroup.setAttribute("role", "group");
         zoomGroup.setAttribute("aria-label", "Zoom");
+        var zoomSelect = el("select", "snapdiff-zoomselect");
+        zoomSelect.setAttribute("aria-label", "Zoom level");
+        ZOOM_PRESETS.forEach(function(preset) { zoomSelect.appendChild(new Option(preset.label, String(preset.value))); });
+        var customZoom = new Option("Custom", "custom");
+        customZoom.disabled = true;
+        zoomSelect.appendChild(customZoom);
+        zoomSelect.addEventListener("change", function() {
+            var value = Number(zoomSelect.value);
+            if (value === 0) { fitView(state); } else { setZoom(state, value, null, null); }
+        });
+        state.zoomSelect = zoomSelect;
+        zoomGroup.appendChild(zoomSelect);
         ZOOM_PRESETS.forEach(function(preset) {
             var b = button("snapdiff-btn snapdiff-zoompreset", preset.label, "Zoom " + preset.label);
             b.setAttribute("aria-pressed", "false");
@@ -631,7 +644,7 @@
             "+ / − — zoom · 0 — fit",
             "n / p — next / previous difference",
             "b — start or stop blinking",
-            "Arrows — pan · drag to pan · scroll to zoom"
+            "Arrows — pan · drag to pan · scroll or pinch to zoom"
         ].forEach(function(line) {
             list.appendChild(el("li", null, line));
         });
@@ -1130,6 +1143,11 @@
             else { pane.root.classList.remove("is-pixelated"); }
         }
         if (state.zoomLabel) { state.zoomLabel.textContent = Math.round(state.zoom * 100) + "%"; }
+        if (state.zoomSelect) {
+            var preset = ZOOM_PRESETS.find(function(p) { return p.value > 0 && Math.abs(state.zoom - p.value) < 0.005; });
+            state.zoomSelect.value = !state.userZoomed ? "0" : preset ? String(preset.value) : "custom";
+            state.zoomSelect.lastChild.textContent = Math.round(state.zoom * 100) + "%";
+        }
         for (var j = 0; j < state.zoomButtons.length; j += 1) {
             var b = state.zoomButtons[j];
             var value = Number(b.getAttribute("data-zoom"));
@@ -1144,42 +1162,48 @@
     }
 
     function attachPanHandlers(state, stage) {
-        var dragging = false;
-        var lastX = 0;
-        var lastY = 0;
-        var pointerId = null;
-
+        var pointers = new Map();
+        function geometry() {
+            var points = Array.from(pointers.values());
+            if (points.length < 2) { return null; }
+            return { x: (points[0].x + points[1].x) / 2,
+                y: (points[0].y + points[1].y) / 2,
+                distance: Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y) };
+        }
         stage.addEventListener("pointerdown", function(event) {
-            if (event.button !== 0) { return; }
-            if (event.target && event.target.closest && event.target.closest(".snapdiff-swipehandle")) { return; }
-            dragging = true;
-            pointerId = event.pointerId;
-            lastX = event.clientX;
-            lastY = event.clientY;
+            if (event.button !== 0 || !state.loaded || state.broken) { return; }
+            if (event.target.closest(".snapdiff-swipehandle")) { return; }
+            pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
             stage.classList.add("is-panning");
-            try { stage.setPointerCapture(pointerId); } catch (error) { /* capture is best effort */ }
+            try { stage.setPointerCapture(event.pointerId); } catch (_) { /* best effort */ }
         });
-
         stage.addEventListener("pointermove", function(event) {
-            if (!dragging || event.pointerId !== pointerId) { return; }
-            state.panX += event.clientX - lastX;
-            state.panY += event.clientY - lastY;
-            lastX = event.clientX;
-            lastY = event.clientY;
+            var previous = pointers.get(event.pointerId);
+            if (!previous) { return; }
+            var before = geometry();
+            pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+            var after = geometry();
+            if (before && after && before.distance > 0) {
+                var rect = state.paneA.root.getBoundingClientRect();
+                setZoom(state, state.zoom * after.distance / before.distance,
+                    before.x - rect.left, before.y - rect.top);
+                state.panX += after.x - before.x;
+                state.panY += after.y - before.y;
+            } else {
+                state.panX += event.clientX - previous.x;
+                state.panY += event.clientY - previous.y;
+            }
             state.userZoomed = true;
             applyTransform(state);
         });
-
         function endDrag(event) {
-            if (!dragging) { return; }
-            if (event && event.pointerId !== pointerId) { return; }
-            dragging = false;
-            stage.classList.remove("is-panning");
-            try { stage.releasePointerCapture(pointerId); } catch (error) { /* already released */ }
-            pointerId = null;
+            pointers.delete(event.pointerId);
+            if (!pointers.size) { stage.classList.remove("is-panning"); }
+            try { stage.releasePointerCapture(event.pointerId); } catch (_) { /* already released */ }
         }
         stage.addEventListener("pointerup", endDrag);
         stage.addEventListener("pointercancel", endDrag);
+        stage.addEventListener("lostpointercapture", endDrag);
     }
 
     function attachSwipeDrag(state, pane) {

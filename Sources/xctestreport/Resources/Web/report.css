@@ -4148,7 +4148,7 @@ a { color: var(--report-accent); }
 .snapdiff-badge { text-transform: none; letter-spacing: 0; }
 .snapdiff-sizebanner { border: 0; border-left: 3px solid #c38a2c; border-radius: 4px; }
 @media (prefers-color-scheme: dark) {
-    :root { --report-bg: #18202c; --report-surface: #202b3a; --report-soft: #273447; --report-ink: #e3eaf4; --report-muted: #a4b3c8; --report-line: #3a485d; --report-accent: #8eb5ff; }
+    :root { --report-bg: #10141b; --report-surface: #222a35; --report-soft: #303b4b; --report-ink: #f5f7fb; --report-muted: #c2ccda; --report-line: #56657a; --report-accent: #a9caff; }
     .report-index-page .snapshot-gallery-link a { background: #316cda; }
 }
 @media (max-width: 767px) {
@@ -4187,3 +4187,69 @@ a { color: var(--report-accent); }
 
 .report-index-page .status-chip[aria-pressed="false"] { text-decoration: none; color: var(--report-muted); background: transparent; opacity: 1; }
 .report-index-page .status-chip[aria-pressed="true"] { border-color: var(--report-accent); color: var(--report-accent); background: var(--report-soft); }
+
+/* Comfortable controls and clearer secondary information across report views. */
+input::placeholder { color: var(--report-muted); opacity: 1; }
+.snapdiff-hint, .snapdiff-device, .snapdiff-counter, .snapdiff-zoomlabel,
+.snapdiff-stat-label, .snapdiff-legend, .suite-sort-label { color: var(--report-muted); }
+.snapdiff-zoomselect { display: none; }
+.snapdiff-modeopts:not(:has(> :not([hidden]))) { display: none; }
+@media (prefers-color-scheme: dark) {
+    .snapdiff-mode[aria-pressed="true"] { background: #405574; color: #ffffff; border-color: #90b5e8; }
+    .snapdiff-mode:hover:not(:disabled), .snapdiff-btn:hover:not(:disabled) { background: #3b4c64; color: #ffffff; }
+    .snapdiff-mode[aria-pressed="true"]:hover { background: #405574; color: #ffffff; }
+    .snapdiff-btn[aria-pressed="true"] { background: #245cc0; color: #ffffff; border-color: #8caff0; }
+}
+@media (max-width: 767px) {
+    .report-heading h1 { font-size: 27px; }
+    .report-nav { gap: 24px; margin: 16px 0 20px; }
+    .report-nav a { display: flex; align-items: center; min-height: 44px; padding-bottom: 4px; }
+    .test-search, select { font-size: 16px; }
+    button, input[type="search"], select { min-height: 44px; box-sizing: border-box; }
+    .report-index-page .report-counts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    #review-failures { grid-column: 1 / -1; width: 100%; }
+    .report-index-page .summary-actions .test-search { width: 100%; min-width: 0; flex-basis: 100%; }
+    .report-index-page .status-chips { display: flex; flex: 1; }
+    .report-index-page .status-chip { flex: 1; }
+    .report-index-page .suite-sort-options { gap: 6px; }
+    .report-index-page .suite-name { white-space: normal; overflow-wrap: anywhere; }
+    .test-detail-page .test-header-compact { grid-template-columns: 1fr auto; gap: 10px; }
+    .test-back-link { min-height: 44px; box-sizing: border-box; }
+    .test-detail-page .test-title-row { grid-row: 2; grid-column: 1 / -1; flex-wrap: wrap; white-space: normal; overflow: visible; }
+    .test-detail-page .test-title-compact { max-width: none; flex-basis: 100%; white-space: normal; overflow-wrap: anywhere; line-height: 1.4; }
+    .test-meta-details { grid-row: 1; grid-column: 2; }
+    .test-meta-details > summary { min-height: 44px; box-sizing: border-box; }
+    .test-detail-page .snapshot-diffs { overflow: visible; max-height: none; }
+    .snapdiff-modes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; box-sizing: border-box; gap: 4px; }
+    .snapdiff-mode { padding: 8px 4px; min-width: 0; }
+    .snapdiff-zoom { width: 100%; }
+    .snapdiff-zoom .snapdiff-zoompreset { display: none; }
+    .snapdiff-zoomselect { display: block; flex: 1; min-width: 0; border: 1px solid var(--report-line); border-radius: 7px; background: var(--report-surface); color: var(--report-ink); padding: 8px 12px; }
+    .snapdiff-btn-icon { width: 44px; }
+    .snapdiff-footer .snapdiff-nav { display: grid; grid-template-columns: auto 1fr auto auto; width: 100%; }
+    .snapdiff-nav-label { grid-column: 1 / -1; }
+    .snapdiff-counter { text-align: center; }
+    .snapdiff-analysis > summary, .snapdiff-legend > summary { min-height: 44px; display: flex; align-items: center; }
+    .snapdiff-link { display: inline-flex; align-items: center; min-height: 44px; padding: 0 8px; }
+    .snapdiff-download-label { flex-basis: 100%; }
+    .snapdiff-inspector { flex-wrap: wrap; overflow-wrap: anywhere; }
+}
+
+body.test-detail-page { background: var(--report-bg); }
+.report-index-page .suite-sort-btn { background: var(--report-surface); color: var(--report-muted); border-color: var(--report-line); box-shadow: none; }
+.report-index-page .suite-sort-btn[aria-pressed="true"] { background: var(--report-soft); color: var(--report-accent); border-color: var(--report-accent); }
+@media (max-width: 767px) {
+    .test-detail-shell { grid-template-columns: minmax(0, 1fr); }
+    .test-header-compact, .test-main-content, .test-error-box, .snapshot-diffs, .snapdiff-toolbar { min-width: 0; }
+    .snapdiff-name { white-space: normal; overflow-wrap: anywhere; text-overflow: clip; }
+    .snapdiff-device { white-space: normal; overflow-wrap: anywhere; }
+}
+
+@media (hover: none) {
+    .snapdiff-mode:hover:not([aria-pressed="true"]) { background: transparent; color: var(--report-muted); }
+    .snapdiff-btn:hover:not([aria-pressed="true"]) { background: var(--report-surface); color: var(--report-ink); }
+}
+@media (pointer: coarse) {
+    .snapdiff-swipehandle { width: 44px; margin-left: -22px; }
+    .snapdiff-swipehandle::before { left: 21px; }
+}

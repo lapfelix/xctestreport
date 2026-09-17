@@ -39,7 +39,7 @@ function bundleFixture({ large = false } = {}) {
 }
 
 // `supportsRange: false` stands in for a host that ignores Range and returns the whole object.
-async function serveBundle({ supportsRange = true, large = false } = {}) {
+async function serveBundle({ supportsRange = true, large = false, exposeContentRange = true } = {}) {
   const archive = bundleFixture({ large });
   const requests = [];
   let bytesServed = 0;
@@ -66,12 +66,14 @@ async function serveBundle({ supportsRange = true, large = false } = {}) {
         else { start = Number(range[1]); end = range[2] === '' ? archive.length - 1 : Math.min(Number(range[2]), archive.length - 1); }
         const slice = archive.subarray(start, end + 1);
         bytesServed += slice.length;
-        res.writeHead(206, {
-          'Content-Range': `bytes ${start}-${end}/${archive.length}`,
+        const headers = {
           'Content-Length': slice.length,
           'Accept-Ranges': 'bytes',
           'Content-Type': 'application/zip'
-        });
+        };
+        // A cross-origin host that does not expose Content-Range hides the archive's real size.
+        if (exposeContentRange) headers['Content-Range'] = `bytes ${start}-${end}/${archive.length}`;
+        res.writeHead(206, headers);
         res.end(slice);
         return;
       }
@@ -200,6 +202,27 @@ test.describe('report bundle reader', () => {
 
       const { requests } = server.stats();
       expect(requests.length, 'a Range-blind host is fetched once, then served from memory').toBe(1);
+    } finally {
+      await server.close();
+    }
+  });
+
+  test('still reads entries when the host hides Content-Range', async ({ page }) => {
+    // Without Content-Range the reader cannot tell a 64 KB tail from the whole archive; it must
+    // treat the response as a tail rather than assume it has everything.
+    const server = await serveBundle({ large: true, exposeContentRange: false });
+    try {
+      await page.goto(server.url);
+      const result = await page.evaluate(async () => {
+        const bundle = globalThis.ReportBundle.open(new URL('detail.zip', location.href).href);
+        const names = await bundle.names();
+        const runStates = await bundle.text('timeline/runstates.json');
+        const png = await bundle.bytes('attachments/1.png');
+        return { count: names.length, runStates, pngLength: png.length };
+      });
+      expect(result.count).toBe(6);
+      expect(JSON.parse(result.runStates)).toEqual([{ index: 0, label: 'Run 1', events: [] }]);
+      expect(result.pngLength).toBe(9008);
     } finally {
       await server.close();
     }

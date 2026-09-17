@@ -108,7 +108,9 @@
     this.directoryPromise = this._fetchRange('bytes=-' + TAIL_BYTES)
       .then(function(result) {
         // Range ignored, or a bundle smaller than the tail window: either way it is all here.
-        if (!result.partial || result.bytes.length >= result.total) {
+        // A total of -1 means Content-Range was unreadable (a cross-origin host that does not
+        // expose it), so the response cannot be assumed complete and has to be read as a tail.
+        if (!result.partial || (result.total >= 0 && result.bytes.length >= result.total)) {
           self.whole = result.bytes;
           return self._directoryFromWhole();
         }

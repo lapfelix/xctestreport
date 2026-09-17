@@ -10,8 +10,6 @@ extension XCTestReport {
         try copyWebAssets(to: webAssetsDirectoryPath)
         try? FileManager.default.createDirectory(
             atPath: testPagesDirectoryPath, withIntermediateDirectories: true)
-        try? FileManager.default.createDirectory(
-            atPath: agentTestsDirectoryPath, withIntermediateDirectories: true)
 
         // Check xcresult file size
         let fileManager = FileManager.default
@@ -60,6 +58,18 @@ extension XCTestReport {
 
             if FileManager.default.fileExists(atPath: attachmentsDir) {
                 attachmentsByTestIdentifier = loadAttachmentsFromManifest(at: attachmentsDir)
+                let looseCount = (try? FileManager.default.contentsOfDirectory(atPath: attachmentsDir))?
+                    .filter { $0 != "manifest.json" }.count ?? 0
+                let manifestCount = attachmentsByTestIdentifier.values.reduce(0) { $0 + $1.count }
+                if manifestCount > 0, looseCount < manifestCount / 2 {
+                    print(
+                        """
+                        WARNING: \(attachmentsDir) holds \(looseCount) files but the manifest lists \
+                        \(manifestCount). A previous run packed them into per-test bundles and removed \
+                        the loose copies, so the rebuilt bundles will be missing attachments. \
+                        Re-run without --html-only, or generate with --keep-loose-attachments.
+                        """)
+                }
             } else {
                 print("Attachment directory not found at \(attachmentsDir). Continuing without attachments.")
             }
@@ -265,6 +275,10 @@ extension XCTestReport {
         let preprocessingChunks = chunkTests(allTests, workerCount: preprocessingWorkers)
         let suiteChunks = chunkTestsWithIndices(allTests, workerCount: suiteWorkers)
 
+        var packedAttachmentFileNames = Set<String>()
+        var keepLooseAttachmentFileNames = Set<String>()
+        let packedAttachmentsQueue = DispatchQueue(label: "packedAttachments")
+
         print("Preprocessing \(allTests.count) tests using \(preprocessingWorkers) cores...")
 
         for chunk in preprocessingChunks {
@@ -284,6 +298,8 @@ extension XCTestReport {
                     }
                     let showsFailureDetails = Self.isFailureTestResult(result)
                     let duration = test.duration ?? "0s"
+                    let bundle = Builder()
+                    let bundleFileName = self.bundleFileName(forTestPageName: testPageName)
 
                     var failureInfo = ""
                     var primaryFailureMessage: String?
@@ -371,6 +387,23 @@ extension XCTestReport {
                         print("No test details for test: \(test.name)")
                     }
 
+                    let snapshotComparisons = buildSnapshotComparisons(
+                        attachments: attachmentsByTestIdentifier[test.nodeIdentifier ?? ""] ?? [])
+                    let snapshotDevice = snapshotDeviceInfo(
+                        testDetails: testDetails, fallbackDevice: summaryDevice)
+                    var snapshotComparisonSources = Set<String>()
+                    for comparison in snapshotComparisons {
+                        snapshotComparisonSources.insert(comparison.expected.src)
+                        snapshotComparisonSources.insert(comparison.actual.src)
+                        if let diffSrc = comparison.diff?.src {
+                            snapshotComparisonSources.insert(diffSrc)
+                        }
+                    }
+                    for source in snapshotComparisonSources {
+                        bundle.keepLoose(
+                            fileName: self.attachmentFileName(fromRelativePath: source))
+                    }
+
                     if showsFailureDetails {
                         let sourceLocationsHtml = renderSourceLocationSection(
                             candidateTexts: sourceLocationCandidateTexts)
@@ -390,7 +423,9 @@ extension XCTestReport {
 
                         let stackTraceHtml = renderStackTraceSection(
                             for: test.nodeIdentifier,
-                            attachmentsByTestIdentifier: attachmentsByTestIdentifier
+                            attachmentsByTestIdentifier: attachmentsByTestIdentifier,
+                            snapshotComparisonSources: snapshotComparisonSources,
+                            bundle: bundle
                         )
                         if !stackTraceHtml.isEmpty {
                             failureInfo += stackTraceHtml
@@ -419,10 +454,6 @@ extension XCTestReport {
                         timelineSourceLocationMap = [:]
                     }
 
-                    let snapshotComparisons = buildSnapshotComparisons(
-                        attachments: attachmentsByTestIdentifier[test.nodeIdentifier ?? ""] ?? [])
-                    let snapshotDevice = snapshotDeviceInfo(
-                        testDetails: testDetails, fallbackDevice: summaryDevice)
                     let snapshotSuiteName =
                         test.nodeIdentifier?.split(separator: "/").first.map(String.init)
                         ?? "Unknown Suite"
@@ -439,14 +470,6 @@ extension XCTestReport {
                     let snapshotDiffHtml = renderSnapshotDiffSection(
                         comparisons: snapshotComparisons, device: snapshotDevice,
                         titleExtraHTML: snapshotGalleryLinkHTML)
-                    var snapshotComparisonSources = Set<String>()
-                    for comparison in snapshotComparisons {
-                        snapshotComparisonSources.insert(comparison.expected.src)
-                        snapshotComparisonSources.insert(comparison.actual.src)
-                        if let diffSrc = comparison.diff?.src {
-                            snapshotComparisonSources.insert(diffSrc)
-                        }
-                    }
 
                     let timelineAndVideoSection = renderTimelineVideoSection(
                         for: test.nodeIdentifier,
@@ -455,7 +478,8 @@ extension XCTestReport {
                         sourceLocationBySymbol: timelineSourceLocationMap,
                         template: timelineTemplate,
                         payloadBaseName: (testPageName as NSString).deletingPathExtension,
-                        snapshotComparisonSources: snapshotComparisonSources
+                        snapshotComparisonSources: snapshotComparisonSources,
+                        bundle: bundle
                     )
 
                     let detailsPanelHtml: String
@@ -473,6 +497,21 @@ extension XCTestReport {
                     }
                     let testSubtitle = htmlEscape(test.nodeIdentifier ?? "Test report")
 
+                    let suiteName =
+                        test.nodeIdentifier?.split(separator: "/").first.map(String.init)
+                        ?? "Unknown Suite"
+                    let (testMarkdown, failureSummary) = renderTestMarkdown(
+                        test: test,
+                        result: result,
+                        suite: suiteName,
+                        testDetails: testDetails,
+                        testActivities: testActivities,
+                        attachmentsByTestIdentifier: attachmentsByTestIdentifier,
+                        primaryFailureMessage: primaryFailureMessage,
+                        sourceLocationCandidateTexts: sourceLocationCandidateTexts,
+                        snapshotComparisons: snapshotComparisons,
+                        bundleFileName: bundleFileName)
+
                     let testDetailHTML: String
                     do {
                         testDetailHTML = try renderTemplate(
@@ -488,6 +527,7 @@ extension XCTestReport {
                                 "details_panel_html": detailsPanelHtml,
                                 "timeline_and_video_section_html": timelineAndVideoSection,
                                 "snapshot_diff_html": snapshotDiffHtml,
+                                "bundle_src": htmlEscape(bundleFileName),
                             ],
                             templateName: "test-detail.html")
                     } catch {
@@ -501,9 +541,21 @@ extension XCTestReport {
                     try? minimizedTestDetailHTML.write(
                         toFile: testPagePath, atomically: true, encoding: .utf8)
 
-                    let suiteName =
-                        test.nodeIdentifier?.split(separator: "/").first.map(String.init)
-                        ?? "Unknown Suite"
+                    bundle.addEntry(name: Self.bundleMarkdownEntry, text: testMarkdown)
+                    let bundlePath = (self.testPagesDirectoryPath as NSString)
+                        .appendingPathComponent(bundleFileName)
+                    do {
+                        let packed = try bundle.write(
+                            to: bundlePath, attachmentsDirectory: attachmentsDir,
+                            decode: { self.readAttachmentData(at: $0) })
+                        packedAttachmentsQueue.sync {
+                            packedAttachmentFileNames.formUnion(packed)
+                            keepLooseAttachmentFileNames.formUnion(bundle.looseFileNames)
+                        }
+                    } catch {
+                        print("Failed to write report bundle for \(test.name): \(error)")
+                    }
+
                     if snapshotDiffEnabled {
                         let snapshotEntry = SnapshotReportTestEntry(
                             testIdentifier: test.nodeIdentifier,
@@ -523,22 +575,6 @@ extension XCTestReport {
                         }
                     }
 
-                    let (testMarkdown, failureSummary) = renderTestMarkdown(
-                        test: test,
-                        result: result,
-                        suite: suiteName,
-                        testDetails: testDetails,
-                        testActivities: testActivities,
-                        attachmentsByTestIdentifier: attachmentsByTestIdentifier,
-                        primaryFailureMessage: primaryFailureMessage,
-                        sourceLocationCandidateTexts: sourceLocationCandidateTexts,
-                        snapshotComparisons: snapshotComparisons)
-                    let markdownFileName = agentMarkdownFileName(
-                        identifier: test.nodeIdentifier, name: test.name)
-                    let markdownPath = (agentTestsDirectoryPath as NSString)
-                        .appendingPathComponent(markdownFileName)
-                    try? testMarkdown.write(
-                        toFile: markdownPath, atomically: true, encoding: .utf8)
                     let agentEntry = AgentTestEntry(
                         name: test.name,
                         suite: suiteName,
@@ -546,7 +582,8 @@ extension XCTestReport {
                         result: result,
                         duration: test.duration,
                         failureSummary: failureSummary,
-                        markdownRelativePath: "\(agentTestsDirectoryName)/\(markdownFileName)",
+                        markdownRelativePath: agentMarkdownAnchorLink(
+                            identifier: test.nodeIdentifier, name: test.name),
                         markdown: testMarkdown)
                     agentEntriesQueue.sync { agentEntries.append(agentEntry) }
 
@@ -566,6 +603,11 @@ extension XCTestReport {
 
         preprocessingGroup.wait()
         print("\n")
+
+        pruneLooseAttachments(
+            packed: packedAttachmentFileNames, keepLoose: keepLooseAttachmentFileNames,
+            attachmentsDirectory: attachmentsDir)
+        writeTestDetailsIndex()
 
         var snapshotGalleryIndexLinkHTML = ""
         if snapshotDiffEnabled {

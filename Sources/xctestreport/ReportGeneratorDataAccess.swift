@@ -10,6 +10,11 @@ private let previousRunsCacheLock = NSLock()
 private var previousRunsCache = [String: [XCTestReport.TestRunDetail]]()
 private let previousRunsDirsCacheLock = NSLock()
 private var previousRunsDirsCache = [String: [String]]()
+private let collectedTestDetailsLock = NSLock()
+// outputDir -> test identifier -> raw xcresulttool JSON, flushed once into test_details.json.
+private var collectedTestDetails = [String: [String: String]]()
+private let previousTestDetailsIndexCacheLock = NSLock()
+private var previousTestDetailsIndexCache = [String: [String: XCTestReport.TestDetails]]()
 private let cocoaToUnixEpochOffset: Double = 978_307_200
 
 extension XCTestReport {
@@ -85,14 +90,9 @@ extension XCTestReport {
             return nil
         }
 
-        // Save test details JSON to test_details folder
-        let testDetailsDir = (outputDir as NSString).appendingPathComponent("test_details")
-        try? FileManager.default.createDirectory(
-            atPath: testDetailsDir, withIntermediateDirectories: true)
-        let safeTestIdentifier = testIdentifier.replacingOccurrences(of: "/", with: "_")
-        let testDetailsPath = (testDetailsDir as NSString).appendingPathComponent(
-            "\(safeTestIdentifier).json")
-        try? testDetailsJSON?.write(toFile: testDetailsPath, atomically: true, encoding: .utf8)
+        if let testDetailsJSON {
+            recordTestDetailsJSON(testDetailsJSON, for: testIdentifier)
+        }
         let decoder = JSONDecoder()
         do {
             let result = try decoder.decode(TestDetails.self, from: data)
@@ -104,6 +104,41 @@ extension XCTestReport {
             print("Failed to decode test details: \(error)")
             print("What we tried to decode: \(String(data: data, encoding: .utf8) ?? "nil")")
             return nil
+        }
+    }
+
+    func recordTestDetailsJSON(_ rawJSON: String, for testIdentifier: String) {
+        collectedTestDetailsLock.lock()
+        collectedTestDetails[outputDir, default: [:]][testIdentifier] = rawJSON
+        collectedTestDetailsLock.unlock()
+    }
+
+    /// Flushes every collected test-details payload into a single `test_details.json` at the
+    /// report root. Safe to call with nothing collected, and safe to call more than once.
+    func writeTestDetailsIndex() {
+        collectedTestDetailsLock.lock()
+        let collected = collectedTestDetails[outputDir] ?? [:]
+        collectedTestDetailsLock.unlock()
+
+        var index = [String: Any](minimumCapacity: collected.count)
+        for (testIdentifier, rawJSON) in collected {
+            guard let data = rawJSON.data(using: .utf8),
+                let object = try? JSONSerialization.jsonObject(with: data)
+            else {
+                print("Skipping malformed test details JSON for: \(testIdentifier)")
+                continue
+            }
+            index[testIdentifier] = object
+        }
+
+        let indexPath = (outputDir as NSString).appendingPathComponent("test_details.json")
+        do {
+            try FileManager.default.createDirectory(
+                atPath: outputDir, withIntermediateDirectories: true)
+            let data = try JSONSerialization.data(withJSONObject: index, options: [.sortedKeys])
+            try data.write(to: URL(fileURLWithPath: indexPath), options: .atomic)
+        } catch {
+            print("Failed to write test details index at \(indexPath): \(error)")
         }
     }
 
@@ -282,20 +317,29 @@ extension XCTestReport {
 
         var previousRuns = [TestRunDetail]()
         for dir in previousDirs.prefix(10) {
-            let testDetailsPath = (parentDir as NSString).appendingPathComponent(
-                "\(dir)/test_details/\(testIdentifier.replacingOccurrences(of: "/", with: "_")).json"
-            )
+            let reportDir = (parentDir as NSString).appendingPathComponent(dir)
 
-            if fileManager.fileExists(atPath: testDetailsPath) {
+            if let testDetails = testDetailsIndex(inReportDir: reportDir)[testIdentifier] {
+                if let testRuns = testDetails.testRuns {
+                    previousRuns.append(contentsOf: testRuns)
+                }
+                continue
+            }
+
+            // Reports generated before the single-file index kept one file per test.
+            let legacyPath = (reportDir as NSString).appendingPathComponent(
+                "test_details/\(testIdentifier.replacingOccurrences(of: "/", with: "_")).json"
+            )
+            if fileManager.fileExists(atPath: legacyPath) {
                 do {
-                    let data = try Data(contentsOf: URL(fileURLWithPath: testDetailsPath))
+                    let data = try Data(contentsOf: URL(fileURLWithPath: legacyPath))
                     let testDetails = try JSONDecoder().decode(TestDetails.self, from: data)
 
                     if let testRuns = testDetails.testRuns {
                         previousRuns.append(contentsOf: testRuns)
                     }
                 } catch {
-                    print("Failed to load previous run details at \(testDetailsPath): \(error)")
+                    print("Failed to load previous run details at \(legacyPath): \(error)")
                 }
             }
         }
@@ -304,6 +348,45 @@ extension XCTestReport {
         previousRunsCache[previousRunsCacheKey] = previousRuns
         previousRunsCacheLock.unlock()
         return previousRuns
+    }
+
+    /// Parsed `test_details.json` for a previously generated report, cached so a directory is
+    /// read and decoded once instead of once per test.
+    func testDetailsIndex(inReportDir reportDir: String) -> [String: TestDetails] {
+        previousTestDetailsIndexCacheLock.lock()
+        if let cached = previousTestDetailsIndexCache[reportDir] {
+            previousTestDetailsIndexCacheLock.unlock()
+            return cached
+        }
+        previousTestDetailsIndexCacheLock.unlock()
+
+        var index = [String: TestDetails]()
+        let indexPath = (reportDir as NSString).appendingPathComponent("test_details.json")
+        if FileManager.default.fileExists(atPath: indexPath) {
+            do {
+                let data = try Data(contentsOf: URL(fileURLWithPath: indexPath))
+                let object = try JSONSerialization.jsonObject(with: data)
+                guard let entries = object as? [String: Any] else {
+                    throw NSError(domain: "xctestreport", code: 4)
+                }
+                let decoder = JSONDecoder()
+                for (testIdentifier, entry) in entries {
+                    guard let entryData = try? JSONSerialization.data(withJSONObject: entry),
+                        let testDetails = try? decoder.decode(TestDetails.self, from: entryData)
+                    else {
+                        continue
+                    }
+                    index[testIdentifier] = testDetails
+                }
+            } catch {
+                print("Failed to load test details index at \(indexPath): \(error)")
+            }
+        }
+
+        previousTestDetailsIndexCacheLock.lock()
+        previousTestDetailsIndexCache[reportDir] = index
+        previousTestDetailsIndexCacheLock.unlock()
+        return index
     }
 
     func exportAttachmentsDirect() -> [String: [AttachmentManifestItem]]? {

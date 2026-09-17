@@ -3,6 +3,7 @@ import Foundation
 
 private struct CompactScreenshotSource: Encodable {
     let value: XCTestReport.ScreenshotSource
+    let bundleEntry: String?
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.unkeyedContainer()
@@ -10,6 +11,7 @@ private struct CompactScreenshotSource: Encodable {
         try container.encode(value.src)
         try container.encode(value.time)
         try container.encode(value.failureAssociated)
+        try container.encode(bundleEntry)
     }
 }
 
@@ -206,9 +208,19 @@ extension XCTestReport {
         return String(data: encoded, encoding: .utf8) ?? "[]"
     }
 
-    private func encodeCompactScreenshotsJSON(_ screenshotSources: [ScreenshotSource]) -> String {
+    private func encodeCompactScreenshotsJSON(
+        _ screenshotSources: [ScreenshotSource],
+        snapshotComparisonSources: Set<String>,
+        bundle: Builder?
+    ) -> String {
         let encoder = JSONEncoder()
-        let payload = screenshotSources.map { CompactScreenshotSource(value: $0) }
+        let payload = screenshotSources.map { source in
+            CompactScreenshotSource(
+                value: source,
+                bundleEntry: bundleEntry(
+                    forRelativePath: source.src,
+                    snapshotComparisonSources: snapshotComparisonSources, bundle: bundle))
+        }
         guard let encoded = try? encoder.encode(payload) else { return "[]" }
         return String(data: encoded, encoding: .utf8) ?? "[]"
     }
@@ -235,7 +247,8 @@ extension XCTestReport {
         sourceLocationBySymbol: [String: SourceLocation] = [:],
         template: String,
         payloadBaseName: String?,
-        snapshotComparisonSources: Set<String> = []
+        snapshotComparisonSources: Set<String> = [],
+        bundle: Builder? = nil
     ) -> String {
         guard let testIdentifier else { return "" }
 
@@ -302,7 +315,9 @@ extension XCTestReport {
 
         let screenshotJSON: String = {
             guard !screenshotSources.isEmpty else { return "[]" }
-            return encodeCompactScreenshotsJSON(screenshotSources)
+            return encodeCompactScreenshotsJSON(
+                screenshotSources, snapshotComparisonSources: snapshotComparisonSources,
+                bundle: bundle)
         }()
         let includeManifestTouchFallback = runActivityLists.count <= 1
         var runStates = [TimelineRunState]()
@@ -367,7 +382,7 @@ extension XCTestReport {
                     "<div class=\"timeline-status\">No activity timeline was found for this run.</div>"
             } else {
                 timelineTree =
-                    "<div class=\"timeline-tree\"><ul class=\"timeline-root\">\(renderTimelineNodesHTML(collapsedTimelineNodes, baseTime: timelineBaseTime, depth: 0))</ul></div>"
+                    "<div class=\"timeline-tree\"><ul class=\"timeline-root\">\(renderTimelineNodesHTML(collapsedTimelineNodes, baseTime: timelineBaseTime, depth: 0, snapshotComparisonSources: snapshotComparisonSources, bundle: bundle))</ul></div>"
             }
             let timelineTreeControls = collapsedTimelineNodes.isEmpty
                 ? ""
@@ -441,7 +456,13 @@ extension XCTestReport {
         var runStatesSrc = ""
         var screenshotSrc = ""
 
-        if let payloadBaseName, !payloadBaseName.isEmpty,
+        if let bundle {
+            // The archive deflates these, so they go in as plain JSON.
+            bundle.addEntry(name: Self.bundleRunStatesEntry, text: runStatesJSON)
+            bundle.addEntry(name: Self.bundleScreenshotsEntry, text: screenshotJSON)
+            runStatesSrc = Self.bundleRunStatesEntry
+            screenshotSrc = Self.bundleScreenshotsEntry
+        } else if let payloadBaseName, !payloadBaseName.isEmpty,
             let payloadPaths = writeCompressedTimelinePayloads(
                 runStatesJSON: runStatesJSON,
                 screenshotJSON: screenshotJSON,
@@ -515,7 +536,7 @@ extension XCTestReport {
             videoElements = """
                 <div class="video-card timeline-video-card" data-video-index="0">
                     <div class="timeline-video-frame">
-                        <img class="timeline-still" data-still-frame src="\(firstScreenshot.src)" alt="\(firstAlt)">
+                        <img class="timeline-still" data-still-frame\(stillFrameSourceAttributes(for: firstScreenshot, snapshotComparisonSources: snapshotComparisonSources, bundle: bundle)) alt="\(firstAlt)">
                         <div class="touch-overlay-layer" data-touch-overlay></div>
                         <div class="hierarchy-overlay-layer" data-hierarchy-overlay>
                             <div class="hierarchy-hints-layer" data-hierarchy-hints></div>

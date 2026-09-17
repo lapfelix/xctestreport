@@ -35,7 +35,8 @@ final class AgentMarkdownTests: XCTestCase {
             testActivities: activities,
             attachmentsByTestIdentifier: [:],
             primaryFailureMessage: test.details,
-            sourceLocationCandidateTexts: [test.details!]
+            sourceLocationCandidateTexts: [test.details!],
+            bundleFileName: "test_Suite_testFoo().zip"
         )
 
         XCTAssertEqual(summary, "Foo.swift:42: XCTAssertTrue failed - boom")
@@ -56,12 +57,12 @@ final class AgentMarkdownTests: XCTestCase {
             XCTestReport.AgentTestEntry(
                 name: "testFoo()", suite: "Suite", identifier: "Suite/testFoo()",
                 result: "Failed", duration: "5s", failureSummary: "boom failed",
-                markdownRelativePath: "agent-tests/Suite_testFoo__.md",
+                markdownRelativePath: "agent-tests.md#Suite_testFoo__",
                 markdown: "# testFoo()"),
             XCTestReport.AgentTestEntry(
                 name: "testBar()", suite: "Suite", identifier: "Suite/testBar()",
                 result: "Passed", duration: "1s", failureSummary: nil,
-                markdownRelativePath: "agent-tests/Suite_testBar__.md",
+                markdownRelativePath: "agent-tests.md#Suite_testBar__",
                 markdown: "# testBar()"),
         ]
         report.writeAgentReport(
@@ -76,7 +77,7 @@ final class AgentMarkdownTests: XCTestCase {
         let markdown = try String(
             contentsOf: directory.appendingPathComponent("report.md"), encoding: .utf8)
         XCTAssertTrue(markdown.contains("## Failed tests (1)"))
-        XCTAssertTrue(markdown.contains("[testFoo()](agent-tests/Suite_testFoo__.md)"))
+        XCTAssertTrue(markdown.contains("[testFoo()](agent-tests.md#Suite_testFoo__)"))
         XCTAssertTrue(markdown.contains("boom failed"))
         XCTAssertTrue(markdown.contains("Suite - 1/2 passed"))
         XCTAssertTrue(markdown.allSatisfy { $0.isASCII }, "Report must be ASCII-only")
@@ -92,12 +93,12 @@ final class AgentMarkdownTests: XCTestCase {
             XCTestReport.AgentTestEntry(
                 name: "testFoo()", suite: "Suite", identifier: "Suite/testFoo()",
                 result: "Failed", duration: "5s", failureSummary: "boom failed",
-                markdownRelativePath: "agent-tests/Suite_testFoo__.md",
+                markdownRelativePath: "agent-tests.md#Suite_testFoo__",
                 markdown: "# testFoo()\n\n## Failure\n\nboom\n\n- [shot](../attachments/foo.png)"),
             XCTestReport.AgentTestEntry(
                 name: "testBar()", suite: "Suite", identifier: "Suite/testBar()",
                 result: "Passed", duration: "1s", failureSummary: nil,
-                markdownRelativePath: "agent-tests/Suite_testBar__.md",
+                markdownRelativePath: "agent-tests.md#Suite_testBar__",
                 markdown: "# testBar()\n\nall good"),
         ]
         report.writeFailuresReport(
@@ -127,7 +128,7 @@ final class AgentMarkdownTests: XCTestCase {
             XCTestReport.AgentTestEntry(
                 name: "testBar()", suite: "Suite", identifier: "Suite/testBar()",
                 result: "Passed", duration: "1s", failureSummary: nil,
-                markdownRelativePath: "agent-tests/Suite_testBar__.md",
+                markdownRelativePath: "agent-tests.md#Suite_testBar__",
                 markdown: "# testBar()"),
         ]
         report.writeFailuresReport(
@@ -166,7 +167,8 @@ final class AgentMarkdownTests: XCTestCase {
             testActivities: nil,
             attachmentsByTestIdentifier: [:],
             primaryFailureMessage: message,
-            sourceLocationCandidateTexts: []
+            sourceLocationCandidateTexts: [],
+            bundleFileName: "test_Suite_testUnicode().zip"
         )
 
         XCTAssertTrue(markdown.allSatisfy { $0.isASCII }, "Markdown must be ASCII-only")
@@ -175,11 +177,109 @@ final class AgentMarkdownTests: XCTestCase {
             "Typographic punctuation folds to ASCII; other non-ASCII becomes '?'")
     }
 
-    func testMarkdownFileNameIsFilesystemSafe() {
+    func testAnchorLinkTargetsCombinedFile() {
         let report = makeReport()
-        let name = report.agentMarkdownFileName(
-            identifier: "Suite/testFoo()", name: "testFoo()")
-        XCTAssertEqual(name, "Suite_testFoo__.md")
+        XCTAssertEqual(
+            report.agentMarkdownAnchorLink(identifier: "Suite/testFoo()", name: "testFoo()"),
+            "agent-tests.md#Suite_testFoo__")
+        XCTAssertEqual(
+            report.agentMarkdownAnchorLink(identifier: nil, name: "testFoo()"),
+            "agent-tests.md#testFoo__")
+        // Slashes and parentheses must not survive into the anchor.
+        XCTAssertEqual(
+            report.agentMarkdownAnchorLink(identifier: "A/B c-d.e()", name: "x"),
+            "agent-tests.md#A_B_c-d.e__")
+    }
+
+    func testAgentTestsFileTableOfContentsPointsAtSectionMarkers() throws {
+        let directory = try makeTempDirectory()
+        let report = makeReport(outputDir: directory.path)
+        let entries = (1...12).map { index -> XCTestReport.AgentTestEntry in
+            let name = "test\(index)()"
+            let suite = index % 2 == 0 ? "BetaSuite" : "AlphaSuite"
+            let body = (0..<index).map { "line \($0)" }.joined(separator: "\n")
+            return XCTestReport.AgentTestEntry(
+                name: name, suite: suite, identifier: "\(suite)/\(name)",
+                result: index % 3 == 0 ? "Failed" : (index % 3 == 1 ? "Passed" : "Skipped"),
+                duration: "1s", failureSummary: nil,
+                markdownRelativePath: report.agentMarkdownAnchorLink(
+                    identifier: "\(suite)/\(name)", name: name),
+                markdown: "# \(name)\n\n\(body)\n\n- [shot](../attachments/foo.png)")
+        }
+
+        report.writeAgentTestsFile(summaryTitle: "My Suite", entries: entries)
+
+        let markdown = try String(
+            contentsOf: directory.appendingPathComponent("agent-tests.md"), encoding: .utf8)
+        let lines = markdown.components(separatedBy: "\n")
+        XCTAssertTrue(markdown.hasPrefix("# My Suite - Per-test detail"))
+        XCTAssertTrue(markdown.contains("## Tests (12)"))
+        XCTAssertTrue(markdown.allSatisfy { $0.isASCII }, "File must be ASCII-only")
+        XCTAssertTrue(
+            markdown.contains("[shot](attachments/foo.png)"),
+            "Links must be rewritten relative to the output root")
+
+        let tocLines = lines.filter { $0.hasPrefix("- ") && $0.contains("Suite/test") }
+        XCTAssertEqual(tocLines.count, 12)
+        for tocLine in tocLines {
+            let fields = tocLine.dropFirst(2).components(separatedBy: " ")
+            let lineNumber = Int(fields[0])
+            XCTAssertNotNil(lineNumber, "Table of contents must start with a line number")
+            let status = fields[1]
+            let identifier = fields[2]
+            XCTAssertEqual(
+                lines[lineNumber! - 1],
+                "<!-- test:\(identifier) --><a id=\"\(identifier.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "(", with: "_").replacingOccurrences(of: ")", with: "_"))\"></a>",
+                "Line \(lineNumber!) must be the marker for \(identifier)")
+            XCTAssertEqual(lines[lineNumber! + 1], "## \(status) \(identifier)")
+        }
+
+        // Sections follow the "All suites" ordering: suite first, then test name.
+        let order = tocLines.map { $0.components(separatedBy: " ").dropFirst(3).joined(separator: " ") }
+        XCTAssertEqual(order, order.sorted())
+    }
+
+    func testBundledAttachmentsBecomeUnzipCommandsAndVideosStayLinks() {
+        let report = makeReport()
+        let test = XCTestReport.TestNode(
+            name: "testFoo()",
+            nodeType: "Test Case",
+            nodeIdentifier: "Suite/testFoo()",
+            result: "Passed",
+            duration: "5s",
+            details: nil,
+            children: nil,
+            startTime: nil
+        )
+        let attachments = [
+            XCTestReport.AttachmentManifestItem(
+                exportedFileName: "12.plist", isAssociatedWithFailure: nil,
+                suggestedHumanReadableName: "UI Snapshot", timestamp: nil, payloadRefId: nil),
+            XCTestReport.AttachmentManifestItem(
+                exportedFileName: "13.mp4", isAssociatedWithFailure: nil,
+                suggestedHumanReadableName: "Screen Recording", timestamp: nil, payloadRefId: nil),
+        ]
+
+        let (markdown, _) = report.renderTestMarkdown(
+            test: test,
+            result: "Passed",
+            suite: "Suite",
+            testDetails: nil,
+            testActivities: nil,
+            attachmentsByTestIdentifier: ["Suite/testFoo()": attachments],
+            primaryFailureMessage: nil,
+            sourceLocationCandidateTexts: [],
+            bundleFileName: "test_Suite_testFoo().zip"
+        )
+
+        XCTAssertTrue(
+            markdown.contains(
+                "UI Snapshot - `unzip -p 'tests/test_Suite_testFoo().zip' attachments/12.plist`"),
+            "Bundled attachments must carry an extraction command, not a dangling link")
+        XCTAssertFalse(markdown.contains("](../attachments/12.plist)"))
+        XCTAssertTrue(
+            markdown.contains("[Screen Recording](../attachments/13.mp4)"),
+            "Videos stay loose files, so they keep a plain link")
     }
 
     // MARK: - Helpers

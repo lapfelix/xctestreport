@@ -4,6 +4,50 @@
   var externalJSONPayloads = Object.create(null);
   var externalJSONLoaders = [];
 
+  // Timeline payloads and attachment previews live in this page's ZIP bundle; bundle-reader.js
+  // pulls single entries out of it with Range requests.
+  var bundleHref = document.body ? document.body.getAttribute('data-report-bundle') : null;
+  var reportBundle = null;
+  if (bundleHref && globalThis.ReportBundle) {
+    try {
+      reportBundle = globalThis.ReportBundle.open(new URL(bundleHref, window.location.href).href);
+    } catch (error) {
+      console.warn('Could not open report bundle', bundleHref, error);
+    }
+  }
+
+  var BUNDLE_MIME_TYPES = {
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+    heic: 'image/heic', webp: 'image/webp', bmp: 'image/bmp', tiff: 'image/tiff',
+    svg: 'image/svg+xml', pdf: 'application/pdf', json: 'application/json',
+    html: 'text/html', htm: 'text/html', txt: 'text/plain', log: 'text/plain',
+    crash: 'text/plain', ips: 'text/plain', plist: 'text/plain',
+    mp4: 'video/mp4', mov: 'video/quicktime', m4v: 'video/x-m4v'
+  };
+
+  function bundleEntryMimeType(entryName) {
+    var ext = String(entryName || '').split('.').pop().toLowerCase();
+    return BUNDLE_MIME_TYPES[ext] || 'application/octet-stream';
+  }
+
+  function bundleEntryBytes(entryName) {
+    if (!reportBundle) return Promise.reject(new Error('This page has no report bundle.'));
+    return reportBundle.bytes(entryName);
+  }
+
+  function bundleEntryObjectURL(entryName) {
+    if (!reportBundle) return Promise.reject(new Error('This page has no report bundle.'));
+    return reportBundle.objectURL(entryName, bundleEntryMimeType(entryName));
+  }
+
+  /// Resolves either a bundled entry or a plain loose-file URL to something assignable to .src.
+  function resolveAssetURL(element) {
+    var entryName = element.getAttribute('data-bundle-src');
+    if (entryName) return bundleEntryObjectURL(entryName);
+    var href = element.getAttribute('href') || element.getAttribute('src');
+    return href ? Promise.resolve(href) : Promise.reject(new Error('No asset source.'));
+  }
+
   function decodeBase64Payload(base64Value) {
     if (!base64Value || typeof base64Value !== 'string') return null;
     if (typeof atob !== 'function') return null;
@@ -76,6 +120,21 @@
     } catch (error) {
       console.warn('Failed to parse timeline JSON payload for selector:', selector, error);
       inlineArray = [];
+    }
+
+    var bundleEntry = node.getAttribute('data-bundle-src');
+    if (bundleEntry && reportBundle) {
+      externalJSONLoaders.push(
+        bundleEntryBytes(bundleEntry)
+          .then(function(bytes) {
+            var parsed = JSON.parse(new TextDecoder('utf-8').decode(bytes) || '[]');
+            externalJSONPayloads[selector] = Array.isArray(parsed) ? parsed : [];
+          })
+          .catch(function(error) {
+            console.warn('Failed to load bundled timeline payload for', selector, bundleEntry, error);
+          })
+      );
+      return inlineArray;
     }
 
     var src = node.getAttribute('data-src');
@@ -288,7 +347,8 @@
         label: asString(raw[0], ''),
         src: asString(raw[1], ''),
         time: asNumber(raw[2], 0),
-        failureAssociated: asBoolean(raw[3])
+        failureAssociated: asBoolean(raw[3]),
+        bundle: raw[4] == null ? '' : String(raw[4])
       };
     }
 
@@ -297,7 +357,8 @@
       label: asString(source.label != null ? source.label : source.l, ''),
       src: asString(source.src != null ? source.src : source.s, ''),
       time: asNumber(source.time != null ? source.time : source.t, 0),
-      failureAssociated: asBoolean(source.failureAssociated != null ? source.failureAssociated : source.f)
+      failureAssociated: asBoolean(source.failureAssociated != null ? source.failureAssociated : source.f),
+      bundle: asString(source.bundle != null ? source.bundle : source.b, '')
     };
   }
 
@@ -864,14 +925,17 @@
     }
   }
 
-  function loadBinaryPlistPreview(href, requestToken) {
-    fetch(href)
-      .then(function(response) {
-        if (!response.ok) {
-          throw new Error('HTTP ' + response.status);
-        }
-        return response.arrayBuffer();
-      })
+  function loadBinaryPlistPreview(source, requestToken) {
+    var bytesPromise = source.entry
+      ? bundleEntryBytes(source.entry).then(function(bytes) { return bytes.buffer; })
+      : fetch(source.href).then(function(response) {
+          if (!response.ok) {
+            throw new Error('HTTP ' + response.status);
+          }
+          return response.arrayBuffer();
+        });
+
+    bytesPromise
       .then(function(buffer) {
         return maybeDecompressGzipBuffer(buffer);
       })
@@ -910,32 +974,78 @@
       });
   }
 
+  function downloadBundledAttachment(link) {
+    var entry = link.getAttribute('data-bundle-src');
+    if (!entry) return;
+    bundleEntryObjectURL(entry).then(function(objectURL) {
+      var anchor = document.createElement('a');
+      anchor.href = objectURL;
+      anchor.download = link.dataset.attachmentName || entry.split('/').pop();
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+    }).catch(function(error) {
+      console.warn('Failed to extract bundled attachment', entry, error);
+    });
+  }
+
   function openAttachmentPreview(link) {
     if (!previewModal || !link) return false;
     var kind = link.dataset.previewKind || 'file';
     if (kind === 'file') return false;
 
+    var entry = link.getAttribute('data-bundle-src');
     var href = link.getAttribute('href');
-    if (!href) return false;
+    if (!entry && !href) return false;
+    var source = { entry: entry, href: href };
     var title = link.dataset.previewTitle || link.textContent || 'Attachment';
+    // Blob URLs carry no filename, so the original one rides along on the link.
+    var fileName = link.dataset.attachmentName || '';
 
     if (previewTitle) previewTitle.textContent = title;
-    if (previewOpen) previewOpen.href = href;
     resetAttachmentPreviewContent();
 
+    if (previewOpen) {
+      if (entry) {
+        previewOpen.removeAttribute('href');
+        bundleEntryObjectURL(entry).then(function(objectURL) {
+          previewOpen.href = objectURL;
+          if (fileName) previewOpen.setAttribute('download', fileName);
+        }).catch(function() {});
+      } else {
+        previewOpen.href = href;
+        previewOpen.removeAttribute('download');
+      }
+    }
+
+    function assignSource(element) {
+      if (!entry) {
+        element.src = href;
+        return;
+      }
+      bundleEntryObjectURL(entry).then(function(objectURL) {
+        element.src = objectURL;
+      }).catch(function(error) {
+        console.warn('Failed to load bundled attachment', entry, error);
+        if (previewEmpty) previewEmpty.style.display = 'flex';
+      });
+    }
+
     if (kind === 'image' && previewImage) {
-      previewImage.src = href;
+      assignSource(previewImage);
       previewImage.style.display = 'block';
     } else if (kind === 'video' && previewVideo) {
-      previewVideo.src = href;
+      assignSource(previewVideo);
       previewVideo.style.display = 'block';
-    } else if (kind === 'plist' && previewText) {
+    } else if ((kind === 'plist' || kind === 'text') && previewText) {
+      // Text attachments are frequently gzipped plutil output or a raw binary plist, neither of
+      // which an iframe can render, so they go through the same decode path as plists.
       var requestToken = plistPreviewRequestToken + 1;
       plistPreviewRequestToken = requestToken;
-      setAttachmentTextPreview('Loading plist preview...');
-      loadBinaryPlistPreview(href, requestToken);
-    } else if (previewFrame && (kind === 'text' || kind === 'json' || kind === 'pdf' || kind === 'html')) {
-      previewFrame.src = href;
+      setAttachmentTextPreview('Loading preview...');
+      loadBinaryPlistPreview(source, requestToken);
+    } else if (previewFrame && (kind === 'json' || kind === 'pdf' || kind === 'html')) {
+      assignSource(previewFrame);
       previewFrame.style.display = 'block';
     } else if (previewEmpty) {
       previewEmpty.style.display = 'flex';
@@ -2185,9 +2295,19 @@
     var nextShot = screenshots[idx];
     if (!nextShot) return;
 
-    if (frame.dataset.currentSrc !== nextShot.src) {
-      frame.src = nextShot.src;
-      frame.dataset.currentSrc = nextShot.src;
+    var shotKey = nextShot.bundle || nextShot.src;
+    if (frame.dataset.currentSrc !== shotKey) {
+      frame.dataset.currentSrc = shotKey;
+      if (nextShot.bundle) {
+        // Blob URLs are cached per entry, so scrubbing back over a still costs nothing.
+        bundleEntryObjectURL(nextShot.bundle).then(function(objectURL) {
+          if (frame.dataset.currentSrc === shotKey) frame.src = objectURL;
+        }).catch(function(error) {
+          console.warn('Failed to load bundled screenshot', nextShot.bundle, error);
+        });
+      } else {
+        frame.src = nextShot.src;
+      }
     }
     frame.alt = nextShot.label || 'Screenshot';
   }
@@ -2854,6 +2974,12 @@
       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       if (openAttachmentPreview(attachmentLink)) {
         event.preventDefault();
+        return;
+      }
+      // Nothing to preview, and a bundled entry has no URL for the browser to follow.
+      if (attachmentLink.getAttribute('data-bundle-src')) {
+        event.preventDefault();
+        downloadBundledAttachment(attachmentLink);
       }
       return;
     }

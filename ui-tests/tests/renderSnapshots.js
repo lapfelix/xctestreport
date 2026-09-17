@@ -47,12 +47,41 @@ function renderSnapshotDetail() {
     details_panel_html: '<details class="test-meta-details"><summary>Summary</summary><div class="test-meta-content">Test metadata</div></details>',
     compact_failure_box_html: '<div class="test-error-box"><pre>Snapshot differs from its reference.</pre></div>',
     timeline_and_video_section_html: '',
+    bundle_src: 'detail.zip',
     snapshot_diff_html: `<section class="snapshot-diffs" data-snapshot-device="${encodeURIComponent(JSON.stringify(source[5].device))}" data-snapshot-comparisons="${encodeURIComponent(JSON.stringify([comparison]))}"></section>`
   };
   let html = fs.readFileSync(path.join(web, 'templates/test-detail.html'), 'utf8');
   for (const [key, value] of Object.entries(values)) html = html.split(`{{${key}}}`).join(value);
   if (/{{\w+}}/.test(html)) throw new Error('Unsubstituted detail template placeholder');
   return html;
+}
+
+// Mirrors the Range behaviour of a static object store (GCS answers suffix ranges with a 206),
+// which is what web/bundle-reader.js relies on to read one ZIP entry without pulling the archive.
+function sendMaybeRanged(req, res, body) {
+  const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+  res.setHeader('Accept-Ranges', 'bytes');
+  if (!range) {
+    res.setHeader('Content-Length', body.length);
+    res.end(body);
+    return;
+  }
+  let start;
+  let end;
+  if (range[1] === '') {
+    start = Math.max(0, body.length - Number(range[2]));
+    end = body.length - 1;
+  } else {
+    start = Number(range[1]);
+    end = range[2] === '' ? body.length - 1 : Math.min(Number(range[2]), body.length - 1);
+  }
+  const slice = body.subarray(start, end + 1);
+  res.writeHead(206, {
+    'Content-Range': `bytes ${start}-${end}/${body.length}`,
+    'Content-Length': slice.length,
+    'Content-Type': res.getHeader('Content-Type') || 'application/octet-stream'
+  });
+  res.end(slice);
 }
 
 async function serveSnapshots(options) {
@@ -66,7 +95,7 @@ async function serveSnapshots(options) {
     const file = path.resolve(root,relative);
     if (!file.startsWith(root + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) { res.writeHead(404); res.end(); return; }
     res.setHeader('Content-Type', file.endsWith('.png') ? 'image/png' : file.endsWith('.css') ? 'text/css' : 'text/javascript');
-    res.end(fs.readFileSync(file));
+    sendMaybeRanged(req, res, fs.readFileSync(file));
   });
   await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
   return {url:`http://127.0.0.1:${server.address().port}/snapshots.html`, close:()=>new Promise(resolve=>server.close(resolve))};

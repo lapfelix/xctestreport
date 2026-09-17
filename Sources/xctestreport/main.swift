@@ -48,6 +48,15 @@ struct XCTestReport: ParsableCommand {
     var additionalTestsFrom: [String] = []
 
     @Flag(
+        name: .customLong("keep-loose-attachments"),
+        help: """
+        Keep the loose copies of attachments that were packed into per-test bundles. \
+        Needed if you intend to re-run with --html-only, which re-reads the attachments directory.
+        """
+    )
+    var keepLooseAttachments: Bool = false
+
+    @Flag(
         name: .customLong("no-snapshot-diff"),
         help: "Disable snapshot visual-diff detection and rendering (enabled by default)."
     )

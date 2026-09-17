@@ -1487,7 +1487,10 @@ extension XCTestReport {
         return .event
     }
 
-    func renderTimelineNodesHTML(_ nodes: [TimelineNode], baseTime: Double?, depth: Int) -> String {
+    func renderTimelineNodesHTML(
+        _ nodes: [TimelineNode], baseTime: Double?, depth: Int,
+        snapshotComparisonSources: Set<String> = [], bundle: Builder? = nil
+    ) -> String {
         let renderedNodes = nodes.map { node -> String in
             let timeLabel: String
             if let timestamp = node.timestamp, let baseTime {
@@ -1539,8 +1542,19 @@ extension XCTestReport {
                     let iconLabel = attachmentIconLabel(for: previewKind)
                     let linkOrText: String
                     if let relativePath = previewRelativePath {
+                        // When a generated text sidecar stands in for the payload, the payload
+                        // itself is never linked; keep it in the bundle so nothing is lost.
+                        if relativePath != attachment.relativePath,
+                            let originalEntry = bundleEntryName(
+                                fromRelativePath: attachment.relativePath)
+                        {
+                            bundle?.addAttachment(entryName: originalEntry)
+                        }
+                        let sourceAttributes = mediaSourceAttributes(
+                            relativePath: relativePath, attributeName: "href",
+                            snapshotComparisonSources: snapshotComparisonSources, bundle: bundle)
                         linkOrText = """
-                            <a class="timeline-attachment-link" href="\(relativePath)" target="_blank" rel="noopener" data-preview-kind="\(previewKind)" data-preview-title="\(attachmentName)">
+                            <a class="timeline-attachment-link"\(sourceAttributes) target="_blank" rel="noopener" data-preview-kind="\(previewKind)" data-preview-title="\(attachmentName)" data-attachment-name="\(htmlEscape(attachmentFileName(fromRelativePath: relativePath)))">
                                 <span class="timeline-attachment-icon">\(iconLabel)</span>
                                 <span class="timeline-attachment-label">\(attachmentName)</span>
                             </a>
@@ -1561,7 +1575,9 @@ extension XCTestReport {
                 return "<li class=\"\(nodeClass)\" style=\"--timeline-depth: \(depth);\">\(row)\(attachmentList)</li>"
             }
 
-            let childHTML = renderTimelineNodesHTML(node.children, baseTime: baseTime, depth: depth + 1)
+            let childHTML = renderTimelineNodesHTML(
+                node.children, baseTime: baseTime, depth: depth + 1,
+                snapshotComparisonSources: snapshotComparisonSources, bundle: bundle)
             return """
                 <li class="\(nodeClass)" style="--timeline-depth: \(depth);">
                     <details>

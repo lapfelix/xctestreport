@@ -3,23 +3,20 @@ import Foundation
 // Agent/LLM-readable Markdown companion to the HTML report.
 //
 // Layout (all links relative so the folder works when hosted remotely):
-//   <output>/report.md                 - index: counts, failed tests, per-suite listing
-//   <output>/agent-tests/<id>.md       - one file per test: failure, source, steps, attachments
+//   <output>/report.md        - index: counts, failed tests, per-suite listing
+//   <output>/agent-tests.md   - every test in one file: failure, source, steps, attachments
+//   <output>/failures.md      - the same detail, failed tests only
 //
 // Output is intentionally ASCII-only so it renders the same regardless of how a
 // viewer guesses the charset (e.g. servers that send .md as latin-1 text/plain).
 // Test-supplied text (failure messages, step titles) is passed through verbatim.
 //
-// From a test file, attachments resolve via ../attachments/... (same depth as tests/),
-// so attachmentRelativePathForTestPage(fileName:) is reused as-is.
+// Per-test Markdown is rendered with links relative to a test page (../attachments/...),
+// because it is also packed into the per-test bundle. The root-level files strip the
+// leading ".." via rootRelativeLinks(_:) before inlining it.
 
 extension XCTestReport {
-    var agentTestsDirectoryName: String { "agent-tests" }
-
-    var agentTestsDirectoryPath: String {
-        (outputDir as NSString).appendingPathComponent(agentTestsDirectoryName)
-    }
-
+    var agentTestsFileName: String { "agent-tests.md" }
     var agentReportFileName: String { "report.md" }
     var failuresReportFileName: String { "failures.md" }
 
@@ -34,7 +31,12 @@ extension XCTestReport {
         let markdown: String  // full per-test Markdown (links relative to agent-tests/)
     }
 
-    func agentMarkdownFileName(identifier: String?, name: String) -> String {
+    /// Link to a test's section in the combined `agent-tests.md`.
+    func agentMarkdownAnchorLink(identifier: String?, name: String) -> String {
+        "\(agentTestsFileName)#\(agentMarkdownSlug(identifier: identifier, name: name))"
+    }
+
+    private func agentMarkdownSlug(identifier: String?, name: String) -> String {
         let base = identifier ?? name
         var safe = ""
         for scalar in base.unicodeScalars {
@@ -48,7 +50,7 @@ extension XCTestReport {
             }
         }
         if safe.isEmpty { safe = "test" }
-        return "\(safe).md"
+        return safe
     }
 
     // MARK: - Per-test Markdown
@@ -62,10 +64,17 @@ extension XCTestReport {
         attachmentsByTestIdentifier: [String: [AttachmentManifestItem]],
         primaryFailureMessage: String?,
         sourceLocationCandidateTexts: [String],
-        snapshotComparisons: [SnapshotComparison] = []
+        snapshotComparisons: [SnapshotComparison] = [],
+        bundleFileName: String
     ) -> (markdown: String, failureSummary: String?) {
         let isFailure = Self.isFailureTestResult(result)
         let attachments = test.nodeIdentifier.flatMap { attachmentsByTestIdentifier[$0] } ?? []
+        var snapshotSources = Set<String>()
+        for comparison in snapshotComparisons {
+            snapshotSources.insert(comparison.expected.src)
+            snapshotSources.insert(comparison.actual.src)
+            if let diff = comparison.diff { snapshotSources.insert(diff.src) }
+        }
 
         var lines = [String]()
         lines.append("# \(test.name)")
@@ -118,7 +127,12 @@ extension XCTestReport {
                 attachmentsByTestIdentifier: attachmentsByTestIdentifier) {
                 lines.append("## Stack trace (preview)")
                 lines.append("")
-                lines.append("[\(markdownInline(stack.attachmentName))](\(linkDestination(stack.relativePath))) - \(stack.frameCount) frames")
+                let reference = agentAttachmentReference(
+                    name: stack.attachmentName,
+                    relativePath: stack.relativePath,
+                    snapshotComparisonSources: snapshotSources,
+                    bundleFileName: bundleFileName)
+                lines.append("\(reference) - \(stack.frameCount) frames")
                 lines.append("")
                 lines.append(fencedCodeBlock(stack.preview))
                 lines.append("")
@@ -138,7 +152,9 @@ extension XCTestReport {
 
         let stepsMarkdown = renderStepsMarkdown(
             activities: testActivities,
-            attachments: attachments)
+            attachments: attachments,
+            snapshotComparisonSources: snapshotSources,
+            bundleFileName: bundleFileName)
         if !stepsMarkdown.isEmpty {
             lines.append("## Steps")
             lines.append("")
@@ -151,14 +167,19 @@ extension XCTestReport {
             lines.append("")
             lines.append("| Snapshot | Expected | Actual | Changed | Max delta | Images |")
             lines.append("| --- | --- | --- | --- | --- | --- |")
+            let reference = { (label: String, src: String) in
+                self.agentAttachmentReference(
+                    name: label, relativePath: src,
+                    snapshotComparisonSources: snapshotSources, bundleFileName: bundleFileName)
+            }
             for comparison in snapshotComparisons {
                 var imageLinks = [
-                    "[expected](\(linkDestination(comparison.expected.src)))",
-                    "[actual](\(linkDestination(comparison.actual.src)))",
+                    reference("expected", comparison.expected.src),
+                    reference("actual", comparison.actual.src),
                 ]
                 if let diff = comparison.diff {
                     let label = comparison.diffSynthesized ? "diff (generated)" : "diff"
-                    imageLinks.append("[\(label)](\(linkDestination(diff.src)))")
+                    imageLinks.append(reference(label, diff.src))
                 }
                 let percent = String(format: "%.2f%%", comparison.changedFraction * 100)
                 let cells = [
@@ -187,12 +208,51 @@ extension XCTestReport {
                 let offset = timeOffsetLabel(attachment.timestamp, base: base)
                 var suffix = ""
                 if attachment.isAssociatedWithFailure == true { suffix += " (failure)" }
-                lines.append("- \(offset)[\(markdownInline(name))](\(linkDestination(relativePath)))\(suffix)")
+                let reference = agentAttachmentReference(
+                    name: name, relativePath: relativePath,
+                    snapshotComparisonSources: snapshotSources, bundleFileName: bundleFileName)
+                lines.append("- \(offset)\(reference)\(suffix)")
             }
             lines.append("")
         }
 
         return (asciiFold(lines.joined(separator: "\n")), failureSummary.map(asciiFold))
+    }
+
+    // Most attachments now live only inside the test's ZIP, so a Markdown link would dangle;
+    // emit the command that prints the entry instead. Files that stay loose on disk (videos,
+    // snapshot comparison images) keep a plain link.
+    private func agentAttachmentReference(
+        name: String,
+        relativePath: String?,
+        snapshotComparisonSources: Set<String>,
+        bundleFileName: String
+    ) -> String {
+        let label = markdownInline(name)
+        guard let relativePath, !relativePath.isEmpty else { return label }
+        // Throwaway builder: reuses the real bundling rules rather than restating them here.
+        guard
+            let entry = bundleEntry(
+                forRelativePath: relativePath,
+                snapshotComparisonSources: snapshotComparisonSources,
+                bundle: Builder())
+        else {
+            return "[\(label)](\(linkDestination(relativePath)))"
+        }
+        let archive = "\(testPagesDirectoryName)/\(bundleFileName)"
+        return "\(label) - `unzip -p \(shellQuoted(archive)) \(shellQuoted(entry))`"
+    }
+
+    // Test identifiers reach file names, so paths routinely contain "()" and spaces.
+    private func shellQuoted(_ path: String) -> String {
+        let needsQuoting = path.unicodeScalars.contains { scalar in
+            !((scalar.value >= 48 && scalar.value <= 57)
+                || (scalar.value >= 65 && scalar.value <= 90)
+                || (scalar.value >= 97 && scalar.value <= 122)
+                || scalar == "." || scalar == "_" || scalar == "-" || scalar == "/")
+        }
+        guard needsQuoting else { return path }
+        return "'\(path.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 
     private func htmlTestPageFileName(for test: TestNode) -> String {
@@ -204,7 +264,9 @@ extension XCTestReport {
 
     private func renderStepsMarkdown(
         activities: TestActivities?,
-        attachments: [AttachmentManifestItem]
+        attachments: [AttachmentManifestItem],
+        snapshotComparisonSources: Set<String>,
+        bundleFileName: String
     ) -> [String] {
         guard let runs = activities?.testRuns, !runs.isEmpty else { return [] }
         let payloadToFile = Dictionary(
@@ -229,7 +291,10 @@ extension XCTestReport {
             for activity in run.activities {
                 appendActivityLines(
                     activity, base: base, depth: 0,
-                    payloadToFile: payloadToFile, into: &lines)
+                    payloadToFile: payloadToFile,
+                    snapshotComparisonSources: snapshotComparisonSources,
+                    bundleFileName: bundleFileName,
+                    into: &lines)
             }
         }
         return lines
@@ -240,6 +305,8 @@ extension XCTestReport {
         base: Double?,
         depth: Int,
         payloadToFile: [String: String],
+        snapshotComparisonSources: Set<String>,
+        bundleFileName: String,
         into lines: inout [String]
     ) {
         let indent = String(repeating: "  ", count: depth)
@@ -253,13 +320,20 @@ extension XCTestReport {
             guard let payloadId = attachment.payloadId,
                 let fileName = payloadToFile[payloadId] else { continue }
             let relativePath = attachmentRelativePathForTestPage(fileName: fileName)
-            lines.append("\(childIndent)- attachment: [\(markdownInline(attachment.name))](\(linkDestination(relativePath)))")
+            let reference = agentAttachmentReference(
+                name: attachment.name, relativePath: relativePath,
+                snapshotComparisonSources: snapshotComparisonSources,
+                bundleFileName: bundleFileName)
+            lines.append("\(childIndent)- attachment: \(reference)")
         }
 
         for child in activity.childActivities ?? [] {
             appendActivityLines(
                 child, base: base, depth: depth + 1,
-                payloadToFile: payloadToFile, into: &lines)
+                payloadToFile: payloadToFile,
+                snapshotComparisonSources: snapshotComparisonSources,
+                bundleFileName: bundleFileName,
+                into: &lines)
         }
     }
 
@@ -302,7 +376,7 @@ extension XCTestReport {
         var lines = [String]()
         lines.append("# \(summaryTitle) - Test Report")
         lines.append("")
-        lines.append("> Agent-readable companion to `index.html`. Every test links to a Markdown file with its failure, source locations, steps, and attachments. All paths are relative, so this folder works when hosted remotely.")
+        lines.append("> Agent-readable companion to `index.html`. Every test links into [`\(agentTestsFileName)`](\(agentTestsFileName)), one file holding the failure, source locations, steps, and attachments of every test; it opens with grep recipes for jumping to a single test. All paths are relative, so this folder works when hosted remotely.")
         lines.append(">")
         lines.append("> For failures only, see [`failures.md`](\(failuresReportFileName)) - one self-contained file with the full detail of every failed test.")
         lines.append("")
@@ -378,6 +452,89 @@ extension XCTestReport {
         } catch {
             print("Error writing agent report: \(error)")
         }
+
+        writeAgentTestsFile(summaryTitle: summaryTitle, entries: entries)
+    }
+
+    // MARK: - Combined per-test detail
+
+    // One file for every test. A per-test file each would be hundreds of files an agent has to
+    // list and open, so the detail is inlined and the header explains how to grep to one section.
+    func writeAgentTestsFile(summaryTitle: String, entries: [AgentTestEntry]) {
+        let sorted = entries
+            .sorted { $0.suite == $1.suite ? $0.name < $1.name : $0.suite < $1.suite }
+
+        var bodyLines = [String]()
+        var sectionOffsets = [Int]()
+        for (index, entry) in sorted.enumerated() {
+            if index > 0 {
+                bodyLines.append("")
+                bodyLines.append("---")
+                bodyLines.append("")
+            }
+            sectionOffsets.append(bodyLines.count)
+            let marker = entry.identifier ?? entry.name
+            let slug = agentMarkdownSlug(identifier: entry.identifier, name: entry.name)
+            bodyLines.append("<!-- test:\(marker) --><a id=\"\(slug)\"></a>")
+            bodyLines.append("")
+            bodyLines.append("## [\(statusToken(entry.result))] \(entry.suite)/\(entry.name)")
+            bodyLines.append("")
+            bodyLines.append(
+                contentsOf: rootRelativeLinks(entry.markdown).components(separatedBy: "\n"))
+        }
+
+        var headerLines = [String]()
+        headerLines.append("# \(summaryTitle) - Per-test detail")
+        headerLines.append("")
+        headerLines.append("Every test of this run, one section each, sorted by suite then name.")
+        headerLines.append("")
+        headerLines.append("## How to read this file")
+        headerLines.append("")
+        headerLines.append("Run these from the report root:")
+        headerLines.append("")
+        headerLines.append("```")
+        headerLines.append("# every test, with the line its section starts on")
+        headerLines.append("grep -n '^<!-- test:' \(agentTestsFileName)")
+        headerLines.append("")
+        headerLines.append("# one test's start line (single quotes keep / and () literal)")
+        headerLines.append("grep -n '^<!-- test:MySuite/testFoo()' \(agentTestsFileName)")
+        headerLines.append("")
+        headerLines.append("# failures only")
+        headerLines.append("grep -n '^## \\[FAIL\\]' \(agentTestsFileName)")
+        headerLines.append("")
+        headerLines.append("# read one section once you know where it starts")
+        headerLines.append("sed -n '1240,1400p' \(agentTestsFileName)")
+        headerLines.append("```")
+        headerLines.append("")
+        headerLines.append(
+            "Attachments are packed one ZIP per test, so each one below carries the `unzip -p` command that prints it. Videos and snapshot images are still loose files and stay plain links.")
+        headerLines.append("")
+        headerLines.append("## Tests (\(sorted.count))")
+        headerLines.append("")
+        // One line per test, so the header length below does not depend on the numbers themselves.
+        let tocStart = headerLines.count
+        for entry in sorted {
+            headerLines.append("- \(statusToken(entry.result)) \(entry.suite)/\(entry.name)")
+        }
+        headerLines.append("")
+        headerLines.append("---")
+        headerLines.append("")
+
+        let headerLineCount = headerLines.count
+        for (index, entry) in sorted.enumerated() {
+            let line = headerLineCount + sectionOffsets[index] + 1
+            headerLines[tocStart + index] =
+                "- \(line) [\(statusToken(entry.result))] \(entry.suite)/\(entry.name)"
+        }
+
+        let markdown = asciiFold((headerLines + bodyLines).joined(separator: "\n")) + "\n"
+        let path = (outputDir as NSString).appendingPathComponent(agentTestsFileName)
+        do {
+            try markdown.write(toFile: path, atomically: true, encoding: .utf8)
+            print("Agent per-test detail written to \(path)")
+        } catch {
+            print("Error writing agent per-test detail: \(error)")
+        }
     }
 
     // MARK: - Failures-only report
@@ -438,8 +595,9 @@ extension XCTestReport {
         }
     }
 
-    // Per-test Markdown links are relative to agent-tests/ (one level deep). failures.md
-    // sits at the output root, so drop one ".." level from every Markdown link target.
+    // Per-test Markdown links are relative to a test page (one level deep). The combined files
+    // sit at the output root, so drop one ".." level from every Markdown link target. Only real
+    // link targets match, so the backticked `unzip -p tests/...` commands are left alone.
     private func rootRelativeLinks(_ markdown: String) -> String {
         markdown
             .replacingOccurrences(of: "](../", with: "](")
@@ -447,9 +605,13 @@ extension XCTestReport {
     }
 
     private func statusIcon(_ result: String) -> String {
-        if Self.isPassedTestResult(result) { return "[PASS]" }
-        if Self.isSkippedTestResult(result) { return "[SKIP]" }
-        return "[FAIL]"
+        "[\(statusToken(result))]"
+    }
+
+    private func statusToken(_ result: String) -> String {
+        if Self.isPassedTestResult(result) { return "PASS" }
+        if Self.isSkippedTestResult(result) { return "SKIP" }
+        return "FAIL"
     }
 
     // MARK: - Markdown helpers

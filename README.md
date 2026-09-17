@@ -11,7 +11,8 @@ Generate static HTML reports from XCTest `.xcresult` bundles.
 - Renders timeline + scrubber + media previews for test activities.
 - Exports attachments and supports video, image, text, and plist preview flows.
 - Compares against previous report folders in the same parent directory.
-- Keeps heavy web payloads compressed to reduce output size.
+- Packs each test's payloads into one ZIP per test, so a full run writes hundreds of files
+  instead of thousands (see [Per-test bundles](#per-test-bundles)).
 
 ## Agent-readable report
 
@@ -24,10 +25,21 @@ into failures without the `.xcresult`:
 - `failures.md` — the cheap entry point. Every failed test's full detail inlined
   into one self-contained file, so an agent reads one file without following
   links. Always written; says so plainly when nothing failed.
-- `agent-tests/<test>.md` — one file per test: result, identifier, device, the
+- `agent-tests.md` — every test's full detail in one file: result, identifier, device, the
   failure message, source locations, stack-trace preview, the full activity
   **steps** tree (timestamps, `[FAIL]` marks the failing step), previous-run
-  history, and links to all attachments.
+  history, and every attachment. It opens with grep/sed recipes and a table of contents
+  giving the exact starting line of every test, so an agent with limited context can jump
+  straight to one section instead of reading the file:
+
+  ```bash
+  grep -n '^<!-- test:MySuite/testFoo()' agent-tests.md   # find the section
+  sed -n '1240,1400p' agent-tests.md                      # read just that section
+  grep -n '^## \[FAIL\]' agent-tests.md                   # failures only
+  ```
+
+  The same per-test Markdown is also stored inside each test's bundle as `test.md`
+  (`unzip -p tests/test_MySuite_testFoo\(\).zip test.md`).
 
 All links are relative, so the output folder works the same whether read locally or
 hosted remotely. Point an agent at `report.md` and let it follow the links.
@@ -51,7 +63,7 @@ cp .build/release/xctestreport /usr/local/bin/xctestreport
 
 ## CLI
 ```bash
-USAGE: xctestreport <xcresult-path> <output-dir> [--compress-video] [--video-height <video-height>] [--header-note <header-note>] [--no-snapshot-diff] [--snapshot-tolerance <snapshot-tolerance>]
+USAGE: xctestreport <xcresult-path> <output-dir> [--compress-video] [--video-height <video-height>] [--header-note <header-note>] [--keep-loose-attachments] [--no-snapshot-diff] [--snapshot-tolerance <snapshot-tolerance>]
 
 ARGUMENTS:
   <xcresult-path>         Path to the .xcresult file.
@@ -62,6 +74,10 @@ OPTIONS:
   --video-height <n>      Maximum compressed video dimension (longest edge). Default: 1024.
   --header-note <note>    Custom note shown under the title on the report's main
                           page (e.g. "Branch: feature/new-thing").
+  --keep-loose-attachments
+                          Keep the loose copies of attachments that were packed into
+                          per-test bundles. Needed only if you intend to re-run with
+                          --html-only, which re-reads the attachments directory.
   --no-snapshot-diff      Disable snapshot visual-diff detection and rendering
                           (enabled by default).
   --snapshot-tolerance <n>
@@ -100,9 +116,10 @@ swift run xctestreport /path/to/Test.xcresult ~/Desktop/xcresultout --header-not
 - Browser decompresses on demand with `DecompressionStream`.
 
 ### Timeline payload compression
-- Timeline run-state and screenshot payloads are compact-encoded JSON, then gzip-compressed.
-- Stored under `timeline_payloads/*.bin` and loaded lazily by `timeline-view.js`.
-- If compression fails, falls back to inline JSON in the page.
+- Timeline run-state and screenshot payloads are compact-encoded JSON, deflated into the test's
+  bundle as `timeline/runstates.json` and `timeline/screenshots.json`.
+- Loaded lazily by `timeline-view.js` through `web/bundle-reader.js`.
+- If the bundle cannot be read, the page falls back to the inline JSON in the page itself.
 
 ## Output Layout
 Typical output directory:
@@ -111,22 +128,76 @@ Typical output directory:
 - `snapshots.html` (snapshot gallery; written when the run produced at least one comparison)
 - `report.md` (agent/LLM-readable index)
 - `failures.md` (agent/LLM-readable, failures only, full detail inlined)
+- `agent-tests.md` (agent/LLM-readable, every test's full detail, with a line-number index)
 - `snapshots.json` (machine-readable snapshot comparison index; written whenever snapshot diffing is enabled, even with zero comparisons)
 - `summary.json`
 - `tests_full.json`
 - `tests_grouped.json`
 - `tests/test_<identifier>.html` (one per test case)
-- `agent-tests/<identifier>.md` (one per test case, agent/LLM-readable)
-- `web/report.css`, `web/index-page.js`, `web/timeline-view.js`, `web/plist-preview.js`, `web/snapshot-diff.js`,
-  `web/snapshot-gallery.js`, `web/snapshot-gallery.css`
-- `attachments/` (exported media + previews)
-- `timeline_payloads/` (compressed timeline payload blobs)
-- `test_details/*.json`
+- `tests/test_<identifier>.zip` (one per test case; everything that page loads lazily)
+- `web/report.css`, `web/index-page.js`, `web/bundle-reader.js`, `web/timeline-view.js`,
+  `web/plist-preview.js`, `web/snapshot-diff.js`, `web/snapshot-gallery.js`, `web/snapshot-gallery.css`
+- `attachments/` (videos and snapshot comparison images only; everything else is bundled)
+- `test_details.json` (per-test detail keyed by test identifier, used to compare against previous runs)
+
+A 403-test run that previously wrote 5,641 files now writes 889.
+
+## Per-test bundles
+
+Each test page has a sibling ZIP holding everything it loads lazily: the two timeline payloads,
+every attachment preview, the UI-hierarchy plists, and the test's agent Markdown. The page itself
+stays a normal HTML file, so a test costs **two files** instead of the dozen-plus it used to.
+
+```
+tests/test_MySuite_testFoo().html
+tests/test_MySuite_testFoo().zip
+  |-- timeline/runstates.json
+  |-- timeline/screenshots.json
+  |-- attachments/12.plist
+  |-- attachments/31.dat.preview.txt
+  `-- test.md
+```
+
+They are ordinary archives, so the shell works on them directly:
+
+```bash
+unzip -l 'tests/test_MySuite_testFoo().zip'
+unzip -p 'tests/test_MySuite_testFoo().zip' test.md
+```
+
+### How the browser reads them
+`web/bundle-reader.js` never downloads a whole bundle to show one attachment. A ZIP keeps its
+central directory at the end, so the reader issues a suffix range request (`Range: bytes=-65536`)
+to get the index, then one ranged request per entry, inflating with the browser's native
+`DecompressionStream('deflate-raw')`. No WebAssembly and no third-party library are involved.
+Entries become `blob:` URLs, which are same-origin, so canvas pixel reads keep working.
+
+Reading one entry out of a 23 MB bundle costs about 300 KB.
+
+### Serving requirements
+- **Serve the report over HTTP(S).** Test pages need `fetch`, which browsers block on `file://`.
+  `index.html`, `report.md`, `failures.md` and `agent-tests.md` are unaffected.
+- The host should honour range requests. Google Cloud Storage, S3 and nginx all do
+  (`Accept-Ranges: bytes`, answering `bytes=-N` with `206`). A host that ignores ranges still
+  works: the reader falls back to fetching the bundle once and serving every entry from memory.
+- Do **not** let the host gzip-transcode `.zip` objects. Content-encoding transcoding makes a
+  range refer to the compressed stream, which breaks the index read, and the entries are already
+  deflated so it saves nothing. On GCS this means uploading them with identity encoding.
+
+### What stays a loose file
+- **Videos**, because `<video>` needs real streaming and seeking, which a blob URL cannot give it.
+- **Snapshot comparison images**, so the contact sheet and its download links keep working with
+  JavaScript disabled.
+- **Stack-trace attachments**, which are linked from outside the timeline section.
+
+Attachments that xcresult stores zstd- or gzip-compressed are decompressed while packing, because
+no browser can decode zstd natively. The archive always holds bytes the page can use directly.
 
 ## Web Assets (for edits)
 - Templates: `Sources/xctestreport/Resources/Web/templates/`
 - CSS: `Sources/xctestreport/Resources/Web/report.css`
 - JS: `Sources/xctestreport/Resources/Web/index-page.js`
+- JS: `Sources/xctestreport/Resources/Web/bundle-reader.js`
 - JS: `Sources/xctestreport/Resources/Web/timeline-view.js`
 - JS: `Sources/xctestreport/Resources/Web/plist-preview.js`
 - JS: `Sources/xctestreport/Resources/Web/snapshot-diff.js`
@@ -173,7 +244,8 @@ and from the back-link in each test page's snapshot section (anchored at that co
 
 ## Notes
 - Very large `.xcresult` bundles can still take time due to attachment export and test detail extraction.
-- Decompressed plist preview in-browser requires `DecompressionStream` support.
+- Reading per-test bundles in the browser requires `DecompressionStream` (Chrome 80+, Safari 16.4+,
+  Firefox 113+).
 
 ### Browser regression checks
 
@@ -181,3 +253,7 @@ Run `npm --prefix ui-tests test`. The Playwright suite uses the shipping templat
 with real watchOS failure images served over HTTP. It covers gallery filtering, all comparison
 modes, synthesized diffs, tolerance, keyboard navigation, mobile light/dark layouts, unavailable
 images, no-JavaScript fallbacks, viewer cleanup, and a 180-comparison contact sheet.
+
+`tests/bundle.spec.js` covers the bundle reader against a range-serving host: entry listing,
+inflating deflated entries, byte-exact stored entries, blob-URL reuse, the partial-fetch path on a
+large archive, and the whole-archive fallback when a host ignores `Range`.

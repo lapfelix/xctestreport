@@ -591,13 +591,19 @@ extension XCTestReport {
 
     func renderStackTraceSection(
         for testIdentifier: String?,
-        attachmentsByTestIdentifier: [String: [AttachmentManifestItem]]
+        attachmentsByTestIdentifier: [String: [AttachmentManifestItem]],
+        snapshotComparisonSources: Set<String> = [],
+        bundle: Builder? = nil
     ) -> String {
         guard
             let stack = extractStackTracePreview(
                 for: testIdentifier, attachmentsByTestIdentifier: attachmentsByTestIdentifier)
         else { return "" }
 
+        // This link sits outside the timeline section, which owns the only bundle-aware click
+        // handler and the preview modal, so the stack trace file stays a real file.
+        _ = snapshotComparisonSources
+        bundle?.keepLoose(fileName: attachmentFileName(fromRelativePath: stack.relativePath))
         return """
             <h3>Stack Trace (Preview)</h3>
             <p><a href="\(stack.relativePath)" target="_blank" rel="noopener">\(htmlEscape(stack.attachmentName))</a></p>

@@ -246,6 +246,7 @@ extension XCTestReport {
         let testDetailTemplate = webTemplates.testDetailTemplate
         let indexTemplate = webTemplates.indexTemplate
         let timelineTemplate = webTemplates.timelineSectionTemplate
+        let failureNavigationByPage = Self.failureNavigation(for: allTests)
 
         // Preprocessing step (parallelized)
         let totalTests = allTests.count
@@ -537,6 +538,8 @@ extension XCTestReport {
                                 "status_text": htmlEscape(result),
                                 "duration_text": htmlEscape(duration),
                                 "test_subtitle": testSubtitle,
+                                "failure_nav_html": renderFailureNavigation(
+                                    failureNavigationByPage[testPageName]),
                                 "compact_failure_box_html": compactFailureBoxHtml,
                                 "details_panel_html": detailsPanelHtml,
                                 "timeline_and_video_section_html": timelineAndVideoSection,

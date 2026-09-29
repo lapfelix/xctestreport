@@ -348,24 +348,30 @@ extension XCTestReport {
                         if let testRuns = testDetails.testRuns {
                             sourceLocationCandidateTexts.append(
                                 contentsOf: extractRunDetailTexts(from: testRuns))
+                            // Failure messages quote the values under test ("<div>", "<external
+                            // symbol>"), so everything here is escaped.
+                            let nestedList = { (items: String) in
+                                items.isEmpty ? "" : "<ul>\(items)</ul>"
+                            }
                             let runsHtml = testRuns.compactMap { run in
                                 guard let children = run.children else { return nil }
                                 let runDetails = children.compactMap { child in
                                     let childDetails =
-                                        child.children?.map { detail in
-                                            return "<li><code>\(detail.name)</code></li>"
+                                        child.children?.compactMap { detail in
+                                            detail.name.isEmpty
+                                                ? nil : "<li><code>\(htmlEscape(detail.name))</code></li>"
                                         }.joined(separator: "") ?? ""
                                     return
-                                        "<li>\(child.name) (\(child.nodeType)): \(child.result ?? "Unknown")<ul>\(childDetails)</ul></li>"
+                                        "<li>\(htmlEscape(child.name)) (\(htmlEscape(child.nodeType))): \(htmlEscape(child.result ?? "Unknown"))\(nestedList(childDetails))</li>"
                                 }.joined(separator: "")
                                 return
-                                    "<li>\(run.name) (\(run.nodeType)): \(run.result ?? "Unknown")<ul>\(runDetails)</ul></li>"
+                                    "<li>\(htmlEscape(run.name)) (\(htmlEscape(run.nodeType))): \(htmlEscape(run.result ?? "Unknown"))\(nestedList(runDetails))</li>"
                             }.joined(separator: "")
 
                             failureInfo += """
-                                <p><strong>Test Description:</strong> \(testDescription)<br>
-                                <strong>Test Result:</strong> \(testResult)</p>
-                                <ul>\(runsHtml)</ul>
+                                <p><strong>Test Description:</strong> \(htmlEscape(testDescription))<br>
+                                <strong>Test Result:</strong> \(htmlEscape(testResult))</p>
+                                \(nestedList(runsHtml))
                                 """
                         }
 

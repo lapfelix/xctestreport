@@ -91,7 +91,7 @@ async function serveBundle({ supportsRange = true, large = false, exposeContentR
     url: `http://127.0.0.1:${server.address().port}/page.html`,
     archiveLength: archive.length,
     stats: () => ({ requests: requests.slice(), bytesServed }),
-    close: () => new Promise(resolve => server.close(resolve))
+    close: () => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); })
   };
 }
 

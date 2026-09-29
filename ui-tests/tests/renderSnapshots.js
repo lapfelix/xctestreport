@@ -109,6 +109,6 @@ async function serveSnapshots(options) {
     sendMaybeRanged(req, res, fs.readFileSync(file));
   });
   await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
-  return {url:`http://127.0.0.1:${server.address().port}/snapshots.html`, close:()=>new Promise(resolve=>server.close(resolve))};
+  return {url:`http://127.0.0.1:${server.address().port}/snapshots.html`, close:()=>new Promise(resolve=>{server.close(resolve); server.closeAllConnections();})};
 }
 module.exports = {serveSnapshots};

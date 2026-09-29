@@ -89,8 +89,14 @@ OPTIONS:
 ## Quick Start
 ```bash
 swift run xctestreport /path/to/Test.xcresult ~/Desktop/xcresultout --compress-video --video-height 1024
-open ~/Desktop/xcresultout/index.html
+cd ~/Desktop/xcresultout && python3 -m http.server 8000
+# then open http://localhost:8000/index.html
 ```
+
+Test pages load their screenshots and attachments with `fetch`, which browsers block on
+`file://`, so serve the folder (see [Serving requirements](#serving-requirements)); a page
+opened from disk says so. `python3 -m http.server` ignores range requests, so videos cannot seek
+there; any real web server can.
 
 Add a header note (shown under the title), handy in CI to label the run:
 

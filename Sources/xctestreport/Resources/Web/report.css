@@ -4416,3 +4416,46 @@ body.test-detail-page { background: var(--report-bg); }
     .snapdiff-swipehandle { width: 44px; margin-left: -22px; }
     .snapdiff-swipehandle::before { left: 21px; }
 }
+
+.file-protocol-notice {
+    position: fixed;
+    left: 50%;
+    bottom: 16px;
+    transform: translateX(-50%);
+    z-index: 1000;
+    box-sizing: border-box;
+    width: min(640px, calc(100vw - 32px));
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid #E3C77A;
+    border-radius: 8px;
+    background: #FFF8E1;
+    color: #5C4400;
+    font-size: 13px;
+    line-height: 1.4;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.file-protocol-notice code {
+    font-size: 12px;
+}
+
+.file-protocol-notice button {
+    flex: none;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+@media (prefers-color-scheme: dark) {
+    .file-protocol-notice {
+        border-color: #6B5620;
+        background: #2B2412;
+        color: #F2DFA5;
+    }
+}

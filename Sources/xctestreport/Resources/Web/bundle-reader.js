@@ -265,6 +265,28 @@
 
   var bundles = Object.create(null);
 
+  // Browsers block fetch on file://, so every bundled screenshot and attachment would fail with
+  // only a console warning. Say so on the page instead.
+  function showFileProtocolNotice() {
+    if (location.protocol !== 'file:' || !document.body) return;
+    if (!document.body.hasAttribute('data-report-bundle')) return;
+    var notice = document.createElement('div');
+    notice.className = 'file-protocol-notice';
+    notice.setAttribute('role', 'status');
+    notice.innerHTML =
+      '<span>Attachment previews and UI snapshots need this report served over HTTP ' +
+      '(for example <code>python3 -m http.server</code> in the report folder); ' +
+      'browsers block them on <code>file://</code>.</span>' +
+      '<button type="button" aria-label="Dismiss">\u00d7</button>';
+    notice.querySelector('button').addEventListener('click', function() { notice.remove(); });
+    document.body.appendChild(notice);
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', showFileProtocolNotice);
+  } else {
+    showFileProtocolNotice();
+  }
+
   globalThis.ReportBundle = {
     open: function(url) {
       if (!bundles[url]) bundles[url] = new Bundle(url);

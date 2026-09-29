@@ -127,6 +127,11 @@
             self.whole = new Uint8Array(buffer);
             return self._directoryFromWhole();
           });
+      })
+      .catch(function(error) {
+        // Let the next caller retry instead of replaying a transient failure forever.
+        self.directoryPromise = null;
+        throw error;
       });
 
     return this.directoryPromise;
@@ -223,6 +228,9 @@
       var entry = directory.entries[name];
       if (!entry) throw new Error('Missing bundle entry: ' + name);
       return self._entryBytes(entry);
+    }).catch(function(error) {
+      if (self.pending[name] === promise) delete self.pending[name];
+      throw error;
     });
 
     this.pending[name] = promise;

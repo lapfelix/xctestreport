@@ -128,6 +128,7 @@ extension XCTestReport {
         let nodeType: String
         let result: String?
         let url: String?
+        let sourceLocation: TestRunSourceLocation?
     }
 
     struct TestHistory {

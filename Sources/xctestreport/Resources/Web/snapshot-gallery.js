@@ -130,7 +130,9 @@
     function step(direction) {
         var visible = visibleComparisons();
         var index = visible.indexOf(current);
-        openComparison(visible[(index + direction + visible.length) % visible.length]);
+        var target = visible[(index + direction + visible.length) % visible.length];
+        // Esc should land on the card now shown, not the one that first opened the inspector.
+        openComparison(target, target && target.button);
     }
     dialog.querySelector(".sg-close").addEventListener("click", function() { dialog.close(); });
     dialog.addEventListener("close", function() {
@@ -181,9 +183,21 @@
                 frame.appendChild(img); pair.appendChild(frame);
             });
             card.appendChild(pair);
-            var percent = (comparison.changedFraction * 100).toFixed(2) + "% changed";
+            var fraction = typeof comparison.overlapChangedFraction === "number" && comparison.overlapPixels > 0
+                ? comparison.overlapChangedFraction : comparison.changedFraction;
+            var percent = (fraction * 100).toFixed(2) + "% changed";
             var caption = node("span", "sg-preview-caption");
-            caption.appendChild(node("span", comparison.sizeMismatch ? "sg-size-changed" : "", comparison.sizeMismatch ? "Size changed · " + percent : percent));
+            var summary = node("span", "sg-preview-summary");
+            if (comparison.sizeMismatch) {
+                var size = comparison.expected.width + "×" + comparison.expected.height + " → "
+                    + comparison.actual.width + "×" + comparison.actual.height;
+                var sizeNode = node("span", "sg-size-changed", size);
+                sizeNode.title = "Size changed; the percentage covers the area both images share";
+                summary.appendChild(sizeNode);
+                summary.appendChild(document.createTextNode(" · "));
+            }
+            summary.appendChild(document.createTextNode(percent));
+            caption.appendChild(summary);
             caption.appendChild(node("span", "sg-inspect-label", "Inspect"));
             card.appendChild(caption);
             card.addEventListener("click", function() { openComparison(entry, card); });

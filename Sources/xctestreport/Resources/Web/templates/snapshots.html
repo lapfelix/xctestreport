@@ -14,7 +14,7 @@
 <nav class="report-nav"><a href="index.html">Test results</a><a href="snapshots.html" aria-current="page">Snapshots</a><a href="report.md">Markdown</a></nav></header>
 <div class="summary-stats sg-summary">
     <div class="sg-summary-counts">
-        Comparisons <span class="stat-number">{{total_comparisons}}</span>
+        Image comparisons <span class="stat-number">{{total_comparisons}}</span>
         Matched <span class="stat-number passed-number">{{matched_comparisons}}</span>
         Changed <span class="stat-number failed-number">{{changed_comparisons}}</span>
         <span class="sg-device">{{device_label}}</span>
@@ -23,10 +23,10 @@
         <input type="search" id="sg-search" class="test-search" aria-label="Search snapshots" placeholder="Search snapshots or tests…">
         <button type="button" id="sg-failed-only" class="sg-toggle" aria-pressed="{{failed_only_pressed}}">Failed only</button>
         <button type="button" id="sg-diff-preview" class="sg-toggle" aria-pressed="false">Show differences</button>
-        <button type="button" id="sg-group" class="sg-toggle" aria-pressed="false">Group by class</button>
+        <button type="button" id="sg-group" class="sg-toggle" aria-pressed="false"{{class_controls_attributes}}>Group by class</button>
         <button type="button" id="sg-toggle-all" hidden class="sg-toggle" aria-pressed="false">Collapse all</button>
     </div>
-    <details class="sg-class-filter"><summary>Filter test classes</summary><div class="sg-suite-chips" id="sg-suite-chips">
+    <details class="sg-class-filter"{{class_controls_attributes}}><summary>Filter test classes</summary><div class="sg-suite-chips" id="sg-suite-chips">
         <span class="sg-chips-label">Test classes</span>
         {{suite_chips_html}}
         <button type="button" class="sg-chip sg-chip-all" id="sg-chip-all">All</button>
@@ -34,9 +34,8 @@
     </details>
     <p role="status" class="sg-readout" id="sg-readout">Showing {{visible_items}} of {{total_items}} tests</p>
 </div>
-<main class="sg-results">{{suite_sections_html}}</main>
+<main class="sg-results"><p id="sg-empty" class="no-match sg-empty" hidden>No snapshots match the current filters.</p>{{suite_sections_html}}</main>
 <details class="sg-about"><summary>About these snapshots</summary>{{limitation_note_html}}</details>
-<p id="sg-empty" class="no-match sg-empty" hidden>No snapshots match the current filters.</p>
 <script src="web/snapshot-gallery.js" defer></script>
 </body>
 </html>

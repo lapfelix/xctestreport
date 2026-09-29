@@ -465,23 +465,33 @@ extension XCTestReport {
         let projectHint = projectNameHint(from: testIdentifierURL)
         var seen = Set<String>()
         let items = references.compactMap { reference -> String? in
-            let dedupeKey = "\(reference.name)|\(reference.url ?? "")"
+            let resolved: SourceLocation?
+            if let explicit = reference.location {
+                resolved = SourceLocation(
+                    filePath: explicit.filePath, line: explicit.lineNumber, column: nil)
+            } else if !reference.name.isEmpty {
+                resolved = resolveSourceReferenceLocation(
+                    referenceName: reference.name,
+                    referenceURL: reference.url,
+                    projectHint: projectHint
+                )
+            } else {
+                resolved = nil
+            }
+            guard !reference.name.isEmpty || resolved != nil else { return nil }
+
+            let label = resolved.map { location -> String in
+                let columnSuffix = location.column.map { ":\($0)" } ?? ""
+                return "\(location.filePath):\(location.line)\(columnSuffix)"
+            }
+            let dedupeKey = "\(reference.name)|\(label ?? reference.url ?? "")"
             guard !seen.contains(dedupeKey) else { return nil }
             seen.insert(dedupeKey)
 
-            let escapedName = htmlEscape(reference.name)
-            if let location = resolveSourceReferenceLocation(
-                referenceName: reference.name,
-                referenceURL: reference.url,
-                projectHint: projectHint
-            ) {
-                let columnSuffix = location.column.map { ":\($0)" } ?? ""
-                let label = "\(location.filePath):\(location.line)\(columnSuffix)"
-                let escapedLabel = htmlEscape(label)
-                return "<li><code>\(escapedName)</code><br><code>\(escapedLabel)</code></li>"
-            }
-
-            return "<li><code>\(escapedName)</code></li>"
+            let parts = [reference.name, label ?? ""].filter { !$0.isEmpty }
+            return "<li>"
+                + parts.map { "<code>\(htmlEscape($0))</code>" }.joined(separator: "<br>")
+                + "</li>"
         }.joined(separator: "")
 
         guard !items.isEmpty else { return "" }
@@ -493,15 +503,16 @@ extension XCTestReport {
 
     private func failingSourceReferences(
         from testRuns: [TestRunDetail]
-    ) -> [(name: String, url: String?)] {
-        var references = [(name: String, url: String?)]()
+    ) -> [(name: String, url: String?, location: TestRunSourceLocation?)] {
+        var references = [(name: String, url: String?, location: TestRunSourceLocation?)]()
         var seen = Set<String>()
 
-        func appendReference(name: String, url: String?) {
-            let key = "\(name)|\(url ?? "")"
+        func appendReference(_ detail: TestRunChildDetail) {
+            let location = detail.sourceLocation.map { "\($0.filePath):\($0.lineNumber)" }
+            let key = "\(detail.name)|\(detail.url ?? "")|\(location ?? "")"
             guard !seen.contains(key) else { return }
             seen.insert(key)
-            references.append((name: name, url: url))
+            references.append((name: detail.name, url: detail.url, location: detail.sourceLocation))
         }
 
         func walkDetail(_ detail: TestRunChildDetail, inFailureContext: Bool) {
@@ -511,7 +522,7 @@ extension XCTestReport {
                 || detail.name.localizedCaseInsensitiveContains("failed")
 
             if detail.nodeType == "Source Code Reference" && isFailureNode {
-                appendReference(name: detail.name, url: detail.url)
+                appendReference(detail)
             }
 
             for child in detail.children ?? [] {

@@ -34,6 +34,18 @@
     var PAN_STEP = 40;
     var MIN_PANE_HEIGHT = 140;
     var MAX_PANE_HEIGHT = 640;
+    // Fit may enlarge tiny snapshots; past PIXELATE_AT it snaps to a whole multiple so every
+    // source pixel renders the same size under nearest-neighbour scaling.
+    var MAX_FIT_ZOOM = 4;
+    var ALIGN_SEARCH_MARGIN = 8;
+    var ALIGN_SEARCH_SAMPLES = 40000;
+    var MAX_LIVE_BOXES = 50;
+    var BOX_MERGE_GAP = 4;
+    var ALIGNMENTS = [
+        { id: "top", label: "Top" },
+        { id: "bottom", label: "Bottom" },
+        { id: "auto", label: "Auto" }
+    ];
 
     var HEAT_LUT = buildHeatLut();
 
@@ -233,7 +245,8 @@
             blinkShowsActual: false,
             blinkTimer: null,
             blinkInterval: 500,
-            tolerance: 0,
+            // Start from the tolerance the report measured with, so live numbers match the badges.
+            tolerance: typeof data.tolerance === "number" ? clamp(Math.round(data.tolerance), 0, 128) : 0,
             boxIndex: -1,
             showBoxes: true,
             expW: expectedWidth,
@@ -242,6 +255,14 @@
             actH: actualHeight,
             unionW: Math.max(expectedWidth, actualWidth, 1),
             unionH: Math.max(expectedHeight, actualHeight, 1),
+            // Vertical placement of each image in the shared world; `dy` is actual relative to expected.
+            align: "top",
+            dy: 0,
+            autoDy: null,
+            expTop: 0,
+            actTop: 0,
+            alignButtons: {},
+            serverBoxes: normalizeBoxes(data.boundingBoxes),
             boxes: normalizeBoxes(data.boundingBoxes),
             loaded: false,
             broken: false,
@@ -273,6 +294,8 @@
         state.body = body;
         root.appendChild(body);
 
+        // Snapshot libraries align top-left, so a few rows of height change flag everything below.
+        if (heightDiffers(state)) { state.align = "auto"; }
         if (data.sizeMismatch) { body.appendChild(buildSizeBanner(state, data)); }
         body.appendChild(buildToolbar(state));
         body.appendChild(buildStage(state));
@@ -304,8 +327,13 @@
         if (data.failureAssociated) {
             badges.appendChild(el("span", "snapdiff-badge snapdiff-badge-fail", "Failure"));
         }
-        if (typeof data.changedFraction === "number") {
-            badges.appendChild(el("span", "snapdiff-badge", fmtPercent(data.changedFraction) + " changed"));
+        var overlapFraction = reportedOverlapFraction(data);
+        if (overlapFraction !== null) {
+            var badge = el("span", "snapdiff-badge", fmtPercent(overlapFraction) + " changed");
+            if (data.sizeMismatch) {
+                badge.title = "Share of the area both images cover, aligned top-left like the failure message";
+            }
+            badges.appendChild(badge);
         }
         head.appendChild(badges);
         return head;
@@ -333,9 +361,57 @@
         if (deltas.length) {
             banner.appendChild(el("span", "snapdiff-sizebanner-delta", "(" + deltas.join(", ") + ")"));
         }
-        banner.appendChild(el("span", "snapdiff-sizebanner-note",
-            "Aligned top-left, never scaled. Hatched areas exist in only one image."));
+        if (heightDiffers(state)) {
+            var group = el("div", "snapdiff-align");
+            group.setAttribute("role", "group");
+            group.setAttribute("aria-label", "Vertical alignment");
+            group.appendChild(el("span", "snapdiff-align-label", "Align"));
+            ALIGNMENTS.forEach(function(option) {
+                var b = button("snapdiff-btn snapdiff-align-btn", option.label, "Align " + option.label.toLowerCase() + " (key a cycles)");
+                b.setAttribute("aria-pressed", option.id === state.align ? "true" : "false");
+                b.addEventListener("click", function() { setAlign(state, option.id); });
+                state.alignButtons[option.id] = b;
+                group.appendChild(b);
+            });
+            banner.appendChild(group);
+        }
+        state.alignNote = el("span", "snapdiff-sizebanner-note");
+        banner.appendChild(state.alignNote);
+        updateAlignNote(state);
         return banner;
+    }
+
+    function heightDiffers(state) {
+        return !!state.expH && !!state.actH && state.expH !== state.actH;
+    }
+
+    function reportedOverlapFraction(data) {
+        if (typeof data.overlapChangedFraction === "number"
+            && typeof data.overlapPixels === "number" && data.overlapPixels > 0) {
+            return data.overlapChangedFraction;
+        }
+        return typeof data.changedFraction === "number" ? data.changedFraction : null;
+    }
+
+    function alignmentDescription(state) {
+        if (state.align === "bottom") { return "Aligned bottom-left"; }
+        if (state.align === "auto") {
+            if (state.autoDy === null) { return "Auto-aligning…"; }
+            if (!state.dy) { return "Auto-aligned: best match is top-left"; }
+            return "Auto-aligned: actual moved " + (state.dy < 0 ? "up " : "down ") + Math.abs(state.dy) + " px";
+        }
+        return "Aligned top-left";
+    }
+
+    function updateAlignNote(state) {
+        if (state.alignNote) {
+            state.alignNote.textContent = alignmentDescription(state)
+                + ", never scaled. Hatched areas exist in only one image.";
+        }
+        ALIGNMENTS.forEach(function(option) {
+            var b = state.alignButtons[option.id];
+            if (b) { b.setAttribute("aria-pressed", option.id === state.align ? "true" : "false"); }
+        });
     }
 
     function buildToolbar(state) {
@@ -399,8 +475,8 @@
 
         var toleranceWrap = el("label", "snapdiff-field");
         toleranceWrap.appendChild(el("span", "snapdiff-fieldlabel", "Tolerance"));
-        var toleranceSlider = range("snapdiff-range", 0, 128, 1, 0, "Per-channel tolerance");
-        var toleranceValue = el("span", "snapdiff-fieldvalue", "0");
+        var toleranceSlider = range("snapdiff-range", 0, 128, 1, state.tolerance, "Per-channel tolerance");
+        var toleranceValue = el("span", "snapdiff-fieldvalue", String(state.tolerance));
         toleranceSlider.addEventListener("input", function() {
             state.tolerance = Number(toleranceSlider.value);
             toleranceValue.textContent = String(state.tolerance);
@@ -550,9 +626,12 @@
         pane.swipeClip.appendChild(pane.imgSwipe);
 
         pane.stripRight = el("div", "snapdiff-oob");
+        pane.stripTop = el("div", "snapdiff-oob");
         pane.stripBottom = el("div", "snapdiff-oob");
-        pane.stripRight.title = "Exists in only one image";
-        pane.stripBottom.title = "Exists in only one image";
+        [pane.stripRight, pane.stripTop, pane.stripBottom].forEach(function(strip) {
+            strip.title = "Exists in only one image";
+            strip.setAttribute("hidden", "");
+        });
 
         pane.canvasSlot = el("div", "snapdiff-canvasslot");
         pane.boxLayer = el("div", "snapdiff-boxlayer");
@@ -563,6 +642,7 @@
         pane.world.appendChild(pane.canvasSlot);
         pane.world.appendChild(pane.imgDiff);
         pane.world.appendChild(pane.stripRight);
+        pane.world.appendChild(pane.stripTop);
         pane.world.appendChild(pane.stripBottom);
         pane.world.appendChild(pane.boxLayer);
 
@@ -609,11 +689,13 @@
         footer.appendChild(state.navigation);
 
         var stats = el("div", "snapdiff-stats");
-        state.statChanged = addStat(stats, "Changed", "—");
-        state.statMax = addStat(stats, "Max Δ",
-            typeof data.maxChannelDelta === "number" ? String(data.maxChannelDelta) : "—");
+        state.statChanged = addStat(stats, "Changed (overlap)", "—");
+        state.statMax = addStat(stats, "Max Δ (overlap)", "—");
         addStat(stats, "Size", state.expW + "×" + state.expH
             + (data.sizeMismatch ? " → " + state.actW + "×" + state.actH : ""));
+        if (data.sizeMismatch) {
+            state.statOutside = addStat(stats, "Outside overlap", "—");
+        }
         addStat(stats, "Diff image",
             data.diff ? (data.diffSynthesized ? "synthesized" : "attached") : "none");
         state.analysis.appendChild(stats);
@@ -644,6 +726,7 @@
             "+ / − — zoom · 0 — fit",
             "n / p — next / previous difference",
             "b — start or stop blinking",
+            "a — cycle vertical alignment (when heights differ)",
             "Arrows — pan · drag to pan · scroll or pinch to zoom"
         ].forEach(function(line) {
             list.appendChild(el("li", null, line));
@@ -715,6 +798,10 @@
                 hideMessage(state);
                 adoptNaturalSizes(state);
                 preparePixelData(state);
+                if (state.pixelsOK) {
+                    resolveAlignment(state);
+                    runCompute(state);
+                }
             }
             applyMode(state);
             requestAnimationFrame(function() {
@@ -766,8 +853,103 @@
             state.actW = actual.naturalWidth;
             state.actH = actual.naturalHeight;
         }
+        applyGeometry(state);
+    }
+
+    // MARK: - Alignment
+
+    function applyGeometry(state) {
+        var top = Math.min(0, state.dy);
+        var bottom = Math.max(state.expH, state.dy + state.actH);
+        state.expTop = -top;
+        state.actTop = state.dy - top;
         state.unionW = Math.max(state.expW, state.actW, 1);
-        state.unionH = Math.max(state.expH, state.actH, 1);
+        state.unionH = Math.max(bottom - top, 1);
+    }
+
+    function resolveAlignment(state) {
+        if (state.align === "auto" && state.autoDy === null && state.expData && state.actData) {
+            state.autoDy = findBestOffset(state);
+        }
+        if (state.align === "bottom") { state.dy = state.expH - state.actH; }
+        else if (state.align === "auto") { state.dy = state.autoDy || 0; }
+        else { state.dy = 0; }
+        applyGeometry(state);
+        updateAlignNote(state);
+    }
+
+    function setAlign(state, align) {
+        if (!heightDiffers(state)) { return; }
+        var b = state.alignButtons[align];
+        if (b && b.disabled) { return; }
+        state.align = align;
+        resolveAlignment(state);
+        state.boxIndex = -1;
+        state.compCache = null;
+        if (state.pixelsOK && state.expData && state.actData) {
+            runCompute(state);
+        } else {
+            state.live = null;
+            state.boxes = state.dy === 0 ? state.serverBoxes : [];
+            updateStats(state);
+        }
+        applyMode(state);
+    }
+
+    function cycleAlign(state) {
+        var order = ALIGNMENTS.filter(function(option) {
+            var b = state.alignButtons[option.id];
+            return b && !b.disabled;
+        });
+        if (order.length < 2) { return; }
+        var index = order.findIndex(function(option) { return option.id === state.align; });
+        setAlign(state, order[(index + 1) % order.length].id);
+    }
+
+    // Vertical offset of actual against expected with the fewest differing pixels. Each
+    // candidate is scored on a strided sample so large snapshots stay interactive.
+    function findBestOffset(state) {
+        var ed = state.expData.data;
+        var ad = state.actData.data;
+        var eW = state.expW;
+        var eH = state.expH;
+        var aW = state.actW;
+        var aH = state.actH;
+        var width = Math.min(eW, aW);
+        var range = Math.abs(eH - aH) + ALIGN_SEARCH_MARGIN;
+        var minRows = Math.max(1, Math.floor(Math.min(eH, aH) / 2));
+        var best = 0;
+        var bestScore = Infinity;
+        for (var dy = -range; dy <= range; dy += 1) {
+            var y0 = Math.max(0, dy);
+            var y1 = Math.min(eH, dy + aH);
+            var rows = y1 - y0;
+            if (rows < minRows || width <= 0) { continue; }
+            var stride = Math.max(1, Math.ceil(Math.sqrt(rows * width / ALIGN_SEARCH_SAMPLES)));
+            var diffs = 0;
+            var samples = 0;
+            for (var y = y0; y < y1; y += stride) {
+                var eRow = y * eW * 4;
+                var aRow = (y - dy) * aW * 4;
+                for (var x = 0; x < width; x += stride) {
+                    var ei = eRow + x * 4;
+                    var ai = aRow + x * 4;
+                    if (ed[ei] !== ad[ai] || ed[ei + 1] !== ad[ai + 1]
+                        || ed[ei + 2] !== ad[ai + 2] || ed[ei + 3] !== ad[ai + 3]) {
+                        diffs += 1;
+                    }
+                    samples += 1;
+                }
+            }
+            var score = samples ? diffs / samples : Infinity;
+            // Ties go to the smaller shift, so identical overlaps stay top-aligned.
+            if (score < bestScore - 1e-9
+                || (Math.abs(score - bestScore) <= 1e-9 && Math.abs(dy) < Math.abs(best))) {
+                best = dy;
+                bestScore = score;
+            }
+        }
+        return best;
     }
 
     // Large snapshots keep tens of megabytes of pixel data alive; drop it on collapse.
@@ -841,6 +1023,15 @@
         if (state.mode === "heat" || (state.mode === "highlight" && !state.data.diff)) {
             state.mode = "side";
         }
+        if (state.alignButtons.auto) {
+            state.alignButtons.auto.disabled = true;
+            state.alignButtons.auto.title = "Auto alignment needs pixel access";
+        }
+        if (state.align === "auto") {
+            state.align = "top";
+            resolveAlignment(state);
+            state.boxes = state.serverBoxes;
+        }
         if (state.pixelNote && !state.broken) { state.pixelNote.removeAttribute("hidden"); }
         clearInspector(state);
     }
@@ -870,7 +1061,6 @@
         toggleHidden(state.blinkWrap, state.mode !== "blink");
         toggleHidden(state.swipeHint, state.mode !== "swipe");
         toggleHidden(state.sideHint, state.mode !== "side");
-        toggleHidden(state.toleranceWrap, state.mode !== "heat" && state.mode !== "highlight");
         applyLayers(state);
         if (needsComputedLayer(state)) { scheduleRecompute(state, true); }
         updateCounter(state);
@@ -888,7 +1078,12 @@
     function needsComputedLayer(state) {
         if (!state.pixelsOK || !state.expData || !state.actData) { return false; }
         if (state.mode === "heat") { return true; }
-        return state.mode === "highlight" && !state.data.diff;
+        return state.mode === "highlight" && !attachedDiffUsable(state);
+    }
+
+    // Attached and synthesized diff images are rendered top-left aligned.
+    function attachedDiffUsable(state) {
+        return !!state.data.diff && state.dy === 0;
     }
 
     function applyLayers(state) {
@@ -896,7 +1091,7 @@
         var A = state.paneA;
         var B = state.paneB;
         var sideBySide = mode === "side";
-        var diff = state.data.diff;
+        var diff = attachedDiffUsable(state) ? state.data.diff : null;
 
         toggleHidden(B.root, !sideBySide);
         if (sideBySide) { state.stage.classList.add("is-split"); }
@@ -909,6 +1104,10 @@
         sizeLayer(B.imgActual, state.actW, state.actH);
         sizeWorld(A.world, state.unionW, state.unionH);
         sizeWorld(B.world, state.unionW, state.unionH);
+        A.imgExpected.style.top = state.expTop + "px";
+        A.imgActual.style.top = state.actTop + "px";
+        A.imgSwipe.style.top = state.actTop + "px";
+        B.imgActual.style.top = state.actTop + "px";
 
         var showExpected = false;
         var showActual = false;
@@ -973,18 +1172,24 @@
 
         // The heatmap paints its own hatch, so only the DOM layers need strips.
         var mismatch = !!state.data.sizeMismatch || state.expW !== state.actW || state.expH !== state.actH;
+        var expectedRect = { y: state.expTop, w: state.expW, h: state.expH };
+        var actualRect = { y: state.actTop, w: state.actW, h: state.actH };
         if (mismatch && !(mode === "heat" && showCanvas)) {
             if (sideBySide) {
-                setStrips(A, state.expW, state.expH, state.unionW, state.unionH);
-                setStrips(B, state.actW, state.actH, state.unionW, state.unionH);
+                setStrips(state, A, expectedRect);
+                setStrips(state, B, actualRect);
             } else {
-                setStrips(A, Math.min(state.expW, state.actW), Math.min(state.expH, state.actH),
-                    state.unionW, state.unionH);
-                setStrips(B, 0, 0, 0, 0);
+                var overlapTop = Math.max(state.expTop, state.actTop);
+                setStrips(state, A, {
+                    y: overlapTop,
+                    w: Math.min(state.expW, state.actW),
+                    h: Math.max(0, Math.min(state.expTop + state.expH, state.actTop + state.actH) - overlapTop)
+                });
+                setStrips(state, B, null);
             }
         } else {
-            setStrips(A, 0, 0, 0, 0);
-            setStrips(B, 0, 0, 0, 0);
+            setStrips(state, A, null);
+            setStrips(state, B, null);
         }
 
         drawBoxes(state, A);
@@ -1011,31 +1216,29 @@
         }
     }
 
-    function setStrips(pane, width, height, unionW, unionH) {
+    // Hatches the parts of the world outside `rect` (left-aligned, `y` from the top).
+    function setStrips(state, pane, rect) {
         if (!pane) { return; }
-        if (!unionW || !unionH || (width >= unionW && height >= unionH)) {
-            pane.stripRight.setAttribute("hidden", "");
-            pane.stripBottom.setAttribute("hidden", "");
+        var W = state.unionW;
+        var H = state.unionH;
+        var width = rect ? Math.min(rect.w, W) : W;
+        var top = rect ? rect.y : 0;
+        var bottom = rect ? rect.y + rect.h : H;
+        placeStrip(pane.stripRight, rect && width < W, width, 0, W - width, H);
+        placeStrip(pane.stripTop, rect && top > 0, 0, 0, width, top);
+        placeStrip(pane.stripBottom, rect && bottom < H, 0, bottom, width, H - bottom);
+    }
+
+    function placeStrip(node, visible, left, top, width, height) {
+        if (!visible || width <= 0 || height <= 0) {
+            node.setAttribute("hidden", "");
             return;
         }
-        if (width < unionW) {
-            pane.stripRight.removeAttribute("hidden");
-            pane.stripRight.style.left = width + "px";
-            pane.stripRight.style.top = "0px";
-            pane.stripRight.style.width = (unionW - width) + "px";
-            pane.stripRight.style.height = unionH + "px";
-        } else {
-            pane.stripRight.setAttribute("hidden", "");
-        }
-        if (height < unionH) {
-            pane.stripBottom.removeAttribute("hidden");
-            pane.stripBottom.style.left = "0px";
-            pane.stripBottom.style.top = height + "px";
-            pane.stripBottom.style.width = Math.min(width, unionW) + "px";
-            pane.stripBottom.style.height = (unionH - height) + "px";
-        } else {
-            pane.stripBottom.setAttribute("hidden", "");
-        }
+        node.removeAttribute("hidden");
+        node.style.left = left + "px";
+        node.style.top = top + "px";
+        node.style.width = width + "px";
+        node.style.height = height + "px";
     }
 
     function drawBoxes(state, pane) {
@@ -1112,7 +1315,7 @@
         var paneWidth = (split && !column) ? (width - gap) / 2 : width;
         var maxPane = Math.min(MAX_PANE_HEIGHT, Math.round(window.innerHeight * 0.7));
         var paneHeight = clamp(
-            Math.round(Math.min(paneWidth, state.unionW) * (state.unionH / state.unionW)) + 48,
+            Math.round(Math.min(paneWidth, state.unionW * MAX_FIT_ZOOM) * (state.unionH / state.unionW)) + 48,
             MIN_PANE_HEIGHT,
             Math.max(MIN_PANE_HEIGHT, maxPane));
         var height = ((split && column) ? paneHeight * 2 + gap : paneHeight) + "px";
@@ -1122,7 +1325,9 @@
     function fitView(state) {
         var rect = state.paneA.root.getBoundingClientRect();
         if (!rect.width || !rect.height) { return; }
-        var zoom = clamp(Math.min(rect.width / state.unionW, rect.height / state.unionH), MIN_ZOOM, 1);
+        var zoom = Math.min(rect.width / state.unionW, rect.height / state.unionH, MAX_FIT_ZOOM);
+        if (zoom >= PIXELATE_AT) { zoom = Math.floor(zoom); }
+        zoom = clamp(zoom, MIN_ZOOM, MAX_FIT_ZOOM);
         state.zoom = zoom;
         state.fitZoom = zoom;
         state.panX = (rect.width - state.unionW * zoom) / 2;
@@ -1297,7 +1502,8 @@
 
     function runCompute(state) {
         var paint = state.mode === "heat" ? "heat" : "highlight";
-        if (state.compCache && state.compCache.tolerance === state.tolerance && state.compCache.paint === paint) {
+        if (state.compCache && state.compCache.tolerance === state.tolerance
+            && state.compCache.paint === paint && state.compCache.dy === state.dy) {
             updateStats(state);
             return;
         }
@@ -1310,8 +1516,15 @@
             applyMode(state);
             return;
         }
-        state.compCache = { tolerance: state.tolerance, paint: paint };
+        state.compCache = { tolerance: state.tolerance, paint: paint, dy: state.dy };
+        if (state.live.boxes) {
+            state.boxes = state.live.boxes;
+        } else {
+            state.boxes = state.dy === 0 ? state.serverBoxes : [];
+        }
+        if (state.boxIndex >= state.boxes.length) { state.boxIndex = -1; }
         updateStats(state);
+        updateCounter(state);
         applyLayers(state);
     }
 
@@ -1332,6 +1545,8 @@
         return state.compCtx;
     }
 
+    // Paints the world-sized canvas and measures only where both images exist; the rest
+    // is hatched and reported separately as a size change.
     function compute(state, paint) {
         var ctx = ensureCanvas(state);
         if (!ctx) { throw new Error("no 2d context"); }
@@ -1342,6 +1557,8 @@
         var eH = state.expH;
         var aW = state.actW;
         var aH = state.actH;
+        var eTop = state.expTop;
+        var aTop = state.actTop;
         var ed = state.expData.data;
         var ad = state.actData.data;
         var tolerance = state.tolerance;
@@ -1349,23 +1566,23 @@
 
         var out = ctx.createImageData(W, H);
         var od = out.data;
+        var mask = new Uint8Array(W * H);
         var changed = 0;
-        var outside = 0;
+        var overlap = 0;
         var maxDelta = 0;
 
         for (var y = 0; y < H; y += 1) {
-            var expectedRow = y < eH;
-            var actualRow = y < aH;
-            var eRow = expectedRow ? y * eW * 4 : 0;
-            var aRow = actualRow ? y * aW * 4 : 0;
+            var ey = y - eTop;
+            var ay = y - aTop;
+            var expectedRow = ey >= 0 && ey < eH;
+            var actualRow = ay >= 0 && ay < aH;
+            var eRow = expectedRow ? ey * eW * 4 : 0;
+            var aRow = actualRow ? ay * aW * 4 : 0;
             var oRow = y * W * 4;
             for (var x = 0; x < W; x += 1) {
                 var o = oRow + x * 4;
 
                 if (!expectedRow || !actualRow || x >= eW || x >= aW) {
-                    outside += 1;
-                    changed += 1;
-                    maxDelta = 255;
                     var stripe = ((x + y) % 12) < 6;
                     od[o] = stripe ? 236 : 122;
                     od[o + 1] = stripe ? 178 : 72;
@@ -1374,6 +1591,7 @@
                     continue;
                 }
 
+                overlap += 1;
                 var ei = eRow + x * 4;
                 var ai = aRow + x * 4;
                 var dr = ed[ei] - ad[ai];
@@ -1404,6 +1622,7 @@
                 }
 
                 changed += 1;
+                mask[y * W + x] = 1;
                 if (heat) {
                     var li = d * 3;
                     od[o] = HEAT_LUT[li];
@@ -1420,31 +1639,156 @@
         }
 
         ctx.putImageData(out, 0, 0);
-        return { changed: changed, outside: outside, total: W * H, maxDelta: maxDelta };
+        return {
+            changed: changed,
+            overlap: overlap,
+            maxDelta: maxDelta,
+            boxes: changed ? changedBoxes(mask, W, H) : []
+        };
+    }
+
+    // Same grouping as the report's server-side boxes: connected runs, then nearby boxes merged.
+    // Returns null when the mask is too noisy to group cheaply.
+    function changedBoxes(mask, W, H) {
+        var runY = [];
+        var runStart = [];
+        var runEnd = [];
+        var parents = [];
+        function find(i) {
+            while (parents[i] !== i) {
+                parents[i] = parents[parents[i]];
+                i = parents[i];
+            }
+            return i;
+        }
+        var previousFrom = 0;
+        var previousTo = 0;
+        for (var y = 0; y < H; y += 1) {
+            var rowFrom = runY.length;
+            var base = y * W;
+            var x = 0;
+            while (x < W) {
+                if (!mask[base + x]) { x += 1; continue; }
+                var end = x;
+                while (end + 1 < W && mask[base + end + 1]) { end += 1; }
+                var id = runY.length;
+                if (id > 500000) { return null; }
+                runY.push(y);
+                runStart.push(x);
+                runEnd.push(end);
+                parents.push(id);
+                for (var p = previousFrom; p < previousTo; p += 1) {
+                    if (runStart[p] <= end + 1 && x <= runEnd[p] + 1) {
+                        var a = find(p);
+                        var b = find(id);
+                        if (a !== b) { parents[b] = a; }
+                    }
+                }
+                x = end + 2;
+            }
+            previousFrom = rowFrom;
+            previousTo = runY.length;
+        }
+
+        var byRoot = new Map();
+        for (var i = 0; i < runY.length; i += 1) {
+            var root = find(i);
+            var box = byRoot.get(root);
+            if (box) {
+                if (runStart[i] < box.minX) { box.minX = runStart[i]; }
+                if (runEnd[i] > box.maxX) { box.maxX = runEnd[i]; }
+                if (runY[i] < box.minY) { box.minY = runY[i]; }
+                if (runY[i] > box.maxY) { box.maxY = runY[i]; }
+            } else {
+                byRoot.set(root, { minX: runStart[i], maxX: runEnd[i], minY: runY[i], maxY: runY[i] });
+            }
+        }
+        var boxes = [];
+        byRoot.forEach(function(b) {
+            boxes.push({ x: b.minX, y: b.minY, w: b.maxX - b.minX + 1, h: b.maxY - b.minY + 1 });
+        });
+        boxes.sort(compareBoxes);
+        return coalesceBoxes(boxes.slice(0, 2000), BOX_MERGE_GAP).sort(compareBoxes).slice(0, MAX_LIVE_BOXES);
+    }
+
+    function compareBoxes(a, b) {
+        return (b.w * b.h - a.w * a.h) || (a.y - b.y) || (a.x - b.x);
+    }
+
+    function coalesceBoxes(boxes, gap) {
+        var result = [];
+        boxes.forEach(function(box) {
+            var c = { x: box.x, y: box.y, w: box.w, h: box.h };
+            var i = 0;
+            while (i < result.length) {
+                var o = result[i];
+                if (o.x - gap <= c.x + c.w + gap && c.x - gap <= o.x + o.w + gap
+                    && o.y - gap <= c.y + c.h + gap && c.y - gap <= o.y + o.h + gap) {
+                    result.splice(i, 1);
+                    var minX = Math.min(c.x, o.x);
+                    var minY = Math.min(c.y, o.y);
+                    c = { x: minX, y: minY,
+                        w: Math.max(c.x + c.w, o.x + o.w) - minX,
+                        h: Math.max(c.y + c.h, o.y + o.h) - minY };
+                    i = 0;
+                } else {
+                    i += 1;
+                }
+            }
+            result.push(c);
+        });
+        return result;
+    }
+
+    // "438×6 px only in actual": the area that exists in one image at the current alignment.
+    function outsideDescription(state) {
+        var overlapTop = Math.max(state.expTop, state.actTop);
+        var overlapBottom = Math.min(state.expTop + state.expH, state.actTop + state.actH);
+        var overlapRows = Math.max(0, overlapBottom - overlapTop);
+        var overlapColumns = Math.min(state.expW, state.actW);
+        var parts = [];
+        function describe(width, height, label) {
+            var extraRows = height - overlapRows;
+            var extraColumns = width - overlapColumns;
+            var pieces = [];
+            if (extraRows > 0) { pieces.push(width + "×" + extraRows); }
+            if (extraColumns > 0) { pieces.push(extraColumns + "×" + (extraRows > 0 ? overlapRows : height)); }
+            if (pieces.length) { parts.push(pieces.join(" + ") + " px only in " + label); }
+        }
+        describe(state.expW, state.expH, "expected");
+        describe(state.actW, state.actH, "actual");
+        return parts.length ? parts.join(" · ") : "none";
     }
 
     function updateStats(state) {
         var data = state.data;
-        if (state.live) {
-            var fraction = state.live.total ? state.live.changed / state.live.total : 0;
-            var text = fmtInt(state.live.changed) + " px · " + fmtPercent(fraction);
-            if (state.live.outside) { text += " · " + fmtInt(state.live.outside) + " px out of frame"; }
-            if (state.tolerance) { text += " · tolerance " + state.tolerance; }
-            state.statChanged.textContent = text;
-            state.statMax.textContent = String(state.live.maxDelta);
-            return;
+        var live = state.live;
+        var changed = null;
+        var overlap = null;
+        var maxDelta = null;
+        if (live) {
+            changed = live.changed;
+            overlap = live.overlap;
+            maxDelta = live.maxDelta;
+        } else if (typeof data.overlapChangedPixels === "number" && data.overlapPixels > 0) {
+            changed = data.overlapChangedPixels;
+            overlap = data.overlapPixels;
+            maxDelta = data.overlapMaxChannelDelta;
+        } else if (typeof data.changedPixels === "number") {
+            changed = data.changedPixels;
+            overlap = data.totalPixels;
+            maxDelta = data.maxChannelDelta;
         }
-        if (typeof data.changedPixels === "number") {
-            var reported = typeof data.changedFraction === "number"
-                ? data.changedFraction
-                : (data.totalPixels ? data.changedPixels / data.totalPixels : 0);
-            state.statChanged.textContent = fmtInt(data.changedPixels) + " px · " + fmtPercent(reported);
-        } else {
+        if (changed === null) {
             state.statChanged.textContent = "—";
+        } else {
+            state.statChanged.textContent = fmtInt(changed) + " px · "
+                + fmtPercent(overlap ? changed / overlap : 0);
         }
-        if (typeof data.maxChannelDelta === "number") {
-            state.statMax.textContent = String(data.maxChannelDelta);
-        }
+        state.statChanged.title = "Pixels that differ where both images exist, at the current alignment. "
+            + "Snapshot failure messages count color channels, so their percentage can differ slightly.";
+        state.statMax.textContent = typeof maxDelta === "number" ? maxDelta + " / 255" : "—";
+        if (state.statOutside) { state.statOutside.textContent = outsideDescription(state); }
     }
 
     // MARK: - Pixel inspector
@@ -1459,12 +1803,12 @@
             return;
         }
         renderInspector(state, x, y,
-            samplePixel(state.expData, state.expW, state.expH, x, y),
-            samplePixel(state.actData, state.actW, state.actH, x, y));
+            samplePixel(state.expData, state.expW, state.expH, x, y - state.expTop),
+            samplePixel(state.actData, state.actW, state.actH, x, y - state.actTop));
     }
 
     function samplePixel(imageData, width, height, x, y) {
-        if (!imageData || x >= width || y >= height) { return null; }
+        if (!imageData || x < 0 || y < 0 || x >= width || y >= height) { return null; }
         var i = (y * width + x) * 4;
         var d = imageData.data;
         return [d[i], d[i + 1], d[i + 2], d[i + 3]];
@@ -1555,6 +1899,8 @@
                 stepBox(state, 1);
             } else if (key === "p" || key === "P") {
                 stepBox(state, -1);
+            } else if ((key === "a" || key === "A") && heightDiffers(state)) {
+                cycleAlign(state);
             } else if (key === "b" || key === "B") {
                 if (state.mode !== "blink") { setMode(state, "blink"); }
                 setBlink(state, !state.blinkOn);

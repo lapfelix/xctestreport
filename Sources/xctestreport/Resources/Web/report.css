@@ -78,6 +78,35 @@ body.test-detail-page {
     flex: 0 0 auto;
 }
 
+.test-failure-nav {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 auto;
+    border: 1px solid var(--report-line);
+    border-radius: 999px;
+    background: var(--report-surface);
+    font-size: 0.8rem;
+    line-height: 1;
+}
+.test-failure-nav-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    height: 24px;
+    font-size: 1.1rem;
+    color: var(--report-accent);
+    text-decoration: none;
+}
+.test-failure-nav-link:hover { background: var(--report-soft); }
+.test-failure-nav-link:first-child { border-radius: 999px 0 0 999px; }
+.test-failure-nav-link:last-child { border-radius: 0 999px 999px 0; }
+.test-failure-nav-link.is-disabled { color: var(--report-muted); opacity: 0.45; }
+.test-failure-nav-count { padding: 0 4px; color: var(--report-muted); font-variant-numeric: tabular-nums; }
+@media (max-width: 767px) {
+    .test-failure-nav-link { min-width: 44px; height: 44px; }
+}
+
 .test-back-link {
     display: inline-flex;
     align-items: center;
@@ -3641,6 +3670,22 @@ th.sortable-duration[data-sort="asc"] .sort-duration-btn::after { content: " \21
     flex: 1 1 240px;
     color: #8A6A2E;
     font-size: 0.76rem;
+}
+
+.snapdiff-align {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.snapdiff-align-label {
+    font-size: 0.76rem;
+    font-weight: 600;
+}
+
+.snapdiff-align .snapdiff-btn {
+    padding: 4px 10px;
+    font-size: 0.78rem;
 }
 
 .snapdiff-toolbar {

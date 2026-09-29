@@ -31,7 +31,7 @@
 .sg-item-link { margin-left: auto; white-space: nowrap; }
 .sg-badge { padding: 2px 6px; border-radius: 4px; font-size: 11px; background: var(--report-soft); }
 .sg-badge-changed, .sg-badge-failed { color: light-dark(#a33737, #ffb4b4); }
-.sg-badge-matched { color: light-dark(#28714d, #97d9b8); }
+.sg-badge-matched, .sg-badge-passed { color: light-dark(#28714d, #97d9b8); }
 .sg-preview { display: block; width: 100%; border: 0; border-top: 1px solid var(--report-line); background: transparent; color: var(--report-ink); padding: 0; text-align: left; }
 .sg-preview:hover { background: var(--report-soft); }
 .sg-preview:focus-visible { outline-offset: -3px; }
@@ -44,7 +44,7 @@
 .sg-inspect-label { color: var(--report-accent); font-weight: 600; }
 .sg-size-changed { color: light-dark(#9b651a, #edc17b); }
 .sg-anchor { display: block; scroll-margin-top: 16px; }
-.sg-empty { text-align: center; padding: 48px; }
+.sg-empty { grid-column: 1 / -1; text-align: center; padding: 48px; }
 .sg-inspecting { overflow: hidden; }
 .sg-inspector { width: min(1400px, calc(100vw - 48px)); max-width: none; max-height: calc(100dvh - 48px); padding: 0; border: 1px solid var(--report-line); border-radius: 12px; background: var(--report-surface); color: var(--report-ink); box-shadow: 0 24px 100px #0005; }
 .sg-inspector::backdrop { background: #111d30aa; }

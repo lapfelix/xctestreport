@@ -70,7 +70,7 @@ extension XCTestReport {
         } ?? ""
 
         for comparison in comparisons {
-            let percent = String(format: "%.2f%%", comparison.changedFraction * 100)
+            let percent = String(format: "%.2f%%", comparison.overlapChangedFraction * 100)
             let deltaText =
                 comparison.sizeMismatch
                 ? "\(comparison.widthDelta >= 0 ? "+" : "")\(comparison.widthDelta) x "
@@ -94,13 +94,13 @@ extension XCTestReport {
                 <figcaption class="snapshot-comparison-name">\(htmlEscape(comparison.name))\(deviceHTML)</figcaption>
                 <div class="snapshot-comparison-images">\(images)</div>
                 <table class="data-table snapshot-comparison-stats">
-                <thead><tr><th scope="col">Expected size</th><th scope="col">Actual size</th><th scope="col">Size delta</th><th scope="col">Changed</th><th scope="col">Max channel delta</th></tr></thead>
+                <thead><tr><th scope="col">Expected size</th><th scope="col">Actual size</th><th scope="col">Size delta</th><th scope="col">Changed (overlap)</th><th scope="col">Max channel delta (overlap)</th></tr></thead>
                 <tbody><tr>
                 <td data-label="Expected size">\(comparison.expected.width)x\(comparison.expected.height)</td>
                 <td data-label="Actual size">\(comparison.actual.width)x\(comparison.actual.height)</td>
                 <td data-label="Size delta">\(htmlEscape(deltaText))</td>
-                <td data-label="Changed">\(percent) (\(comparison.changedPixels) / \(comparison.totalPixels) px)</td>
-                <td data-label="Max channel delta">\(comparison.maxChannelDelta)</td>
+                <td data-label="Changed (overlap)">\(percent) (\(comparison.overlapChangedPixels) / \(comparison.overlapPixels) px)</td>
+                <td data-label="Max channel delta (overlap)">\(comparison.overlapMaxChannelDelta)</td>
                 </tr></tbody>
                 </table>
                 </figure>

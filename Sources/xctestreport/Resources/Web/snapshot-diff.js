@@ -1782,8 +1782,10 @@
         if (changed === null) {
             state.statChanged.textContent = "—";
         } else {
-            state.statChanged.textContent = fmtInt(changed) + " px · "
-                + fmtPercent(overlap ? changed / overlap : 0);
+            var text = fmtInt(changed) + " px · " + fmtPercent(overlap ? changed / overlap : 0);
+            // Live counts depend on the slider, so name the tolerance they were measured at.
+            if (live && state.tolerance) { text += " · tolerance " + state.tolerance; }
+            state.statChanged.textContent = text;
         }
         state.statChanged.title = "Pixels that differ where both images exist, at the current alignment. "
             + "Snapshot failure messages count color channels, so their percentage can differ slightly.";

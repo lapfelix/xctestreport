@@ -38,6 +38,7 @@ final class AttachmentExportTests: XCTestCase {
             INSERT INTO Attachments VALUES ('kXCTAttachmentScreenRecording', 'public.mpeg-4', 'video', 100, 1.0, NULL);
             INSERT INTO Attachments VALUES ('App UI hierarchy', 'public.plain-text', 'hierarchy', 102, 2.0, NULL);
             INSERT INTO Attachments VALUES ('kXCTAttachmentLegacyDiagnosticReportData', 'public.data', 'crash', NULL, 3.0, 50);
+            INSERT INTO Attachments VALUES ('kXCTAttachmentLegacySnapshot', 'com.apple.property-list', 'snapshot', 102, 4.0, NULL);
             """
         XCTAssertEqual(sqlite3_exec(db, sql, nil, nil, nil), SQLITE_OK)
         sqlite3_close(db)
@@ -57,6 +58,9 @@ final class AttachmentExportTests: XCTestCase {
         FileManager.default.createFile(
             atPath: (dataDir as NSString).appendingPathComponent("data.hierarchy"),
             contents: compressed.prefix(compressedSize))
+        FileManager.default.createFile(
+            atPath: (dataDir as NSString).appendingPathComponent("data.snapshot"),
+            contents: compressed.prefix(compressedSize))
 
         var report = XCTestReport()
         report.xcresultPath = xcresult
@@ -68,11 +72,16 @@ final class AttachmentExportTests: XCTestCase {
         XCTAssertEqual(Array(byTest.keys), ["Suite/testCrash()"])
         XCTAssertEqual(
             byTest["Suite/testCrash()"]?.map(\.exportedFileName),
-            ["Suite_testCrash.mp4", "2.txt", "3.ips"])
+            ["Suite_testCrash.mp4", "2.txt", "3.ips", "4.plist"])
         XCTAssertEqual(
             FileManager.default.contents(
                 atPath: (report.outputDir as NSString).appendingPathComponent("attachments/2.txt")),
-            hierarchy, "zstd payloads are unwrapped on export")
+            hierarchy, "zstd text payloads are unwrapped on export")
+        XCTAssertEqual(
+            FileManager.default.contents(
+                atPath: (report.outputDir as NSString).appendingPathComponent("attachments/4.plist")),
+            compressed.prefix(compressedSize),
+            "Plists stay as stored; the timeline and synthesized-event parser decode them")
     }
 
     /// The xcresulttool fallback decorates names; snapshot pairing needs them as written.

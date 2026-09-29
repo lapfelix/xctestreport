@@ -515,10 +515,11 @@ extension XCTestReport {
                 ?? "\(fileCounter).\(fileExt)"
             let destPath = (attachmentsDir as NSString).appendingPathComponent(destFileName)
             
-            // xcresult stores some payloads zstd-compressed; unwrap them here so a loose file or
-            // a crash report quoted in the Markdown is readable as-is. Videos are never compressed.
+            // xcresult stores some payloads zstd-compressed; unwrap text ones here so a loose file
+            // or a crash report quoted in the Markdown is readable as-is. Plists and other binary
+            // payloads stay as stored: the timeline decodes them itself.
             do {
-                if !["mp4", "mov", "m4v"].contains(fileExt),
+                if ["txt", "ips", "log", "json", "xml", "html"].contains(fileExt),
                     let decompressed = zstdDecompressedPayload(atPath: sourcePath)
                 {
                     try decompressed.write(to: URL(fileURLWithPath: destPath))
@@ -964,8 +965,9 @@ extension XCTestReport {
                 .values
                 .flatMap { $0 }
                 .filter {
-                    ($0.suggestedHumanReadableName ?? "").localizedCaseInsensitiveContains(
-                        "synthesized event")
+                    // "kXCTAttachmentLegacySynthesizedEvent" as well as "Synthesized Event".
+                    ($0.suggestedHumanReadableName ?? "").replacingOccurrences(of: " ", with: "")
+                        .localizedCaseInsensitiveContains("synthesizedevent")
                 }
                 .map(\.exportedFileName)
         )

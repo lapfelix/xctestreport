@@ -23,10 +23,12 @@ async function reportURL() {
   return renderReport({ suites });
 }
 
-test('status chips render, all on by default', async ({ page }) => {
+test('status chips are "show only" filters, none selected by default', async ({ page }) => {
   await page.goto(await reportURL());
+  await expect(page.locator('#status-chips-label')).toHaveText('Show only:');
+  await expect(page.getByRole('group', { name: 'Show only:' })).toBeVisible();
   await expect(page.locator('.status-chip:visible')).toHaveCount(3);
-  await expect(page.locator('.status-chip[data-status][aria-pressed="true"]')).toHaveCount(3);
+  await expect(page.locator('.status-chip[aria-pressed="true"]')).toHaveCount(0);
   // The Flaky chip only shows when some row is flaky.
   await expect(page.locator('.flaky-chip')).toBeHidden();
   await expect(page.locator('.suite-tests-table tbody tr:visible')).toHaveCount(5);
@@ -50,6 +52,23 @@ test('the Flaky chip appears for flaky rows and narrows to them', async ({ page 
   await expect(page.locator('.suite-tests-table tbody tr:visible')).toHaveCount(5);
 });
 
+test('selecting several chips shows the union', async ({ page }) => {
+  const withFlaky = suites.map((suite) => ({
+    ...suite,
+    tests: suite.tests.map((t) => (t.name === 'testBeta' ? { ...t, flaky: true } : t)),
+  }));
+  await page.goto(renderReport({ suites: withFlaky }));
+  await page.locator('.status-chip[data-status="failed"]').click();
+  await expect(page.locator('.suite-tests-table tbody tr:visible')).toHaveCount(1);
+  await page.locator('.flaky-chip').click();
+  await expect(page.locator('.suite-tests-table tbody tr:visible')).toHaveCount(2);
+  await expect(page.locator('tr:visible', { hasText: 'testBeta' })).toHaveCount(1);
+  await expect(page.locator('tr.failed:visible')).toHaveCount(1);
+  await page.locator('.status-chip[data-status="failed"]').click();
+  await page.locator('.flaky-chip').click();
+  await expect(page.locator('.suite-tests-table tbody tr:visible')).toHaveCount(5);
+});
+
 test('durations use the compact format', async ({ page }) => {
   await page.goto(renderReport({ suites: [{ name: 'TimingTests', tests: [
     { name: 'testLong', status: 'passed', duration: 219 },
@@ -59,10 +78,10 @@ test('durations use the compact format', async ({ page }) => {
   await expect(page.locator('td[data-label="Duration"]')).toHaveText(['3m 39s', '12.3s', '6ms']);
 });
 
-test('disabling Passed and Skipped chips leaves only the failed row', async ({ page }) => {
+test('selecting Failed leaves only the failed row', async ({ page }) => {
   await page.goto(await reportURL());
-  await page.locator('.status-chip[data-status="passed"]').click();
-  await page.locator('.status-chip[data-status="skipped"]').click();
+  await page.locator('.status-chip[data-status="failed"]').click();
+  await expect(page.locator('.status-chip[data-status="failed"]')).toHaveAttribute('aria-pressed', 'true');
 
   await expect(page.locator('.suite-tests-table tbody tr:visible')).toHaveCount(1);
   await expect(page.locator('tr.failed:visible')).toHaveCount(1);
@@ -92,8 +111,7 @@ test('search with no matches shows the empty-state line', async ({ page }) => {
 test('search and chips compose with AND', async ({ page }) => {
   await page.goto(await reportURL());
   await page.locator('#test-search').fill('test');
-  await page.locator('.status-chip[data-status="passed"]').click();
-  await page.locator('.status-chip[data-status="skipped"]').click();
+  await page.locator('.status-chip[data-status="failed"]').click();
 
   await expect(page.locator('.suite-tests-table tbody tr:visible')).toHaveCount(1);
   await expect(page.locator('tr.failed:visible')).toHaveCount(1);

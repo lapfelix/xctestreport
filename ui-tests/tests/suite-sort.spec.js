@@ -122,8 +122,7 @@ test('sorting suites does not break status-chip/search filtering', async ({ page
   await page.locator('.suite-sort-btn[data-sort-key="failed"]').click();
   await expect(suiteNames(page)).toHaveText(['GammaTests', 'AlphaTests', 'BetaTests']);
 
-  await page.locator('.status-chip[data-status="passed"]').click();
-  await page.locator('.status-chip[data-status="skipped"]').click();
+  await page.locator('.status-chip[data-status="failed"]').click();
 
   // Only failed rows remain visible: 1 in AlphaTests, 2 in GammaTests.
   await expect(page.locator('.suite-tests-table tbody tr:visible')).toHaveCount(3);

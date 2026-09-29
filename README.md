@@ -4,7 +4,7 @@ Generate static HTML reports from XCTest `.xcresult` bundles.
 
 ## Highlights
 - Builds an `index.html` suite overview and per-test detail pages.
-- Search box, per-status chips (passed/failed/skipped), and Duration-column sort
+- Search box, "Show only" chips (passed, failed, skipped, flaky; combine to see several), and Duration-column sort
   on the main page, plus a collapsible "Slowest tests" section.
 - Optional custom header note under the title (`--header-note`), e.g. the branch under test.
 - Writes an agent/LLM-readable `report.md`, a failures-only `failures.md`, and per-test Markdown (see below).

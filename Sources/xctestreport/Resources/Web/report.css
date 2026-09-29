@@ -2108,14 +2108,17 @@ button#toggle-all,
     width: 100%;
 }
 
-.status-chip[aria-pressed="false"] {
-    opacity: 0.5;
-    text-decoration: line-through;
-}
-
 .status-chips {
     display: flex;
+    align-items: center;
     gap: 8px;
+}
+
+.status-chips-label {
+    flex: none;
+    font-size: 13px;
+    color: var(--report-muted, #6a737d);
+    white-space: nowrap;
 }
 
 .suite-sort-bar {
@@ -4349,7 +4352,8 @@ a { color: var(--report-accent); }
 @media (max-width: 767px) { .snapdiff-zoompreset[data-zoom="1"], .snapdiff-zoompreset[data-zoom="2"], .snapdiff-zoompreset[data-zoom="4"] { display: none; } }
 
 .report-index-page .status-chip[aria-pressed="false"] { text-decoration: none; color: var(--report-muted); background: transparent; opacity: 1; }
-.report-index-page .status-chip[aria-pressed="true"] { border-color: var(--report-accent); color: var(--report-accent); background: var(--report-soft); }
+.report-index-page .status-chip[aria-pressed="true"] { border-color: var(--report-accent); color: var(--report-surface); background: var(--report-accent); }
+.report-index-page .status-chip[aria-pressed="true"]::before { content: "\2713\00a0"; }
 
 /* Comfortable controls and clearer secondary information across report views. */
 input::placeholder { color: var(--report-muted); opacity: 1; }
@@ -4373,6 +4377,7 @@ input::placeholder { color: var(--report-muted); opacity: 1; }
     #review-failures { grid-column: 1 / -1; width: 100%; }
     .report-index-page .summary-actions .test-search { width: 100%; min-width: 0; flex-basis: 100%; }
     .report-index-page .status-chips { display: flex; flex: 1; flex-wrap: wrap; }
+    .report-index-page .status-chips-label { flex-basis: 100%; }
     .report-index-page .status-chip { flex: 1; padding-left: 6px; padding-right: 6px; white-space: nowrap; }
     .report-index-page .suite-sort-options { gap: 6px; }
     .report-index-page .suite-name { white-space: normal; overflow-wrap: anywhere; }

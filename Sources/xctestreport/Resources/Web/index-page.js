@@ -40,10 +40,10 @@
   var flakyChip = document.querySelector('.flaky-chip');
   if (flakyChip) { flakyChip.hidden = !document.querySelector('tr[data-flaky="true"]'); }
 
-  function enabledStatuses() {
+  function selectedStatuses() {
     var set = {};
     chips.forEach(function(chip) {
-      if (chip.hasAttribute('data-status') && chip.getAttribute('aria-pressed') !== 'false') {
+      if (chip.hasAttribute('data-status') && chip.getAttribute('aria-pressed') === 'true') {
         set[chip.getAttribute('data-status')] = true;
       }
     });
@@ -70,12 +70,14 @@
   // Collapse state from before the current search, restored once the search is cleared.
   var collapsedBeforeSearch = null;
 
-  // Row visible when its status chip is on, it passes the flaky filter, and its test or
-  // suite name matches the search. A suite with no visible rows hides itself.
+  // The chips are "show only" filters: none selected shows every test, otherwise a row shows
+  // when it matches any selected chip. The search narrows that further by test or suite name.
+  // A suite with no visible rows hides itself.
   function applyFilter() {
     var query = (searchInput ? searchInput.value : '').trim().toLowerCase();
-    var statuses = enabledStatuses();
-    var flakyOnly = !!flakyChip && !flakyChip.hidden && flakyChip.getAttribute('aria-pressed') === 'true';
+    var statuses = selectedStatuses();
+    var flakySelected = !!flakyChip && !flakyChip.hidden && flakyChip.getAttribute('aria-pressed') === 'true';
+    var anySelected = flakySelected || Object.keys(statuses).length > 0;
     var anyVisible = false;
 
     if (query !== '' && collapsedBeforeSearch === null) {
@@ -88,10 +90,11 @@
       var visibleInSuite = 0;
       for (var r = 0; r < rows.length; r++) {
         var row = rows[r];
-        var matchesStatus = !!statuses[row.getAttribute('data-status')];
-        var matchesFlaky = !flakyOnly || row.getAttribute('data-flaky') === 'true';
+        var matchesChips = !anySelected
+          || !!statuses[row.getAttribute('data-status')]
+          || (flakySelected && row.getAttribute('data-flaky') === 'true');
         var matchesQuery = query === '' || suiteMatches || rowName(row).indexOf(query) !== -1;
-        var visible = matchesStatus && matchesFlaky && matchesQuery;
+        var visible = matchesChips && matchesQuery;
         row.style.display = visible ? '' : 'none';
         if (visible) { visibleInSuite++; }
       }
@@ -118,7 +121,7 @@
 
   chips.forEach(function(chip) {
     chip.addEventListener('click', function() {
-      var pressed = chip.getAttribute('aria-pressed') !== 'false';
+      var pressed = chip.getAttribute('aria-pressed') === 'true';
       chip.setAttribute('aria-pressed', pressed ? 'false' : 'true');
       applyFilter();
     });

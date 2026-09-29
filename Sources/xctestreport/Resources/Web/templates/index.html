@@ -22,10 +22,11 @@
     </div>
     <div class="summary-actions">
         <input type="search" id="test-search" class="test-search" aria-label="Search tests" placeholder="Search tests…">
-        <span class="status-chips">
-            <button type="button" class="status-chip" data-status="passed" aria-pressed="true">Passed</button>
-            <button type="button" class="status-chip" data-status="failed" aria-pressed="true">Failed</button>
-            <button type="button" class="status-chip" data-status="skipped" aria-pressed="true">Skipped</button>
+        <span class="status-chips" role="group" aria-labelledby="status-chips-label">
+            <span class="status-chips-label" id="status-chips-label">Show only:</span>
+            <button type="button" class="status-chip" data-status="passed" aria-pressed="false">Passed</button>
+            <button type="button" class="status-chip" data-status="failed" aria-pressed="false">Failed</button>
+            <button type="button" class="status-chip" data-status="skipped" aria-pressed="false">Skipped</button>
             <button type="button" class="status-chip flaky-chip" data-filter="flaky" aria-pressed="false" hidden>Flaky</button>
         </span>
         <button id="toggle-all">Collapse All</button>

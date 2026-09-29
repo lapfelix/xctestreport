@@ -75,6 +75,22 @@ final class AttachmentExportTests: XCTestCase {
             hierarchy, "zstd payloads are unwrapped on export")
     }
 
+    /// The xcresulttool fallback decorates names; snapshot pairing needs them as written.
+    func testStripsXCResultToolExportSuffixFromAttachmentNames() {
+        let report = XCTestReport()
+        XCTAssertEqual(
+            report.attachmentNameWithoutExportSuffix(
+                "RouteDetailsPinButton-pinned.expected_0_BFC432E3-D995-4A29-B1D8-0368457E90D1.png"),
+            "RouteDetailsPinButton-pinned.expected.png")
+        XCTAssertEqual(
+            report.attachmentNameWithoutExportSuffix(
+                "kXCTAttachmentScreenRecording_12_A310F634-271F-40E1-9ECF-958FEF5C94C5"),
+            "kXCTAttachmentScreenRecording")
+        XCTAssertEqual(
+            report.attachmentNameWithoutExportSuffix("Debug description for `Button_1`"),
+            "Debug description for `Button_1`")
+    }
+
     func testSummarizesIPSCrashReportFromExceptionBacktrace() throws {
         let body: [String: Any] = [
             "procName": "Transit",

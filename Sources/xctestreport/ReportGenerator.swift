@@ -78,6 +78,28 @@ extension XCTestReport {
             let exportQueue = DispatchQueue(
                 label: "reportExport", qos: .userInitiated, attributes: .concurrent)
 
+            let summaryCmd = [
+                "xcrun", "xcresulttool", "get", "test-results", "summary", "--path", xcresultPath,
+                "--format", "json", "--compact",
+            ]
+            let runSummary = {
+                print("Running summary command: \(summaryCmd.joined(separator: " "))")
+                let startTime = Date()
+                let (json, exitCode) = shell(summaryCmd)
+                summaryDuration = Date().timeIntervalSince(startTime)
+                summaryJSON = json
+                summaryExit = exitCode
+            }
+
+            // xcresulttool builds database.sqlite3 on first use. Concurrent first uses race and
+            // fail with exit 64, and the direct attachment export needs the database anyway.
+            let databasePath = (xcresultPath as NSString).appendingPathComponent("database.sqlite3")
+            let summaryRanFirst = !FileManager.default.fileExists(atPath: databasePath)
+            if summaryRanFirst {
+                print("No database.sqlite3 yet; running the summary alone so xcresulttool builds it once.")
+                runSummary()
+            }
+
             exportGroup.enter()
             exportQueue.async {
                 let startTime = Date()
@@ -87,20 +109,12 @@ extension XCTestReport {
                 exportGroup.leave()
             }
 
-            // Get summary
-            let summaryCmd = [
-                "xcrun", "xcresulttool", "get", "test-results", "summary", "--path", xcresultPath,
-                "--format", "json", "--compact",
-            ]
-            print("Running summary command: \(summaryCmd.joined(separator: " "))")
-            exportGroup.enter()
-            exportQueue.async {
-                let startTime = Date()
-                let (json, exitCode) = shell(summaryCmd)
-                summaryDuration = Date().timeIntervalSince(startTime)
-                summaryJSON = json
-                summaryExit = exitCode
-                exportGroup.leave()
+            if !summaryRanFirst {
+                exportGroup.enter()
+                exportQueue.async {
+                    runSummary()
+                    exportGroup.leave()
+                }
             }
 
             exportGroup.enter()
@@ -125,16 +139,6 @@ extension XCTestReport {
         print("Summary command completed in \(String(format: "%.2f", summaryDuration)) seconds")
         print("Attachment export completed in \(String(format: "%.2f", attachmentsExportDuration)) seconds")
         print("Full results command completed in \(String(format: "%.2f", fullDuration)) seconds")
-
-        if !htmlOnly, summaryExit != 0 || summaryJSON?.isEmpty != false {
-            // Seen once on a freshly copied multi-GB bundle while the other xcresulttool calls
-            // ran alongside it; a second, uncontended attempt succeeded.
-            print("Summary command failed (exit \(summaryExit)); retrying once...")
-            (summaryJSON, summaryExit) = shell([
-                "xcrun", "xcresulttool", "get", "test-results", "summary", "--path", xcresultPath,
-                "--format", "json", "--compact",
-            ])
-        }
 
         guard summaryExit == 0, let summaryData = summaryJSON?.data(using: .utf8) else {
             print("Failed to get test summary.")

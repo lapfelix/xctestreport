@@ -210,7 +210,7 @@ extension XCTestReport {
     struct AttachmentManifestItem: Codable {
         var exportedFileName: String
         let isAssociatedWithFailure: Bool?
-        let suggestedHumanReadableName: String?
+        var suggestedHumanReadableName: String?
         let timestamp: Double?
         let payloadRefId: String?
     }

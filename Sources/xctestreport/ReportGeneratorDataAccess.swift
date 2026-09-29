@@ -607,6 +607,15 @@ extension XCTestReport {
         return attachmentsByTest
     }
     
+    /// `xcresulttool export attachments` appends `_<index>_<UUID>` to each attachment name
+    /// (`Foo.expected_0_BFC4…D8.png`); the database stores the name as the test wrote it, and
+    /// snapshot pairing matches on that.
+    func attachmentNameWithoutExportSuffix(_ name: String) -> String {
+        name.replacingOccurrences(
+            of: #"_\d+_[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}(?=\.[^.]+$|$)"#,
+            with: "", options: .regularExpression)
+    }
+
     /// Reads only the header of payloads that are not zstd-compressed.
     func zstdDecompressedPayload(atPath path: String) -> Data? {
         guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
@@ -821,6 +830,13 @@ extension XCTestReport {
         do {
             let data = try Data(contentsOf: URL(fileURLWithPath: manifestPath))
             var manifestEntries = try JSONDecoder().decode([AttachmentManifestEntry].self, from: data)
+            for entryIndex in manifestEntries.indices {
+                for itemIndex in manifestEntries[entryIndex].attachments.indices {
+                    let item = manifestEntries[entryIndex].attachments[itemIndex]
+                    manifestEntries[entryIndex].attachments[itemIndex].suggestedHumanReadableName =
+                        item.suggestedHumanReadableName.map(attachmentNameWithoutExportSuffix)
+                }
+            }
             renameExportedVideosByTest(in: attachmentsDir, manifestEntries: &manifestEntries)
 
             if compressVideo {

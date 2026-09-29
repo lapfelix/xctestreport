@@ -552,8 +552,7 @@ extension XCTestReport {
             if let crash = crashReportPreview(fromIPS: fileData) {
                 // A symbolicated crash report beats any frame list scraped from plain text.
                 return StackTracePreview(
-                    attachmentName: attachment.suggestedHumanReadableName
-                        ?? attachment.exportedFileName,
+                    attachmentName: "Crash report",
                     relativePath: attachmentRelativePathForTestPage(
                         fileName: attachment.exportedFileName),
                     preview: crash.preview,

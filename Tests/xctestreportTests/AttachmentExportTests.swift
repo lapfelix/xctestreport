@@ -84,6 +84,20 @@ final class AttachmentExportTests: XCTestCase {
             "Plists stay as stored; the timeline and synthesized-event parser decode them")
     }
 
+    func testGunzipsWithSystemZlib() {
+        let gzipped = Data([
+            31, 139, 8, 0, 0, 0, 0, 0, 2, 255, 171, 72, 46, 73, 45, 46, 41, 74, 45, 200, 47, 42, 81,
+            72, 175, 202, 44, 80, 40, 202, 47, 205, 75, 81, 40, 41, 202, 44, 224, 170, 32, 91, 18, 0,
+            239, 201, 196, 67, 87, 0, 0, 0,
+        ])
+        let report = XCTestReport()
+        XCTAssertEqual(
+            report.decompressGzipData(gzipped),
+            Data(String(repeating: "xctestreport gzip round trip\n", count: 3).utf8))
+        XCTAssertNil(report.decompressGzipData(Data("not gzip".utf8)))
+        XCTAssertNil(report.decompressGzipData(gzipped.prefix(20)), "truncated input")
+    }
+
     /// The xcresulttool fallback decorates names; snapshot pairing needs them as written.
     func testStripsXCResultToolExportSuffixFromAttachmentNames() {
         let report = XCTestReport()

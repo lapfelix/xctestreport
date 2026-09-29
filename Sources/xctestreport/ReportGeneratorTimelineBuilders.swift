@@ -1,7 +1,7 @@
 import Dispatch
 import Foundation
-import Gzip
 import libzstd
+import zlib
 
 extension XCTestReport {
     func videoMimeType(for fileName: String) -> String {
@@ -542,11 +542,30 @@ extension XCTestReport {
     }
 
     func decompressGzipData(_ compressedData: Data) -> Data? {
-        do {
-            return try compressedData.gunzipped()
-        } catch {
-            return nil
+        guard !compressedData.isEmpty else { return Data() }
+        var stream = z_stream()
+        // 16 + MAX_WBITS: expect a gzip header rather than a raw zlib stream.
+        guard inflateInit2_(&stream, 16 + MAX_WBITS, ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size)) == Z_OK
+        else { return nil }
+        defer { inflateEnd(&stream) }
+
+        var output = Data()
+        var chunk = [UInt8](repeating: 0, count: 64 * 1024)
+        var status = Z_OK
+        compressedData.withUnsafeBytes { (input: UnsafeRawBufferPointer) in
+            stream.next_in = UnsafeMutablePointer(
+                mutating: input.bindMemory(to: Bytef.self).baseAddress)
+            stream.avail_in = uInt(input.count)
+            while status == Z_OK {
+                chunk.withUnsafeMutableBufferPointer { buffer in
+                    stream.next_out = buffer.baseAddress
+                    stream.avail_out = uInt(buffer.count)
+                    status = inflate(&stream, Z_NO_FLUSH)
+                    output.append(buffer.baseAddress!, count: buffer.count - Int(stream.avail_out))
+                }
+            }
         }
+        return status == Z_STREAM_END ? output : nil
     }
 
     func decompressZstdData(_ compressedData: Data) -> Data? {

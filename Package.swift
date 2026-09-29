@@ -9,15 +9,11 @@ let package = Package(
     dependencies: [
         .package(
             url: "https://github.com/apple/swift-argument-parser.git",
-            from: "1.0.0"
+            from: "1.8.2"
         ),
         .package(
             url: "https://github.com/facebook/zstd.git",
-            branch: "dev"
-        ),
-        .package(
-            url: "https://github.com/1024jp/GzipSwift.git",
-            from: "6.0.0"
+            from: "1.5.7"
         )
     ],
     targets: [
@@ -25,8 +21,7 @@ let package = Package(
             name: "xctestreport",
             dependencies: [
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
-                .product(name: "libzstd", package: "zstd"),
-                .product(name: "Gzip", package: "GzipSwift")
+                .product(name: "libzstd", package: "zstd")
             ],
             resources: [
                 .process("Resources")

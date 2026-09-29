@@ -2908,13 +2908,47 @@
     }
   }
 
+  var timelineSection = root.closest('.timeline-video-section') || root;
+  var lastPointerDownInTimeline = null;
+
   function isKeyboardEditableTarget(target) {
     if (!target || !(target instanceof Element)) return false;
-    if (target.closest('[contenteditable=\"true\"]')) return true;
-    var interactive = target.closest('input, textarea, select, button, a');
-    if (!interactive) return false;
-    if (interactive.tagName === 'INPUT' && interactive.type === 'range') return false;
+    if (target.isContentEditable) return true;
+    var field = target.closest('input, textarea, select');
+    if (!field) return false;
+    if (field.tagName === 'INPUT' && ['range', 'button', 'checkbox', 'radio', 'submit', 'reset'].indexOf(field.type) >= 0) {
+      return false;
+    }
     return true;
+  }
+
+  /// Elements whose own Space/Enter activation must not be doubled by the playback shortcut.
+  function isKeyboardActivatableTarget(target) {
+    if (!target || !(target instanceof Element)) return false;
+    return !!target.closest('button, summary, a[href], select, [role="button"], [role="link"], [tabindex]:not(input)');
+  }
+
+  function isTimelineInView() {
+    var rect = timelineSection.getBoundingClientRect();
+    var viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    var visible = Math.min(rect.bottom, viewportHeight) - Math.max(rect.top, 0);
+    return visible > 0 && visible >= Math.min(rect.height, viewportHeight) * 0.5;
+  }
+
+  function shouldHandleTimelineShortcut(event) {
+    var target = event.target;
+    if (isPreviewOpen()) return false;
+    if (isKeyboardEditableTarget(target)) return false;
+    if (target instanceof Element && timelineSection.contains(target)) {
+      // Scrollable side panels keep their native arrow-key scrolling.
+      return !target.closest('[data-hierarchy-panel]');
+    }
+    var onPageBody = !target || target === document.body || target === document.documentElement || target === document;
+    if (!onPageBody) return false;
+    // A click elsewhere on the page (e.g. into the stack trace) moves focus to body; the arrows
+    // then belong to page scrolling, not the timeline.
+    if (lastPointerDownInTimeline === false) return false;
+    return isTimelineInView();
   }
 
   function scheduleUpdateFromVideoTime() {
@@ -3454,6 +3488,10 @@
     scheduleHierarchyOverlayUpdate(true);
   });
 
+  document.addEventListener('pointerdown', function(event) {
+    lastPointerDownInTimeline = event.target instanceof Node && timelineSection.contains(event.target);
+  }, true);
+
   window.addEventListener('keydown', function(event) {
     if (isPreviewOpen()) return;
     if (event.key === 'Escape') {
@@ -3465,10 +3503,11 @@
       }
     }
     if (event.defaultPrevented) return;
-    if (isKeyboardEditableTarget(event.target)) return;
     if (event.metaKey || event.ctrlKey || event.altKey) return;
+    if (!shouldHandleTimelineShortcut(event)) return;
 
     if (event.code === 'Space' || event.key === ' ') {
+      if (isKeyboardActivatableTarget(event.target)) return;
       event.preventDefault();
       togglePlayback();
       return;

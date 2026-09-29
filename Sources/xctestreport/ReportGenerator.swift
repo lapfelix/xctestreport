@@ -385,7 +385,6 @@ extension XCTestReport {
                                         "<tr><td data-label=\"Run\">\(htmlEscape(run.name))</td><td data-label=\"Status\">\(htmlEscape(run.result ?? "Unknown"))</td><td data-label=\"Duration\">\(htmlEscape(run.duration))</td></tr>"
                                 }.joined(separator: "")
                                 failureInfo += """
-                                    <h3>Previous Runs (Last 10)</h3>
                                     <table class="data-table previous-runs-table">
                                     <thead><tr><th scope="col">Run</th><th scope="col">Status</th><th scope="col">Duration</th></tr></thead>
                                     <tbody>\(previousRunsHTML)</tbody>
@@ -862,8 +861,14 @@ extension XCTestReport {
             let dateString = dateFormatter.string(from: previousResults.date)
                 .replacingOccurrences(of: ":", with: "&#58;")
                 .replacingOccurrences(of: " ", with: "&#32;")
-            comparisonInfoHTML =
-                "<p class=\"comparison-info\">Compared with previous run from: \(dateString)</p>"
+            let delta = Self.previousRunDelta(
+                current: allTests, previous: previousResults.results,
+                pagePath: { test in
+                    let pageName = "test_\(test.nodeIdentifier ?? test.name).html"
+                        .replacingOccurrences(of: "/", with: "_")
+                    return "\(testPagesDirectoryName)/\(pageName)"
+                })
+            comparisonInfoHTML = renderPreviousRunDeltaHTML(delta, dateHTML: dateString)
         }
 
         // Add suite sections to HTML in sorted order

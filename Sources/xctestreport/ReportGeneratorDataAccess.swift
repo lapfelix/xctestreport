@@ -519,11 +519,7 @@ extension XCTestReport {
             // a crash report quoted in the Markdown is readable as-is. Videos are never compressed.
             do {
                 if !["mp4", "mov", "m4v"].contains(fileExt),
-                    let handle = FileHandle(forReadingAtPath: sourcePath),
-                    isZstdCompressedData((try? handle.read(upToCount: 4)) ?? Data()),
-                    (try? handle.seek(toOffset: 0)) != nil,
-                    let data = try? handle.readToEnd(),
-                    let decompressed = decompressZstdData(data)
+                    let decompressed = zstdDecompressedPayload(atPath: sourcePath)
                 {
                     try decompressed.write(to: URL(fileURLWithPath: destPath))
                 } else {
@@ -611,6 +607,15 @@ extension XCTestReport {
         return attachmentsByTest
     }
     
+    /// Reads only the header of payloads that are not zstd-compressed.
+    func zstdDecompressedPayload(atPath path: String) -> Data? {
+        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { handle.closeFile() }
+        guard isZstdCompressedData(handle.readData(ofLength: 4)) else { return nil }
+        handle.seek(toFileOffset: 0)
+        return decompressZstdData(handle.readDataToEndOfFile())
+    }
+
     /// Videos stay loose files next to the per-test bundles, so name them after their test
     /// (`Suite_testName.mp4`, then `Suite_testName-2.mp4`, ...) instead of an export counter.
     func readableVideoFileName(

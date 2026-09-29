@@ -25,10 +25,38 @@ async function reportURL() {
 
 test('status chips render, all on by default', async ({ page }) => {
   await page.goto(await reportURL());
-  await expect(page.locator('.status-chip')).toHaveCount(3);
-  await expect(page.locator('.status-chip[aria-pressed="true"]')).toHaveCount(3);
+  await expect(page.locator('.status-chip:visible')).toHaveCount(3);
+  await expect(page.locator('.status-chip[data-status][aria-pressed="true"]')).toHaveCount(3);
+  // The Flaky chip only shows when some row is flaky.
+  await expect(page.locator('.flaky-chip')).toBeHidden();
   await expect(page.locator('.suite-tests-table tbody tr:visible')).toHaveCount(5);
   await expect(page.locator('.suite:visible')).toHaveCount(2);
+});
+
+test('the Flaky chip appears for flaky rows and narrows to them', async ({ page }) => {
+  const withFlaky = suites.map((suite) => ({
+    ...suite,
+    tests: suite.tests.map((t) => (t.name === 'testBeta' ? { ...t, flaky: true } : t)),
+  }));
+  await page.goto(renderReport({ suites: withFlaky }));
+  const flaky = page.locator('.flaky-chip');
+  await expect(flaky).toBeVisible();
+  await expect(flaky).toHaveAttribute('aria-pressed', 'false');
+  await flaky.click();
+  await expect(page.locator('.suite-tests-table tbody tr:visible')).toHaveCount(1);
+  await expect(page.locator('tr:visible', { hasText: 'testBeta' })).toHaveCount(1);
+  await expect(page.locator('.suite:visible')).toHaveCount(1);
+  await flaky.click();
+  await expect(page.locator('.suite-tests-table tbody tr:visible')).toHaveCount(5);
+});
+
+test('durations use the compact format', async ({ page }) => {
+  await page.goto(renderReport({ suites: [{ name: 'TimingTests', tests: [
+    { name: 'testLong', status: 'passed', duration: 219 },
+    { name: 'testMedium', status: 'passed', duration: 12.3 },
+    { name: 'testShort', status: 'passed', duration: 0.006 },
+  ] }] }));
+  await expect(page.locator('td[data-label="Duration"]')).toHaveText(['3m 39s', '12.3s', '6ms']);
 });
 
 test('disabling Passed and Skipped chips leaves only the failed row', async ({ page }) => {
@@ -75,18 +103,23 @@ test('clicking the Duration header sorts a suite desc, then asc, then original',
   await page.goto(await reportURL());
   const suite = page.locator('.suite', { hasText: 'LoginTests' });
   const header = suite.locator('th.sortable-duration');
+  const button = header.getByRole('button', { name: 'Duration' });
   const names = suite.locator('tbody tr td:first-child');
 
   await expect(names).toHaveText(['testValidLogin', 'testInvalidLogin', 'testSkippedLogin']);
+  await expect(header).toHaveAttribute('aria-sort', 'none');
 
-  await header.click(); // desc by duration: 10, 3, 1
+  await button.click(); // desc by duration: 10, 3, 1
   await expect(names).toHaveText(['testInvalidLogin', 'testValidLogin', 'testSkippedLogin']);
+  await expect(header).toHaveAttribute('aria-sort', 'descending');
 
-  await header.click(); // asc by duration: 1, 3, 10
+  await button.click(); // asc by duration: 1, 3, 10
   await expect(names).toHaveText(['testSkippedLogin', 'testValidLogin', 'testInvalidLogin']);
+  await expect(header).toHaveAttribute('aria-sort', 'ascending');
 
-  await header.click(); // back to original order
+  await button.press('Enter'); // back to original order, from the keyboard
   await expect(names).toHaveText(['testValidLogin', 'testInvalidLogin', 'testSkippedLogin']);
+  await expect(header).toHaveAttribute('aria-sort', 'none');
 });
 
 test('slowest-tests lists the top tests by duration', async ({ page }) => {

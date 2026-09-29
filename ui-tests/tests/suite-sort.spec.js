@@ -141,7 +141,7 @@ test('sorting suites does not break the per-suite Duration column sort', async (
   await expect(suiteNames(page)).toHaveText(['AlphaTests', 'GammaTests', 'BetaTests']);
 
   const gamma = page.locator('.suite', { hasText: 'GammaTests' });
-  const header = gamma.locator('th.sortable-duration');
+  const header = gamma.locator('th.sortable-duration').getByRole('button', { name: 'Duration' });
   const names = gamma.locator('tbody tr td:first-child');
 
   await expect(names).toHaveText(['testGammaFailTwo', 'testGammaPass', 'testGammaFailOne']);

@@ -18,15 +18,39 @@ function htmlEscape(s) {
     .replace(/'/g, '&#39;');
 }
 
+// Mirrors formatCompactDuration in ReportIndexHelpers.swift.
+function formatCompactDuration(seconds) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '0s';
+  const milliseconds = Math.round(seconds * 1000);
+  if (milliseconds < 1) return '<1ms';
+  if (milliseconds < 1000) return `${milliseconds}ms`;
+  const tenths = Math.round(seconds * 10);
+  if (tenths < 600) {
+    const whole = Math.floor(tenths / 10);
+    const fraction = tenths % 10;
+    return fraction === 0 ? `${whole}s` : `${whole}.${fraction}s`;
+  }
+  const total = Math.round(seconds);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  const parts = [];
+  if (hours > 0) parts.push(`${hours}h`);
+  if (minutes > 0 || (hours > 0 && secs > 0)) parts.push(`${minutes}m`);
+  if (secs > 0) parts.push(`${secs}s`);
+  return parts.join(' ');
+}
+
 // Mirrors the test-row markup in ReportGenerator.swift.
 function testRow(test) {
   const statusClass = test.status; // "passed" | "failed" | "skipped"
   const rowClass = statusClass === 'passed' ? '' : ` class="${statusClass}"`;
   const result = statusClass.charAt(0).toUpperCase() + statusClass.slice(1);
   const seconds = test.duration == null ? 1 : test.duration;
-  return `<tr${rowClass} data-status="${statusClass}" data-duration="${seconds}"><td data-label="Test Name"><a href="tests/test_${htmlEscape(test.name)}.html">${htmlEscape(test.name)}</a></td>` +
+  const flaky = test.flaky ? ' data-flaky="true"' : '';
+  return `<tr${rowClass} data-status="${statusClass}"${flaky} data-duration="${seconds}"><td data-label="Test Name"><a href="tests/test_${htmlEscape(test.name)}.html">${htmlEscape(test.name)}</a></td>` +
     `<td data-label="Status" class="${statusClass}">${result}</td>` +
-    `<td data-label="Duration">${seconds} sec</td></tr>`;
+    `<td data-label="Duration">${htmlEscape(formatCompactDuration(seconds))}</td></tr>`;
 }
 
 // Mirrors the suite-section markup in ReportGenerator.swift.
@@ -45,18 +69,18 @@ function suiteSection(suite) {
     <span class="suite-stats">
         <span class="stats-number">${passed}/${totalExcludingSkipped}</span> Passed
         <span class="stats-percent">(${percentPassed.toFixed(1)}%)</span>
-        <span class="suite-duration">${suiteDuration.toFixed(1)} sec</span>
+        <span class="suite-duration">${htmlEscape(formatCompactDuration(suiteDuration))}</span>
     </span>
-</h2><div class="content">
+</h2><div class="content"><div class="content-inner">
 <table class="data-table suite-tests-table" style="margin-top:0px">
-<thead><tr><th scope="col">Test Name</th><th scope="col">Status</th><th scope="col" class="sortable-duration">Duration</th></tr></thead>
+<thead><tr><th scope="col">Test Name</th><th scope="col">Status</th><th scope="col" class="sortable-duration" aria-sort="none"><button type="button" class="sort-duration-btn">Duration</button></th></tr></thead>
 <tbody>
 ${rows}
-</tbody></table></div></div>`;
+</tbody></table></div></div></div>`;
 }
 
 /**
- * @param {{ title?: string, headerNote?: string, suites?: Array<{name: string, tests: Array<{name: string, status: string}>}> }} opts
+ * @param {{ title?: string, headerNote?: string, suites?: Array<{name: string, tests: Array<{name: string, status: string, duration?: number, flaky?: boolean}>}> }} opts
  * @returns {string} file:// URL to the rendered index.html
  */
 function renderReport(opts = {}) {

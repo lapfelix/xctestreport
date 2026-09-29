@@ -35,7 +35,8 @@ test('inspector navigates every failure, closes with Escape and restores focus',
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).not.toBeVisible();
   await expect(page.locator('.snapdiff')).toHaveCount(0);
-  await expect(page.getByRole('button',{name:'Inspect NearbyRouteDisplayName-text',exact:true})).toBeFocused();
+  // Focus returns to the card last shown, not the one that opened the inspector.
+  await expect(page.getByRole('button',{name:'Inspect RouteDetailsDepartures-noSeparators',exact:true})).toBeFocused();
 });
 
 test('all six modes, live tolerance, zoom, change navigation and downloads work', async ({page}) => {
@@ -61,6 +62,9 @@ test('all six modes, live tolerance, zoom, change navigation and downloads work'
 test('size mismatch keeps its dimensions and generates a heatmap', async ({page}) => {
   await inspect(page,'RouteDetailsDepartures-noSeparators');
   await expect(page.locator('.snapdiff-sizebanner')).toContainText('height −4');
+  // Heights differ, so alignment defaults to Auto and the size-change area is listed apart.
+  await expect(page.getByRole('button',{name:/^Align auto/})).toHaveAttribute('aria-pressed','true');
+  await expect(page.locator('.snapdiff-stat', {hasText:'Outside overlap'})).toContainText('px only in expected');
   await page.getByRole('button',{name:'Heatmap (key 5)',exact:true}).click();
   await expect(page.locator('.snapdiff-canvas')).toBeVisible();
   const dimensions=await page.locator('.snapdiff-canvas').evaluate(c=>[c.width,c.height]);
@@ -163,11 +167,23 @@ test('tests without images remain available and class filters can recover from n
   await expect(page.locator('.sg-item[data-has-viewer="false"]:visible')).toHaveCount(1);
   await page.getByRole('button',{name:'Failed only',exact:true}).click();
   await expect(page.locator('.sg-item[data-has-viewer="false"]:visible')).toHaveCount(3);
+  // "Matched" is only for image comparisons; an imageless passed test just passed.
+  await expect(page.locator('.sg-item[data-has-viewer="false"] .sg-badge')).toHaveText(['Passed','Skipped','Failed']);
   await page.getByText('Filter test classes',{exact:true}).click();
   for (const chip of await page.locator('.sg-chip[data-suite]').all()) await chip.click();
   await expect(page.locator('#sg-empty')).toBeVisible();
   await page.locator('#sg-chip-all').click();
   await expect(page.locator('.sg-preview:visible')).toHaveCount(6);
+});
+
+test('a single test class hides the class filter and grouping controls', async ({page}) => {
+  await server.close(); server = await serveSnapshots({singleClass:true});
+  await page.goto(server.url);
+  await expect(page.locator('.sg-preview:visible')).toHaveCount(2);
+  await expect(page.getByText('Filter test classes',{exact:true})).toBeHidden();
+  await expect(page.getByRole('button',{name:'Group by class'})).toBeHidden();
+  await page.getByRole('searchbox').fill('nothingmatches');
+  await expect(page.locator('.sg-results #sg-empty')).toBeVisible();
 });
 
 test('malformed payload preserves the static comparison and missing diff can be computed', async ({page}) => {
@@ -284,6 +300,7 @@ for (const width of [320, 390, 667]) {
     await expect(page.locator('.snapdiff')).toHaveAttribute('data-mode','swipe');
     expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
     await expect(page.locator('.test-title-compact')).toHaveCSS('white-space','normal');
+    await expect(page.getByRole('link',{name:/^Previous failure/})).toHaveAttribute('rel','prev');
     await page.getByRole('combobox',{name:'Zoom level'}).selectOption('4');
     await expect(page.locator('.snapdiff-zoomlabel')).toHaveText('400%');
     await page.getByText('Pixel analysis',{exact:true}).click();

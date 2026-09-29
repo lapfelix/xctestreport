@@ -651,30 +651,7 @@ extension XCTestReport {
                 return parseDuration(durationStr)
             }.reduce(0, +)
 
-            let durationText: String
-            if totalDuration >= 3600 {
-                let hours = floor(totalDuration / 3600)
-                let minutes = floor((totalDuration.truncatingRemainder(dividingBy: 3600)) / 60)
-                let seconds = totalDuration.truncatingRemainder(dividingBy: 60)
-                if seconds > 0 {
-                    durationText = String(
-                        format: "%.0f hr %.0f min %.0f sec", hours, minutes, seconds)
-                } else if minutes > 0 {
-                    durationText = String(format: "%.0f hr %.0f min", hours, minutes)
-                } else {
-                    durationText = String(format: "%.0f hr", hours)
-                }
-            } else if totalDuration >= 60 {
-                let minutes = floor(totalDuration / 60)
-                let seconds = totalDuration.truncatingRemainder(dividingBy: 60)
-                if seconds > 0 {
-                    durationText = String(format: "%.0f min %.0f sec", minutes, seconds)
-                } else {
-                    durationText = String(format: "%.0f min", minutes)
-                }
-            } else {
-                durationText = String(format: "%.1f sec", totalDuration)
-            }
+            let durationText = formatCompactDuration(totalDuration)
 
             let avgDuration = totalDuration / Double(max(tests.count, 1))
 
@@ -722,7 +699,6 @@ extension XCTestReport {
                     }
                     let duration = test.duration ?? "0s"
                     let escapedResult = htmlEscape(result)
-                    let escapedDuration = htmlEscape(duration)
                     let escapedTestName = htmlEscape(test.name)
                     let testPageRelativePath = "\(testPagesDirectoryName)/\(testPageName)"
                     let escapedPageName = htmlEscape(testPageRelativePath)
@@ -748,24 +724,23 @@ extension XCTestReport {
                         }
                     }
 
+                    var isFlaky = false
                     if sizeInGB < 10.0,
-                        result == "Passed",
+                        Self.isPassedTestResult(result),
                         let testId = test.nodeIdentifier,
-                        let testDetails = getTestDetails(for: testId),
-                        let testRuns = testDetails.testRuns,
-                        testRuns.count > 1,
-                        let firstRun = testRuns.first,
-                        let firstRunResult = firstRun.result,
-                        firstRunResult != "Passed"
+                        let testRuns = getTestDetails(for: testId)?.testRuns,
+                        Self.isFlakyTest(result: result, testRuns: testRuns)
                     {
+                        isFlaky = true
                         statusEmoji += """
                              <span class="emoji-status" title="Failed first attempt, succeeded on run #\(testRuns.count)">⚠️</span>
                             """
                     }
 
                     let durationSeconds = parseDuration(duration) ?? 0
+                    let flakyAttribute = isFlaky ? " data-flaky=\"true\"" : ""
                     let testRow =
-                        "<tr\(rowClass) data-status=\"\(statusClass)\" data-duration=\"\(durationSeconds)\"><td data-label=\"Test Name\"><a href=\"\(escapedPageName)\">\(escapedTestName)</a></td><td data-label=\"Status\" class=\"\(statusClass)\">\(escapedResult)\(statusEmoji)</td><td data-label=\"Duration\">\(escapedDuration)</td></tr>"
+                        "<tr\(rowClass) data-status=\"\(statusClass)\"\(flakyAttribute) data-duration=\"\(durationSeconds)\"><td data-label=\"Test Name\"><a href=\"\(escapedPageName)\">\(escapedTestName)</a></td><td data-label=\"Status\" class=\"\(statusClass)\">\(escapedResult)\(statusEmoji)</td><td data-label=\"Duration\">\(htmlEscape(formatCompactDuration(durationSeconds)))</td></tr>"
 
                     suiteHTMLQueue.sync {
                         suiteSections[suite]?.append((index: testIndex, html: testRow))

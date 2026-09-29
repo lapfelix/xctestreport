@@ -2079,18 +2079,28 @@ button#toggle-all,
     width: 100%;
 }
 
-th.sortable-duration {
+.sort-duration-btn {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: inherit;
     cursor: pointer;
     user-select: none;
 }
 
-th.sortable-duration::after {
+.sort-duration-btn::after {
     content: " \2195";
     opacity: 0.4;
 }
 
-th.sortable-duration[data-sort="desc"]::after { content: " \2193"; opacity: 1; }
-th.sortable-duration[data-sort="asc"]::after { content: " \2191"; opacity: 1; }
+th.sortable-duration[data-sort="desc"] .sort-duration-btn::after { content: " \2193"; opacity: 1; }
+th.sortable-duration[data-sort="asc"] .sort-duration-btn::after { content: " \2191"; opacity: 1; }
+
+.flaky-chip[hidden] {
+    display: none;
+}
 
 .slowest-tests details {
     margin: 12px 0;

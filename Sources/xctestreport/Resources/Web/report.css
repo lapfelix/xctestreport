@@ -1941,7 +1941,7 @@ a:hover {
     min-width: 0;
     overflow-wrap: break-word;
     word-break: normal;
-    hyphens: auto;
+    hyphens: none;
 }
 
 .suite-stats {
@@ -1956,16 +1956,24 @@ a:hover {
     min-width: 0;
 }
 
+/* Animating grid rows between 0fr and 1fr collapses to the content's real height, so
+   long suites are never clipped the way a fixed max-height would clip them. */
 .content {
-    max-height: 2000px;
+    display: grid;
+    grid-template-rows: 1fr;
     opacity: 1;
-    transition: max-height 0.3s ease-in-out, opacity 0.2s ease-in-out;
+    transition: grid-template-rows 0.3s ease-in-out, opacity 0.2s ease-in-out, visibility 0.3s;
+}
+
+.content-inner {
+    min-height: 0;
     overflow: hidden;
 }
 
 .collapsed + .content {
-    max-height: 0;
+    grid-template-rows: 0fr;
     opacity: 0;
+    visibility: hidden;
 }
 
 .suite {
@@ -2071,18 +2079,28 @@ button#toggle-all,
     width: 100%;
 }
 
-th.sortable-duration {
+.sort-duration-btn {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: inherit;
     cursor: pointer;
     user-select: none;
 }
 
-th.sortable-duration::after {
+.sort-duration-btn::after {
     content: " \2195";
     opacity: 0.4;
 }
 
-th.sortable-duration[data-sort="desc"]::after { content: " \2193"; opacity: 1; }
-th.sortable-duration[data-sort="asc"]::after { content: " \2191"; opacity: 1; }
+th.sortable-duration[data-sort="desc"] .sort-duration-btn::after { content: " \2193"; opacity: 1; }
+th.sortable-duration[data-sort="asc"] .sort-duration-btn::after { content: " \2191"; opacity: 1; }
+
+.flaky-chip[hidden] {
+    display: none;
+}
 
 .slowest-tests details {
     margin: 12px 0;
@@ -2211,9 +2229,9 @@ th.sortable-duration[data-sort="asc"]::after { content: " \2191"; opacity: 1; }
         white-space: normal;
         overflow: visible;
         text-overflow: clip;
-        overflow-wrap: break-word;
+        overflow-wrap: anywhere;
         word-break: normal;
-        hyphens: auto;
+        hyphens: none;
     }
 
     .suite-stats {
@@ -2241,6 +2259,11 @@ th.sortable-duration[data-sort="asc"]::after { content: " \2191"; opacity: 1; }
     .suite-tests-table td {
         display: block;
         width: 100%;
+    }
+
+    /* Beat the desktop column widths, which use the more specific :nth-child. */
+    .suite-tests-table td:nth-child(n) {
+        width: auto;
     }
 
     .suite-tests-table tr {
@@ -2288,9 +2311,9 @@ th.sortable-duration[data-sort="asc"]::after { content: " \2191"; opacity: 1; }
 
     .suite-tests-table td a {
         white-space: normal;
-        overflow-wrap: break-word;
+        overflow-wrap: anywhere;
         word-break: normal;
-        hyphens: auto;
+        hyphens: none;
     }
 
     .suite-tests-table td[data-label="Status"] {
@@ -2396,6 +2419,7 @@ th.sortable-duration[data-sort="asc"]::after { content: " \2191"; opacity: 1; }
         height: auto;
         min-height: 100dvh;
         grid-template-rows: auto auto auto;
+        align-content: start;
     }
 
     .test-detail-page .test-main-content {
@@ -4176,6 +4200,14 @@ a { color: var(--report-accent); }
 .report-index-page .suite-stats { font-size: 12px; color: var(--report-muted); }
 .snapdiff-name { font-family: inherit; }
 @media (max-width: 767px) { .report-counts { gap: 16px; } #review-failures { margin: 0; } }
+.report-index-page .comparison-info { margin: 16px 0; padding: 12px 16px; background: var(--report-surface); border: 1px solid var(--report-line); border-radius: 8px; font-size: 14px; }
+.report-index-page .comparison-info p { margin: 0; color: var(--report-muted); }
+.report-index-page .comparison-group { margin-top: 10px; }
+.report-index-page .comparison-group summary { cursor: pointer; font-weight: 600; }
+.report-index-page .comparison-newly-failing summary { color: light-dark(#b23e45, #ffa9b2); }
+.report-index-page .comparison-fixed summary { color: light-dark(#26734b, #8ed5b2); }
+.report-index-page .comparison-group ul { margin: 6px 0 0; padding-left: 20px; }
+.report-index-page .comparison-group li { overflow-wrap: anywhere; }
 
 .snapdiff-toolbar { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
 .snapdiff-modeopts { grid-column: 1 / -1; }
@@ -4209,8 +4241,8 @@ input::placeholder { color: var(--report-muted); opacity: 1; }
     .report-index-page .report-counts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
     #review-failures { grid-column: 1 / -1; width: 100%; }
     .report-index-page .summary-actions .test-search { width: 100%; min-width: 0; flex-basis: 100%; }
-    .report-index-page .status-chips { display: flex; flex: 1; }
-    .report-index-page .status-chip { flex: 1; }
+    .report-index-page .status-chips { display: flex; flex: 1; flex-wrap: wrap; }
+    .report-index-page .status-chip { flex: 1; padding-left: 6px; padding-right: 6px; white-space: nowrap; }
     .report-index-page .suite-sort-options { gap: 6px; }
     .report-index-page .suite-name { white-space: normal; overflow-wrap: anywhere; }
     .test-detail-page .test-header-compact { grid-template-columns: 1fr auto; gap: 10px; }

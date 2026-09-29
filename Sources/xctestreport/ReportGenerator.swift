@@ -391,7 +391,6 @@ extension XCTestReport {
                                         "<tr><td data-label=\"Run\">\(htmlEscape(run.name))</td><td data-label=\"Status\">\(htmlEscape(run.result ?? "Unknown"))</td><td data-label=\"Duration\">\(htmlEscape(run.duration))</td></tr>"
                                 }.joined(separator: "")
                                 failureInfo += """
-                                    <h3>Previous Runs (Last 10)</h3>
                                     <table class="data-table previous-runs-table">
                                     <thead><tr><th scope="col">Run</th><th scope="col">Status</th><th scope="col">Duration</th></tr></thead>
                                     <tbody>\(previousRunsHTML)</tbody>
@@ -657,30 +656,7 @@ extension XCTestReport {
                 return parseDuration(durationStr)
             }.reduce(0, +)
 
-            let durationText: String
-            if totalDuration >= 3600 {
-                let hours = floor(totalDuration / 3600)
-                let minutes = floor((totalDuration.truncatingRemainder(dividingBy: 3600)) / 60)
-                let seconds = totalDuration.truncatingRemainder(dividingBy: 60)
-                if seconds > 0 {
-                    durationText = String(
-                        format: "%.0f hr %.0f min %.0f sec", hours, minutes, seconds)
-                } else if minutes > 0 {
-                    durationText = String(format: "%.0f hr %.0f min", hours, minutes)
-                } else {
-                    durationText = String(format: "%.0f hr", hours)
-                }
-            } else if totalDuration >= 60 {
-                let minutes = floor(totalDuration / 60)
-                let seconds = totalDuration.truncatingRemainder(dividingBy: 60)
-                if seconds > 0 {
-                    durationText = String(format: "%.0f min %.0f sec", minutes, seconds)
-                } else {
-                    durationText = String(format: "%.0f min", minutes)
-                }
-            } else {
-                durationText = String(format: "%.1f sec", totalDuration)
-            }
+            let durationText = formatCompactDuration(totalDuration)
 
             let avgDuration = totalDuration / Double(max(tests.count, 1))
 
@@ -689,15 +665,15 @@ extension XCTestReport {
                 suiteSections[suite]?.append((index: -1, html:
                     """
                     <div class="suite" data-suite-name="\(htmlEscape(suite.lowercased()))" data-total-tests="\(suiteCounts.totalTests)" data-failed-tests="\(suiteCounts.failedTests)" data-percent-passed="\(suiteCounts.percentagePassed)" data-suite-duration="\(totalDuration)" data-avg-duration="\(avgDuration)"><h2 class="collapsible">
-                        <span class="suite-name">\(suite)</span>
+                        <span class="suite-name">\(htmlEscape(suite))</span>
                         <span class="suite-stats">
                             <span class="stats-number">\(suiteCounts.passedTests)/\(suiteCounts.totalTests)</span> Passed
                             <span class="stats-percent">(\(String(format: "%.1f", suiteCounts.percentagePassed))%)</span>
                             <span class="suite-duration">\(durationText)</span>
                         </span>
-                    </h2><div class="content">
+                    </h2><div class="content"><div class="content-inner">
                     <table class="data-table suite-tests-table" style="margin-top:0px">
-                    <thead><tr><th scope="col">Test Name</th><th scope="col">Status</th><th scope="col" class="sortable-duration">Duration</th></tr></thead>
+                    <thead><tr><th scope="col">Test Name</th><th scope="col">Status</th><th scope="col" class="sortable-duration" aria-sort="none"><button type="button" class="sort-duration-btn">Duration</button></th></tr></thead>
                     <tbody>
                     """))
             }
@@ -728,7 +704,6 @@ extension XCTestReport {
                     }
                     let duration = test.duration ?? "0s"
                     let escapedResult = htmlEscape(result)
-                    let escapedDuration = htmlEscape(duration)
                     let escapedTestName = htmlEscape(test.name)
                     let testPageRelativePath = "\(testPagesDirectoryName)/\(testPageName)"
                     let escapedPageName = htmlEscape(testPageRelativePath)
@@ -754,24 +729,23 @@ extension XCTestReport {
                         }
                     }
 
+                    var isFlaky = false
                     if sizeInGB < 10.0,
-                        result == "Passed",
+                        Self.isPassedTestResult(result),
                         let testId = test.nodeIdentifier,
-                        let testDetails = getTestDetails(for: testId),
-                        let testRuns = testDetails.testRuns,
-                        testRuns.count > 1,
-                        let firstRun = testRuns.first,
-                        let firstRunResult = firstRun.result,
-                        firstRunResult != "Passed"
+                        let testRuns = getTestDetails(for: testId)?.testRuns,
+                        Self.isFlakyTest(result: result, testRuns: testRuns)
                     {
+                        isFlaky = true
                         statusEmoji += """
                              <span class="emoji-status" title="Failed first attempt, succeeded on run #\(testRuns.count)">⚠️</span>
                             """
                     }
 
                     let durationSeconds = parseDuration(duration) ?? 0
+                    let flakyAttribute = isFlaky ? " data-flaky=\"true\"" : ""
                     let testRow =
-                        "<tr\(rowClass) data-status=\"\(statusClass)\" data-duration=\"\(durationSeconds)\"><td data-label=\"Test Name\"><a href=\"\(escapedPageName)\">\(escapedTestName)</a></td><td data-label=\"Status\" class=\"\(statusClass)\">\(escapedResult)\(statusEmoji)</td><td data-label=\"Duration\">\(escapedDuration)</td></tr>"
+                        "<tr\(rowClass) data-status=\"\(statusClass)\"\(flakyAttribute) data-duration=\"\(durationSeconds)\"><td data-label=\"Test Name\"><a href=\"\(escapedPageName)\">\(escapedTestName)</a></td><td data-label=\"Status\" class=\"\(statusClass)\">\(escapedResult)\(statusEmoji)</td><td data-label=\"Duration\">\(htmlEscape(formatCompactDuration(durationSeconds)))</td></tr>"
 
                     suiteHTMLQueue.sync {
                         suiteSections[suite]?.append((index: testIndex, html: testRow))
@@ -859,7 +833,7 @@ extension XCTestReport {
 
         // Close all suite sections
         for suite in groupedTests.keys {
-            suiteSections[suite]?.append((index: Int.max, html: "</tbody></table></div></div>"))
+            suiteSections[suite]?.append((index: Int.max, html: "</tbody></table></div></div></div>"))
         }
 
         var buildResultsHTML = ""
@@ -893,8 +867,14 @@ extension XCTestReport {
             let dateString = dateFormatter.string(from: previousResults.date)
                 .replacingOccurrences(of: ":", with: "&#58;")
                 .replacingOccurrences(of: " ", with: "&#32;")
-            comparisonInfoHTML =
-                "<p class=\"comparison-info\">Compared with previous run from: \(dateString)</p>"
+            let delta = Self.previousRunDelta(
+                current: allTests, previous: previousResults.results,
+                pagePath: { test in
+                    let pageName = "test_\(test.nodeIdentifier ?? test.name).html"
+                        .replacingOccurrences(of: "/", with: "_")
+                    return "\(testPagesDirectoryName)/\(pageName)"
+                })
+            comparisonInfoHTML = renderPreviousRunDeltaHTML(delta, dateHTML: dateString)
         }
 
         // Add suite sections to HTML in sorted order

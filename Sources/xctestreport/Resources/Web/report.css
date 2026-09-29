@@ -4464,3 +4464,25 @@ body.test-detail-page { background: var(--report-bg); }
         color: #F2DFA5;
     }
 }
+
+/* report-shell.js: test pages open in a full-screen frame over the index. Frames that are
+   still preloading keep their full size so the page lays itself out before it is shown. */
+.report-shell-layer {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    pointer-events: none;
+    visibility: hidden;
+}
+.report-shell-layer.is-open { pointer-events: auto; visibility: visible; background: var(--report-bg); }
+.report-shell-layer .report-shell-frame {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    visibility: hidden;
+    background: var(--report-bg);
+}
+.report-shell-layer.is-open .report-shell-frame.is-active { visibility: visible; }
+html.report-shell-open, html.report-shell-open body { overflow: hidden; }

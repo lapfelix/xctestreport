@@ -98,6 +98,12 @@ Test pages load their screenshots and attachments with `fetch`, which browsers b
 opened from disk says so. `python3 -m http.server` ignores range requests, so videos cannot seek
 there; any real web server can.
 
+Served over HTTP, the index opens test pages in place instead of navigating away. It starts
+loading a test when you hover or press its link, and Back returns to the index with its filters
+and scroll intact. The address becomes `index.html#test=tests/<page>.html`, which can be shared.
+Every test page is still a standalone file, so direct links and plain static hosting work
+unchanged. Modifier-clicks open a new tab as usual.
+
 Add a header note (shown under the title), handy in CI to label the run:
 
 ```bash
@@ -141,7 +147,7 @@ Typical output directory:
 - `tests_grouped.json`
 - `tests/test_<identifier>.html` (one per test case)
 - `tests/test_<identifier>.zip` (one per test case; everything that page loads lazily)
-- `web/report.css`, `web/index-page.js`, `web/bundle-reader.js`, `web/timeline-view.js`,
+- `web/report.css`, `web/index-page.js`, `web/report-shell.js`, `web/bundle-reader.js`, `web/timeline-view.js`,
   `web/plist-preview.js`, `web/snapshot-diff.js`, `web/snapshot-gallery.js`, `web/snapshot-gallery.css`
 - `attachments/` (videos, snapshot comparison images, and crash reports quoted in a failure;
   everything else is bundled). Videos are named after their test (`Suite_testName.mp4`, then
@@ -205,6 +211,7 @@ no browser can decode zstd natively. The archive always holds bytes the page can
 - Templates: `Sources/xctestreport/Resources/Web/templates/`
 - CSS: `Sources/xctestreport/Resources/Web/report.css`
 - JS: `Sources/xctestreport/Resources/Web/index-page.js`
+- JS: `Sources/xctestreport/Resources/Web/report-shell.js` (opens test pages over the index)
 - JS: `Sources/xctestreport/Resources/Web/bundle-reader.js`
 - JS: `Sources/xctestreport/Resources/Web/timeline-view.js`
 - JS: `Sources/xctestreport/Resources/Web/plist-preview.js`

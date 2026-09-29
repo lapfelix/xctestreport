@@ -514,7 +514,7 @@ extension XCTestReport {
                 return """
                     <div class="video-card timeline-video-card"\(hiddenStyle) data-video-index="\(index)"\(runIndexAttribute)>
                         <div class="timeline-video-frame">
-                            <video class="timeline-video" preload="metadata" data-video-start="\(startTime)">
+                            <video class="timeline-video" preload="none" data-deferred-preload="metadata" data-video-start="\(startTime)">
                                 <source src="\(relativePath)" type="\(source.mimeType)">
                                 <a href="\(relativePath)">Download video</a>
                             </video>

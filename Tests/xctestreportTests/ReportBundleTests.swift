@@ -27,6 +27,28 @@ final class ReportBundleTests: XCTestCase {
         XCTAssertEqual(bundle.attachmentFileNames, ["12.plist"])
     }
 
+    /// Loose videos are named after their test so they can be found without the HTML pages.
+    func testNamesVideosAfterTheirTest() {
+        let report = makeReport()
+        var used = Set<String>()
+        XCTAssertEqual(
+            report.readableVideoFileName(
+                testIdentifier: "TripPlanTests/testSearch()", fileExtension: "mp4",
+                usedNames: &used),
+            "TripPlanTests_testSearch.mp4")
+        XCTAssertEqual(
+            report.readableVideoFileName(
+                testIdentifier: "TripPlanTests/testSearch()", fileExtension: "mp4",
+                usedNames: &used),
+            "TripPlanTests_testSearch-2.mp4")
+        XCTAssertNil(
+            report.readableVideoFileName(
+                testIdentifier: "TripPlanTests/testSearch()", fileExtension: "png",
+                usedNames: &used))
+        XCTAssertNil(
+            report.readableVideoFileName(testIdentifier: "", fileExtension: "mp4", usedNames: &used))
+    }
+
     /// Videos need real streaming and seeking, which a blob URL cannot provide.
     func testLeavesVideosLoose() {
         let report = makeReport()

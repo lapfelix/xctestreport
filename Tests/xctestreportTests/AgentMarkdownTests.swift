@@ -282,6 +282,51 @@ final class AgentMarkdownTests: XCTestCase {
             "Videos stay loose files, so they keep a plain link")
     }
 
+    func testCrashReportFillsStackTraceAndFailureSummary() throws {
+        let outputDir = (NSTemporaryDirectory() as NSString).appendingPathComponent(
+            "agentmd-crash-\(UUID().uuidString)")
+        let attachmentsDir = (outputDir as NSString).appendingPathComponent("attachments")
+        try FileManager.default.createDirectory(
+            atPath: attachmentsDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: outputDir) }
+        let body: [String: Any] = [
+            "procName": "App",
+            "usedImages": [["name": "App.debug.dylib"]],
+            "lastExceptionBacktrace": [
+                ["imageIndex": 0, "symbol": "-[Foo bar]", "sourceFile": "Foo.m", "sourceLine": 12]
+            ],
+        ]
+        var ips = Data("{\"bug_type\":\"309\"}\n".utf8)
+        ips.append(try JSONSerialization.data(withJSONObject: body))
+        try ips.write(to: URL(fileURLWithPath: (attachmentsDir as NSString).appendingPathComponent("3.ips")))
+
+        let report = makeReport(outputDir: outputDir)
+        let test = XCTestReport.TestNode(
+            name: "testFoo()", nodeType: "Test Case", nodeIdentifier: "Suite/testFoo()",
+            result: "Failed", duration: "5s", details: nil, children: nil, startTime: nil)
+        let (markdown, summary) = report.renderTestMarkdown(
+            test: test,
+            result: "Failed",
+            suite: "Suite",
+            testDetails: nil,
+            testActivities: nil,
+            attachmentsByTestIdentifier: [
+                "Suite/testFoo()": [
+                    XCTestReport.AttachmentManifestItem(
+                        exportedFileName: "3.ips", isAssociatedWithFailure: nil,
+                        suggestedHumanReadableName: "kXCTAttachmentLegacyDiagnosticReportData",
+                        timestamp: nil, payloadRefId: nil)
+                ]
+            ],
+            primaryFailureMessage: "App crashed in <external symbol>",
+            sourceLocationCandidateTexts: [],
+            bundleFileName: "test_Suite_testFoo().zip"
+        )
+
+        XCTAssertTrue(markdown.contains("Crash site: Foo.m:12 in -[Foo bar]"))
+        XCTAssertEqual(summary, "App crashed in <external symbol> (crash site: Foo.m:12)")
+    }
+
     // MARK: - Helpers
 
     private func activity(

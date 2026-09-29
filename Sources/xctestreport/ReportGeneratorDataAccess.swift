@@ -433,9 +433,17 @@ extension XCTestReport {
         }
         defer { sqlite3_close(db) }
         
-        // Query to get attachments with their test identifiers
+        // Only top-level activities carry testCaseRun_fk, so walk nested ones up to their root.
+        // Attachments on a test issue (crash reports) may have no activity at all.
         let query = """
-            SELECT 
+            WITH RECURSIVE activity_run(id, run_fk) AS (
+                SELECT ROWID, testCaseRun_fk FROM Activities WHERE testCaseRun_fk IS NOT NULL
+                UNION ALL
+                SELECT child.ROWID, parent.run_fk
+                FROM Activities child
+                JOIN activity_run parent ON child.parent_fk = parent.id
+            )
+            SELECT
                 a.name,
                 a.uniformTypeIdentifier,
                 a.xcResultKitPayloadRefId,
@@ -444,8 +452,9 @@ extension XCTestReport {
                 a.timestamp,
                 a.testIssue_fk
             FROM Attachments a
-            LEFT JOIN Activities act ON a.activity_fk = act.ROWID
-            LEFT JOIN TestCaseRuns tcr ON act.testCaseRun_fk = tcr.ROWID
+            LEFT JOIN activity_run ar ON a.activity_fk = ar.id
+            LEFT JOIN TestIssues ti ON a.testIssue_fk = ti.ROWID
+            LEFT JOIN TestCaseRuns tcr ON tcr.ROWID = COALESCE(ar.run_fk, ti.testCaseRun_fk)
             LEFT JOIN TestCases tc ON tcr.testCase_fk = tc.ROWID
             WHERE a.xcResultKitPayloadRefId IS NOT NULL
             ORDER BY a.timestamp, a.ROWID
@@ -461,6 +470,7 @@ extension XCTestReport {
         var attachmentsByTest = [String: [AttachmentManifestItem]]()
         var manifestEntries = [AttachmentManifestEntry]()
         var fileCounter = 0
+        var usedVideoFileNames = Set<String>()
         var lastProgressTime = Date()
         
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -493,14 +503,32 @@ extension XCTestReport {
                 let uti = String(cString: utiPtr)
                 fileExt = fileExtensionForUTI(uti)
             }
+            if fileExt == "dat", suggestedName?.contains("DiagnosticReport") == true {
+                fileExt = "ips"
+            }
             
             fileCounter += 1
-            let destFileName = "\(fileCounter).\(fileExt)"
+            let destFileName =
+                readableVideoFileName(
+                    testIdentifier: testIdentifier, fileExtension: fileExt,
+                    usedNames: &usedVideoFileNames)
+                ?? "\(fileCounter).\(fileExt)"
             let destPath = (attachmentsDir as NSString).appendingPathComponent(destFileName)
             
-            // Copy file
+            // xcresult stores some payloads zstd-compressed; unwrap them here so a loose file or
+            // a crash report quoted in the Markdown is readable as-is. Videos are never compressed.
             do {
-                try FileManager.default.copyItem(atPath: sourcePath, toPath: destPath)
+                if !["mp4", "mov", "m4v"].contains(fileExt),
+                    let handle = FileHandle(forReadingAtPath: sourcePath),
+                    isZstdCompressedData((try? handle.read(upToCount: 4)) ?? Data()),
+                    (try? handle.seek(toOffset: 0)) != nil,
+                    let data = try? handle.readToEnd(),
+                    let decompressed = decompressZstdData(data)
+                {
+                    try decompressed.write(to: URL(fileURLWithPath: destPath))
+                } else {
+                    try FileManager.default.copyItem(atPath: sourcePath, toPath: destPath)
+                }
             } catch {
                 print("Failed to copy \(sourcePath): \(error)")
                 continue
@@ -583,12 +611,81 @@ extension XCTestReport {
         return attachmentsByTest
     }
     
+    /// Videos stay loose files next to the per-test bundles, so name them after their test
+    /// (`Suite_testName.mp4`, then `Suite_testName-2.mp4`, ...) instead of an export counter.
+    func readableVideoFileName(
+        testIdentifier: String, fileExtension: String, usedNames: inout Set<String>
+    ) -> String? {
+        guard ["mp4", "mov", "m4v"].contains(fileExtension.lowercased()) else { return nil }
+        var base = testIdentifier
+        if base.hasSuffix("()") { base.removeLast(2) }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_."))
+        base = String(
+            base.unicodeScalars.map { allowed.contains($0) ? Character($0) : "_" })
+            .trimmingCharacters(in: CharacterSet(charactersIn: "_."))
+        guard !base.isEmpty else { return nil }
+
+        var candidate = "\(base).\(fileExtension)"
+        var suffix = 1
+        while usedNames.contains(candidate) {
+            suffix += 1
+            candidate = "\(base)-\(suffix).\(fileExtension)"
+        }
+        usedNames.insert(candidate)
+        return candidate
+    }
+
+    /// `xcresulttool export attachments` picks its own file names; rename the videos to match
+    /// the direct export and rewrite the manifest so later HTML-only runs see the same names.
+    func renameExportedVideosByTest(
+        in attachmentsDir: String, manifestEntries: inout [AttachmentManifestEntry]
+    ) {
+        var usedNames = Set<String>()
+        var renamedAny = false
+        for entryIndex in manifestEntries.indices {
+            let testIdentifier = manifestEntries[entryIndex].testIdentifier
+            for itemIndex in manifestEntries[entryIndex].attachments.indices {
+                let oldName = manifestEntries[entryIndex].attachments[itemIndex].exportedFileName
+                let ext = (oldName as NSString).pathExtension
+                guard
+                    let newName = readableVideoFileName(
+                        testIdentifier: testIdentifier, fileExtension: ext, usedNames: &usedNames),
+                    newName != oldName
+                else { continue }
+                let oldPath = (attachmentsDir as NSString).appendingPathComponent(oldName)
+                let newPath = (attachmentsDir as NSString).appendingPathComponent(newName)
+                guard !FileManager.default.fileExists(atPath: newPath) else { continue }
+                do {
+                    try FileManager.default.moveItem(atPath: oldPath, toPath: newPath)
+                    manifestEntries[entryIndex].attachments[itemIndex].exportedFileName = newName
+                    renamedAny = true
+                } catch {
+                    print("Failed to rename video \(oldName) to \(newName): \(error)")
+                }
+            }
+        }
+        guard renamedAny else { return }
+
+        let manifestPath = (attachmentsDir as NSString).appendingPathComponent("manifest.json")
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        do {
+            try encoder.encode(manifestEntries).write(to: URL(fileURLWithPath: manifestPath))
+        } catch {
+            print("Failed to rewrite attachment manifest after renaming videos: \(error)")
+        }
+    }
+
     func fileExtensionForUTI(_ uti: String) -> String {
         switch uti {
         case "public.mpeg-4": return "mp4"
+        case "com.apple.quicktime-movie": return "mov"
         case "public.png": return "png"
         case "public.jpeg": return "jpg"
-        case "public.plain-text": return "txt"
+        case "public.heic": return "heic"
+        case "public.plain-text", "public.utf8-plain-text", "public.text": return "txt"
+        case "public.log": return "log"
+        case "com.apple.crashreport": return "ips"
         case "public.xml": return "xml"
         case "public.json": return "json"
         case "com.apple.property-list": return "plist"
@@ -718,7 +815,8 @@ extension XCTestReport {
 
         do {
             let data = try Data(contentsOf: URL(fileURLWithPath: manifestPath))
-            let manifestEntries = try JSONDecoder().decode([AttachmentManifestEntry].self, from: data)
+            var manifestEntries = try JSONDecoder().decode([AttachmentManifestEntry].self, from: data)
+            renameExportedVideosByTest(in: attachmentsDir, manifestEntries: &manifestEntries)
 
             if compressVideo {
                 if fastVideo {

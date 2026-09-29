@@ -545,7 +545,19 @@ extension XCTestReport {
 
             let absolutePath =
                 (attachmentRoot as NSString).appendingPathComponent(attachment.exportedFileName)
-            guard let fileData = FileManager.default.contents(atPath: absolutePath) else { continue }
+            guard let fileData = readAttachmentData(at: absolutePath) else { continue }
+            if let crash = crashReportPreview(fromIPS: fileData) {
+                // A symbolicated crash report beats any frame list scraped from plain text.
+                return StackTracePreview(
+                    attachmentName: attachment.suggestedHumanReadableName
+                        ?? attachment.exportedFileName,
+                    relativePath: attachmentRelativePathForTestPage(
+                        fileName: attachment.exportedFileName),
+                    preview: crash.preview,
+                    frameCount: crash.frameCount
+                )
+            }
+
             let limitedData = Data(fileData.prefix(220_000))
             guard let text = String(data: limitedData, encoding: .utf8) else { continue }
 
@@ -587,6 +599,80 @@ extension XCTestReport {
         }
 
         return best
+    }
+
+    /// Summarizes an `.ips` crash report (a JSON header line followed by a JSON body): what
+    /// crashed, the first frame with source info, and the exception backtrace, or the crashed
+    /// thread when the crash was not an uncaught exception.
+    func crashReportPreview(fromIPS data: Data) -> (preview: String, frameCount: Int)? {
+        guard let newline = data.firstIndex(of: UInt8(ascii: "\n")),
+            data.first == UInt8(ascii: "{"),
+            let body = try? JSONSerialization.jsonObject(
+                with: data[data.index(after: newline)...]) as? [String: Any],
+            let images = body["usedImages"] as? [[String: Any]]
+        else { return nil }
+
+        let threads = body["threads"] as? [[String: Any]] ?? []
+        let faultingIndex = body["faultingThread"] as? Int
+        let faultingThread = faultingIndex.flatMap { threads.indices.contains($0) ? threads[$0] : nil }
+        let exceptionFrames = body["lastExceptionBacktrace"] as? [[String: Any]] ?? []
+        let usesExceptionBacktrace = !exceptionFrames.isEmpty
+        let frames = usesExceptionBacktrace
+            ? exceptionFrames : (faultingThread?["frames"] as? [[String: Any]] ?? [])
+        guard !frames.isEmpty else { return nil }
+
+        func location(_ frame: [String: Any]) -> String? {
+            guard let file = frame["sourceFile"] as? String else { return nil }
+            return (frame["sourceLine"] as? Int).map { "\(file):\($0)" } ?? file
+        }
+        func frameLine(_ index: Int, _ frame: [String: Any]) -> String {
+            let imageIndex = frame["imageIndex"] as? Int ?? -1
+            let image = images.indices.contains(imageIndex)
+                ? (images[imageIndex]["name"] as? String ?? "???") : "???"
+            var line = "\(index)".padding(toLength: 4, withPad: " ", startingAt: 0)
+                + image.padding(toLength: max(image.count, 28), withPad: " ", startingAt: 0)
+            if let symbol = frame["symbol"] as? String {
+                line += " \(symbol)"
+                if let offset = frame["symbolLocation"] as? Int { line += " + \(offset)" }
+            } else if let offset = frame["imageOffset"] as? Int {
+                line += String(format: " 0x%llx", offset)
+            }
+            if let location = location(frame) { line += " (\(location))" }
+            return line
+        }
+
+        var lines = [String]()
+        var header = (body["procName"] as? String) ?? "Process"
+        if let bundle = body["bundleInfo"] as? [String: Any],
+            let identifier = bundle["CFBundleIdentifier"] as? String
+        {
+            let version = (bundle["CFBundleShortVersionString"] as? String).map { " \($0)" } ?? ""
+            header += " (\(identifier)\(version))"
+        }
+        header += " crashed"
+        if let exception = body["exception"] as? [String: Any] {
+            let type = exception["type"] as? String ?? ""
+            let signal = (exception["signal"] as? String).map { " (\($0))" } ?? ""
+            if !type.isEmpty { header += ": \(type)\(signal)" }
+        }
+        lines.append(header)
+        if let queue = faultingThread?["queue"] as? String {
+            lines.append("Queue: \(queue)")
+        }
+        if let site = frames.first(where: { location($0) != nil }) {
+            let symbol = (site["symbol"] as? String).map { " in \($0)" } ?? ""
+            lines.append("Crash site: \(location(site)!)\(symbol)")
+        }
+        lines.append("")
+        lines.append(
+            usesExceptionBacktrace
+                ? "Last exception backtrace:"
+                : "Crashed thread \(faultingIndex.map(String.init) ?? "?"):")
+        for (index, frame) in frames.prefix(25).enumerated() {
+            lines.append(frameLine(index, frame))
+        }
+        if frames.count > 25 { lines.append("... \(frames.count - 25) more frames") }
+        return (lines.joined(separator: "\n"), frames.count)
     }
 
     func renderStackTraceSection(

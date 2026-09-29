@@ -137,7 +137,9 @@ Typical output directory:
 - `tests/test_<identifier>.zip` (one per test case; everything that page loads lazily)
 - `web/report.css`, `web/index-page.js`, `web/bundle-reader.js`, `web/timeline-view.js`,
   `web/plist-preview.js`, `web/snapshot-diff.js`, `web/snapshot-gallery.js`, `web/snapshot-gallery.css`
-- `attachments/` (videos and snapshot comparison images only; everything else is bundled)
+- `attachments/` (videos, snapshot comparison images, and crash reports quoted in a failure;
+  everything else is bundled). Videos are named after their test (`Suite_testName.mp4`, then
+  `-2`, `-3`, ...), and diagnostic reports keep an `.ips` extension.
 - `test_details.json` (per-test detail keyed by test identifier, used to compare against previous runs)
 
 A 403-test run that previously wrote 5,641 files now writes 889.

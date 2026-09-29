@@ -136,6 +136,14 @@ extension XCTestReport {
                 lines.append("")
                 lines.append(fencedCodeBlock(stack.preview))
                 lines.append("")
+                // Crash failures read "crashed in <external symbol>"; the report knows better.
+                if let site = stack.preview.components(separatedBy: "\n")
+                    .first(where: { $0.hasPrefix("Crash site: ") })?
+                    .dropFirst("Crash site: ".count)
+                    .split(separator: " ").first
+                {
+                    failureSummary = (failureSummary ?? "Crashed") + " (crash site: \(site))"
+                }
             }
 
             let previousRuns = test.nodeIdentifier.map { getPreviousRuns(for: $0) } ?? []
@@ -379,6 +387,14 @@ extension XCTestReport {
         lines.append("> Agent-readable companion to `index.html`. Every test links into [`\(agentTestsFileName)`](\(agentTestsFileName)), one file holding the failure, source locations, steps, and attachments of every test; it opens with grep recipes for jumping to a single test. All paths are relative, so this folder works when hosted remotely.")
         lines.append(">")
         lines.append("> For failures only, see [`failures.md`](\(failuresReportFileName)) - one self-contained file with the full detail of every failed test.")
+        lines.append("")
+        lines.append("### Folder layout")
+        lines.append("")
+        lines.append("- `\(testPagesDirectoryName)/<page>.zip` - everything one test captured: `test.md` (the same section as in `\(agentTestsFileName)`), `attachments/` (UI hierarchies, debug descriptions, `.ips` crash reports, logs, screenshots), and `timeline/` data for the HTML page. `unzip -l` lists it, `unzip -p <zip> <entry>` prints one entry. Quote the path: page names contain `()`.")
+        lines.append("- `\(testPagesDirectoryName)/<page>.html` - the browser view of the same test; not useful to read as text.")
+        lines.append("- `attachments/` - files that stay loose: screen recordings named after their test (`Suite_testName.mp4`), snapshot images, and crash reports quoted in a failure. `manifest.json` maps every attachment to its test.")
+        lines.append("- `summary.json`, `tests_full.json`, `tests_grouped.json`, `test_details.json` - raw `xcresulttool` data; the Markdown files already carry what they say.")
+        lines.append("- `index.html`, `web/` - the browser report.")
         lines.append("")
 
         lines.append("- **Result:** \(result)")

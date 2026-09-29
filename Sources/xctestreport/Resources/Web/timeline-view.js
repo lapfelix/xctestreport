@@ -2909,6 +2909,8 @@
   function attachVideoHandlers(video) {
     if (!video) return;
     video.addEventListener('loadedmetadata', function() {
+      // Every run's video loads metadata; only the visible one owns the scrubber and pending seek.
+      if (video !== getActiveVideo()) return;
       updateActiveMediaAspect();
       clampScrubber(video);
     });

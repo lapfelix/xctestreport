@@ -126,6 +126,16 @@ extension XCTestReport {
         print("Attachment export completed in \(String(format: "%.2f", attachmentsExportDuration)) seconds")
         print("Full results command completed in \(String(format: "%.2f", fullDuration)) seconds")
 
+        if !htmlOnly, summaryExit != 0 || summaryJSON?.isEmpty != false {
+            // Seen once on a freshly copied multi-GB bundle while the other xcresulttool calls
+            // ran alongside it; a second, uncontended attempt succeeded.
+            print("Summary command failed (exit \(summaryExit)); retrying once...")
+            (summaryJSON, summaryExit) = shell([
+                "xcrun", "xcresulttool", "get", "test-results", "summary", "--path", xcresultPath,
+                "--format", "json", "--compact",
+            ])
+        }
+
         guard summaryExit == 0, let summaryData = summaryJSON?.data(using: .utf8) else {
             print("Failed to get test summary.")
             throw RuntimeError(message: "Failed to get test summary.")

@@ -114,6 +114,12 @@ extension XCTestReport {
         let name: String
         let nodeType: String
         let result: String?
+        let sourceLocation: TestRunSourceLocation?
+    }
+
+    struct TestRunSourceLocation: Decodable {
+        let filePath: String
+        let lineNumber: Int
     }
 
     struct TestRunChildDetail: Decodable {

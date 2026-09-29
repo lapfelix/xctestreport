@@ -95,6 +95,10 @@ extension XCTestReport {
             let os = device.osVersion.isEmpty ? "" : " (\(device.platform ?? "")\(device.platform == nil ? "" : " ")\(device.osVersion))"
             lines.append("- **Device:** \(device.deviceName)\(os)")
         }
+        if !attachments.isEmpty {
+            let archive = shellQuoted("\(testPagesDirectoryName)/\(bundleFileName)")
+            lines.append("- **Attachments ZIP:** `unzip -p \(archive) <entry>` prints an `attachments/...` entry below")
+        }
         lines.append("")
 
         var failureSummary: String?
@@ -107,6 +111,30 @@ extension XCTestReport {
                 lines.append("")
                 lines.append(fencedCodeBlock(message))
                 lines.append("")
+            }
+
+            // With retries the test-level message is just "Failed after N retries"; what each
+            // run actually hit lives one level down.
+            let runFailures = (testDetails?.testRuns ?? []).compactMap { run -> String? in
+                let messages = (run.children ?? []).compactMap { child -> String? in
+                    let name = child.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !name.isEmpty else { return nil }
+                    let location = child.sourceLocation.map {
+                        " (`\(($0.filePath as NSString).lastPathComponent):\($0.lineNumber)`)"
+                    } ?? ""
+                    return firstLine(of: name) + location
+                }
+                guard !messages.isEmpty else { return nil }
+                return "**\(run.name)** (\(run.duration)): \(messages.joined(separator: "; "))"
+            }
+            if (testDetails?.testRuns?.count ?? 0) > 1, !runFailures.isEmpty {
+                lines.append("### Runs")
+                lines.append("")
+                lines.append(contentsOf: runFailures.map { "- \($0)" })
+                lines.append("")
+                let runSummary = runFailures.map { $0.replacingOccurrences(of: "**", with: "") }
+                    .joined(separator: "; ")
+                failureSummary = failureSummary.map { "\($0) - \(runSummary)" } ?? runSummary
             }
 
             let locations = sourceLocationCandidateTexts
@@ -142,7 +170,18 @@ extension XCTestReport {
                     .dropFirst("Crash site: ".count)
                     .split(separator: " ").first
                 {
-                    failureSummary = (failureSummary ?? "Crashed") + " (crash site: \(site))"
+                    // Attach the site to the crash itself, not to whichever run failed last.
+                    let note = " (crash site: \(site))"
+                    if var summary = failureSummary,
+                        let crash = summary.range(of: "crashed in ")
+                    {
+                        let end = summary.range(of: "; ", range: crash.upperBound..<summary.endIndex)?
+                            .lowerBound ?? summary.endIndex
+                        summary.insert(contentsOf: note, at: end)
+                        failureSummary = summary
+                    } else {
+                        failureSummary = (failureSummary ?? "Crashed") + note
+                    }
                 }
             }
 
@@ -209,7 +248,8 @@ extension XCTestReport {
                 .min()
             lines.append("## Attachments")
             lines.append("")
-            for attachment in attachments {
+            for attachment in attachments
+            where !isMachineOnlyAttachment(name: attachment.suggestedHumanReadableName) {
                 let relativePath = attachmentRelativePathForTestPage(
                     fileName: attachment.exportedFileName)
                 let name = attachment.suggestedHumanReadableName ?? attachment.exportedFileName
@@ -227,9 +267,15 @@ extension XCTestReport {
         return (asciiFold(lines.joined(separator: "\n")), failureSummary.map(asciiFold))
     }
 
+    /// Legacy UI snapshots and synthesized events are gzipped binary archives for the HTML
+    /// timeline; the "App UI hierarchy" text next to each snapshot is the readable version.
+    private func isMachineOnlyAttachment(name: String?) -> Bool {
+        name == "kXCTAttachmentLegacySnapshot" || name == "kXCTAttachmentLegacySynthesizedEvent"
+    }
+
     // Most attachments now live only inside the test's ZIP, so a Markdown link would dangle;
-    // emit the command that prints the entry instead. Files that stay loose on disk (videos,
-    // snapshot comparison images) keep a plain link.
+    // name the entry instead (the test header says which ZIP holds it). Files that stay loose
+    // on disk (videos, snapshot comparison images) keep a plain link.
     private func agentAttachmentReference(
         name: String,
         relativePath: String?,
@@ -247,8 +293,7 @@ extension XCTestReport {
         else {
             return "[\(label)](\(linkDestination(relativePath)))"
         }
-        let archive = "\(testPagesDirectoryName)/\(bundleFileName)"
-        return "\(label) - `unzip -p \(shellQuoted(archive)) \(shellQuoted(entry))`"
+        return "\(label) - `\(entry)`"
     }
 
     // Test identifiers reach file names, so paths routinely contain "()" and spaces.
@@ -296,22 +341,72 @@ extension XCTestReport {
                 lines.append("")
             }
             let base = minStartTime(in: run.activities)
-            for activity in run.activities {
-                appendActivityLines(
-                    activity, base: base, depth: 0,
-                    payloadToFile: payloadToFile,
-                    snapshotComparisonSources: snapshotComparisonSources,
-                    bundleFileName: bundleFileName,
-                    into: &lines)
-            }
+            appendActivityList(
+                run.activities, base: base, depth: 0,
+                payloadToFile: payloadToFile,
+                snapshotComparisonSources: snapshotComparisonSources,
+                bundleFileName: bundleFileName,
+                into: &lines)
         }
         return lines
+    }
+
+    /// XCUITest polls once a second while it waits, so one wait becomes dozens of identical
+    /// "Checking existence" subtrees. Consecutive siblings with the same shape collapse into the
+    /// first one plus a count; anything on the failure path is always written out.
+    private func appendActivityList(
+        _ activities: [TestActivity],
+        base: Double?,
+        depth: Int,
+        payloadToFile: [String: String],
+        snapshotComparisonSources: Set<String>,
+        bundleFileName: String,
+        into lines: inout [String]
+    ) {
+        var index = 0
+        while index < activities.count {
+            let activity = activities[index]
+            var repeatCount = 1
+            if let signature = stepSignature(activity) {
+                while index + repeatCount < activities.count,
+                    stepSignature(activities[index + repeatCount]) == signature
+                {
+                    repeatCount += 1
+                }
+            }
+            var repeatNote = ""
+            if repeatCount > 1 {
+                let last = timeOffsetLabel(
+                    activities[index + repeatCount - 1].startTime, base: base)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "[] "))
+                repeatNote = " (x\(repeatCount)\(last.isEmpty ? "" : ", last at \(last)"))"
+            }
+            appendActivityLines(
+                activity, base: base, depth: depth, repeatNote: repeatNote,
+                payloadToFile: payloadToFile,
+                snapshotComparisonSources: snapshotComparisonSources,
+                bundleFileName: bundleFileName,
+                into: &lines)
+            index += repeatCount
+        }
+    }
+
+    /// Titles of the activity and its subtree, or nil when anything in it is tied to a failure.
+    private func stepSignature(_ activity: TestActivity) -> String? {
+        guard activity.isAssociatedWithFailure != true else { return nil }
+        var signature = activity.title
+        for child in activity.childActivities ?? [] {
+            guard let childSignature = stepSignature(child) else { return nil }
+            signature += "\u{1F}{\(childSignature)}"
+        }
+        return signature
     }
 
     private func appendActivityLines(
         _ activity: TestActivity,
         base: Double?,
         depth: Int,
+        repeatNote: String = "",
         payloadToFile: [String: String],
         snapshotComparisonSources: Set<String>,
         bundleFileName: String,
@@ -321,10 +416,11 @@ extension XCTestReport {
         let marker = (activity.isAssociatedWithFailure == true) ? "[FAIL] " : ""
         let offset = timeOffsetLabel(activity.startTime, base: base)
         let title = markdownInline(activity.title)
-        lines.append("\(indent)- \(marker)\(offset)\(title)")
+        lines.append("\(indent)- \(marker)\(offset)\(title)\(repeatNote)")
 
         let childIndent = String(repeating: "  ", count: depth + 1)
-        for attachment in activity.attachments ?? [] {
+        for attachment in activity.attachments ?? []
+        where !isMachineOnlyAttachment(name: attachment.name) {
             guard let payloadId = attachment.payloadId,
                 let fileName = payloadToFile[payloadId] else { continue }
             let relativePath = attachmentRelativePathForTestPage(fileName: fileName)
@@ -335,14 +431,12 @@ extension XCTestReport {
             lines.append("\(childIndent)- attachment: \(reference)")
         }
 
-        for child in activity.childActivities ?? [] {
-            appendActivityLines(
-                child, base: base, depth: depth + 1,
-                payloadToFile: payloadToFile,
-                snapshotComparisonSources: snapshotComparisonSources,
-                bundleFileName: bundleFileName,
-                into: &lines)
-        }
+        appendActivityList(
+            activity.childActivities ?? [], base: base, depth: depth + 1,
+            payloadToFile: payloadToFile,
+            snapshotComparisonSources: snapshotComparisonSources,
+            bundleFileName: bundleFileName,
+            into: &lines)
     }
 
     private func minStartTime(in activities: [TestActivity]) -> Double? {
@@ -523,7 +617,7 @@ extension XCTestReport {
         headerLines.append("```")
         headerLines.append("")
         headerLines.append(
-            "Attachments are packed one ZIP per test, so each one below carries the `unzip -p` command that prints it. Videos and snapshot images are still loose files and stay plain links.")
+            "Attachments are packed one ZIP per test. Each test's header gives the `unzip -p` command for its ZIP, and each attachment below names its entry (`attachments/12.txt`). Videos and snapshot images are still loose files and stay plain links.")
         headerLines.append("")
         headerLines.append("## Tests (\(sorted.count))")
         headerLines.append("")

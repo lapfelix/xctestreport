@@ -90,6 +90,9 @@ extension XCTestReport {
             texts.append(run.name)
             for child in run.children ?? [] {
                 texts.append(child.name)
+                if let location = child.sourceLocation {
+                    texts.append("\(location.filePath):\(location.lineNumber)")
+                }
                 for detail in child.children ?? [] {
                     collectDetailTexts(detail)
                 }

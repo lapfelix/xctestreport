@@ -274,8 +274,11 @@ final class AgentMarkdownTests: XCTestCase {
 
         XCTAssertTrue(
             markdown.contains(
-                "UI Snapshot - `unzip -p 'tests/test_Suite_testFoo().zip' attachments/12.plist`"),
-            "Bundled attachments must carry an extraction command, not a dangling link")
+                "- **Attachments ZIP:** `unzip -p 'tests/test_Suite_testFoo().zip' <entry>`"),
+            "The test header must say how to extract its bundled attachments")
+        XCTAssertTrue(
+            markdown.contains("UI Snapshot - `attachments/12.plist`"),
+            "Bundled attachments must name their entry, not carry a dangling link")
         XCTAssertFalse(markdown.contains("](../attachments/12.plist)"))
         XCTAssertTrue(
             markdown.contains("[Screen Recording](../attachments/13.mp4)"),
@@ -325,6 +328,97 @@ final class AgentMarkdownTests: XCTestCase {
 
         XCTAssertTrue(markdown.contains("Crash site: Foo.m:12 in -[Foo bar]"))
         XCTAssertEqual(summary, "App crashed in <external symbol> (crash site: Foo.m:12)")
+    }
+
+    func testRetriedFailureListsWhatEachRunHit() throws {
+        let details = try JSONDecoder().decode(
+            XCTestReport.TestDetails.self,
+            from: Data(
+                """
+                {"devices": [], "duration": "2m", "hasMediaAttachments": false,
+                 "hasPerformanceMetrics": false, "testDescription": "Test case with 2 runs",
+                 "testIdentifier": "Suite/testFoo()", "testName": "testFoo()",
+                 "testPlanConfigurations": [], "testResult": "Failed",
+                 "testRuns": [
+                   {"name": "First Run", "duration": "34s", "nodeType": "Repetition", "result": "Failed",
+                    "children": [{"name": "App crashed in <external symbol>", "nodeType": "Test Case Run", "result": "Failed"}]},
+                   {"name": "Retry 1", "duration": "3min 13s", "nodeType": "Repetition", "result": "Failed",
+                    "children": [{"name": "failed - no station offered GO", "nodeType": "Test Case Run", "result": "Failed",
+                                  "sourceLocation": {"filePath": "/ci/UITests/StationRobot.swift", "lineNumber": 36}}]}
+                 ]}
+                """.utf8))
+        let test = XCTestReport.TestNode(
+            name: "testFoo()", nodeType: "Test Case", nodeIdentifier: "Suite/testFoo()",
+            result: "Failed", duration: "2m", details: nil, children: nil, startTime: nil)
+        let attachments = [
+            XCTestReport.AttachmentManifestItem(
+                exportedFileName: "11.plist.gz", isAssociatedWithFailure: nil,
+                suggestedHumanReadableName: "kXCTAttachmentLegacySnapshot", timestamp: nil,
+                payloadRefId: nil),
+            XCTestReport.AttachmentManifestItem(
+                exportedFileName: "10.txt", isAssociatedWithFailure: nil,
+                suggestedHumanReadableName: "App UI hierarchy for com.example", timestamp: nil,
+                payloadRefId: nil),
+        ]
+
+        let (markdown, summary) = makeReport().renderTestMarkdown(
+            test: test,
+            result: "Failed",
+            suite: "Suite",
+            testDetails: details,
+            testActivities: nil,
+            attachmentsByTestIdentifier: ["Suite/testFoo()": attachments],
+            primaryFailureMessage: "Failed after 2 retries",
+            sourceLocationCandidateTexts: [],
+            bundleFileName: "test_Suite_testFoo().zip"
+        )
+
+        XCTAssertTrue(markdown.contains("- **First Run** (34s): App crashed in <external symbol>"))
+        XCTAssertTrue(
+            markdown.contains(
+                "- **Retry 1** (3min 13s): failed - no station offered GO (`StationRobot.swift:36`)"))
+        XCTAssertEqual(
+            summary,
+            "Failed after 2 retries - First Run (34s): App crashed in <external symbol>; "
+                + "Retry 1 (3min 13s): failed - no station offered GO (`StationRobot.swift:36`)")
+        XCTAssertTrue(markdown.contains("App UI hierarchy for com.example - `attachments/10.txt`"))
+        XCTAssertFalse(
+            markdown.contains("kXCTAttachmentLegacySnapshot"),
+            "Binary UI snapshots are for the HTML timeline, not for agents")
+    }
+
+    func testRepeatedPollingStepsCollapseButFailuresStay() {
+        let poll = { (start: Double) in
+            self.activity(title: "Checking existence of `Search`", start: start, children: [
+                self.activity(title: "Capturing element debug description", start: start)
+            ])
+        }
+        let activities = XCTestReport.TestActivities(
+            testIdentifier: "Suite/testFoo()",
+            testRuns: [
+                XCTestReport.TestActivityRun(activities: [
+                    activity(title: "Waiting 10.0s for Search", start: 100.0, children: [
+                        poll(101), poll(102), poll(103),
+                        activity(title: "Checking existence of `Search`", start: 104, failure: true),
+                    ])
+                ])
+            ]
+        )
+        let test = XCTestReport.TestNode(
+            name: "testFoo()", nodeType: "Test Case", nodeIdentifier: "Suite/testFoo()",
+            result: "Failed", duration: "5s", details: nil, children: nil, startTime: nil)
+
+        let (markdown, _) = makeReport().renderTestMarkdown(
+            test: test, result: "Failed", suite: "Suite", testDetails: nil,
+            testActivities: activities, attachmentsByTestIdentifier: [:],
+            primaryFailureMessage: nil, sourceLocationCandidateTexts: [],
+            bundleFileName: "test_Suite_testFoo().zip")
+
+        XCTAssertTrue(
+            markdown.contains("  - [1.000s] Checking existence of `Search` (x3, last at 3.000s)"))
+        XCTAssertEqual(
+            markdown.components(separatedBy: "Capturing element debug description").count - 1, 1)
+        XCTAssertTrue(markdown.contains("  - [FAIL] [4.000s] Checking existence of `Search`"))
     }
 
     // MARK: - Helpers

@@ -189,6 +189,7 @@ body.test-detail-page {
     top: calc(100% + 6px);
     right: 0;
     left: auto;
+    box-sizing: border-box;
     width: min(940px, calc(100vw - 20px));
     padding: 10px 12px;
     max-height: min(56vh, 560px);
@@ -1043,11 +1044,14 @@ tr.skipped {
 .attachment-preview-image,
 .attachment-preview-video,
 .attachment-preview-text,
+.attachment-preview-crash,
 .attachment-preview-frame,
 .attachment-preview-empty {
     display: none;
+    box-sizing: border-box;
     width: 100%;
     height: 100%;
+    min-width: 0;
     min-height: 320px;
 }
 
@@ -1573,6 +1577,28 @@ tr.skipped {
     opacity: 1;
     transform: translateX(0);
     transition: opacity 140ms ease, transform 140ms ease;
+}
+
+/* Keep the open inspector inside the video panel's row; long property lists scroll in place. */
+@media (min-width: 981px) {
+    .test-detail-page .video-panel {
+        grid-template-rows: minmax(0, 1fr);
+    }
+
+    .test-detail-page .hierarchy-side-panel {
+        min-height: 0;
+        max-height: 100%;
+    }
+
+    .test-detail-page .hierarchy-side-body {
+        min-height: 0;
+        overflow-y: auto;
+    }
+
+    .test-detail-page .hierarchy-inspector {
+        min-height: 96px;
+        overflow-y: auto;
+    }
 }
 
 .hierarchy-side-panel.is-collapsed .hierarchy-side-body {

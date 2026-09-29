@@ -208,6 +208,8 @@ extension XCTestReport {
             "total_items": String(items.count),
             "visible_items": String(anyFailed ? items.filter { $0.failed }.count : items.count),
             "failed_only_pressed": anyFailed ? "true" : "false",
+            // Class filtering and grouping have nothing to do with a single class.
+            "class_controls_attributes": suites.count > 1 ? "" : " hidden",
             "suite_chips_html": chips,
             "limitation_note_html": "<p class=\"sg-note\">\(htmlEscape(limitationNote))</p>",
             "suite_sections_html": suites.map(renderSnapshotGallerySuite).joined(),
@@ -245,7 +247,7 @@ extension XCTestReport {
                 changed > 0
                 ? "<span class=\"sg-badge sg-badge-changed\">Changed</span>"
                 : "<span class=\"sg-badge sg-badge-matched\">Matched</span>"
-            let percent = item.comparisons.map { $0.changedFraction }.max() ?? 0
+            let percent = item.comparisons.map { $0.overlapChangedFraction }.max() ?? 0
             meta =
                 "\(item.comparisons.count) comparison\(item.comparisons.count == 1 ? "" : "s")"
                 + (changed > 0 ? String(format: " - up to %.2f%% changed", percent * 100) : "")
@@ -256,7 +258,8 @@ extension XCTestReport {
             badge = "<span class=\"sg-badge sg-badge-failed\">Failed</span>"
             meta = "failed without snapshot images"
         } else {
-            badge = "<span class=\"sg-badge sg-badge-matched\">Matched</span>"
+            // "Matched" is reserved for image comparisons; this test has none to match.
+            badge = "<span class=\"sg-badge sg-badge-passed\">Passed</span>"
             meta = "no images - captured only on failure"
         }
 

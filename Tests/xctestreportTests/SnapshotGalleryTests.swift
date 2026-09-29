@@ -54,6 +54,60 @@ final class SnapshotGalleryTests: XCTestCase {
         XCTAssertTrue(html.contains("1 test listed without images"))
     }
 
+    func testHeaderCountsImageComparisonsAndImagelessTestsAreNotCalledMatched() throws {
+        let report = makeReport()
+        let suites = report.buildSnapshotGallerySuites(entries: [
+            makeEntry(suite: "SnapTests", test: "testChanged()", result: "Failed", comparisons: 2),
+            makeEntry(
+                suite: "SnapTests", test: "testSame()", result: "Failed", comparisons: 1,
+                changedPixels: 0),
+            makeEntry(suite: "SnapTests", test: "testPassed()", result: "Passed", comparisons: 0),
+        ])
+        let html = try report.renderSnapshotGalleryPage(
+            suites: suites, reportTitle: "MyScheme", template: try loadTemplate())
+
+        XCTAssertTrue(html.contains("Image comparisons <span class=\"stat-number\">3</span>"))
+        XCTAssertTrue(html.contains("Matched <span class=\"stat-number passed-number\">1</span>"))
+        XCTAssertTrue(html.contains("Changed <span class=\"stat-number failed-number\">2</span>"))
+        XCTAssertTrue(html.contains("Showing 2 of 3 tests"))
+        // One badge per test: the comparison-less pass is "Passed", never "Matched".
+        XCTAssertEqual(html.components(separatedBy: "sg-badge-matched\">Matched").count - 1, 1)
+        XCTAssertEqual(html.components(separatedBy: "sg-badge-passed\">Passed").count - 1, 1)
+    }
+
+    func testClassControlsAreHiddenForASingleClass() throws {
+        let report = makeReport()
+        let single = try report.renderSnapshotGalleryPage(
+            suites: report.buildSnapshotGallerySuites(entries: [
+                makeEntry(suite: "SnapTests", test: "testA()", result: "Failed", comparisons: 1)
+            ]),
+            reportTitle: "One", template: try loadTemplate())
+        XCTAssertTrue(single.contains("id=\"sg-group\" class=\"sg-toggle\" aria-pressed=\"false\" hidden>"))
+        XCTAssertTrue(single.contains("<details class=\"sg-class-filter\" hidden>"))
+
+        let multiple = try report.renderSnapshotGalleryPage(
+            suites: report.buildSnapshotGallerySuites(entries: [
+                makeEntry(suite: "SnapTests", test: "testA()", result: "Failed", comparisons: 1),
+                makeEntry(suite: "OtherTests", test: "testB()", result: "Failed", comparisons: 1),
+            ]),
+            reportTitle: "Two", template: try loadTemplate())
+        XCTAssertTrue(multiple.contains("aria-pressed=\"false\">Group by class"))
+        XCTAssertTrue(multiple.contains("<details class=\"sg-class-filter\"><summary>"))
+    }
+
+    func testEmptyFilterMessageSitsWithTheResults() throws {
+        let report = makeReport()
+        let html = try report.renderSnapshotGalleryPage(
+            suites: report.buildSnapshotGallerySuites(entries: [
+                makeEntry(suite: "SnapTests", test: "testA()", result: "Failed", comparisons: 1)
+            ]),
+            reportTitle: "One", template: try loadTemplate())
+        let main = try XCTUnwrap(
+            html.components(separatedBy: "<main class=\"sg-results\">").last?
+                .components(separatedBy: "</main>").first)
+        XCTAssertTrue(main.contains("id=\"sg-empty\""))
+    }
+
     func testFailedOnlyDefaultsOffWhenNothingFailed() throws {
         let report = makeReport()
         let suites = report.buildSnapshotGallerySuites(entries: [

@@ -58,6 +58,24 @@ final class SnapshotComparisonTests: XCTestCase {
         XCTAssertEqual(result.changedPixels, 8)
         XCTAssertEqual(result.maxChannelDelta, 255)
         XCTAssertEqual(result.boundingBoxes, [XCTestReport.SnapshotBoundingBox(x: 0, y: 2, w: 4, h: 2)])
+        XCTAssertEqual(result.overlapPixels, 8)
+        XCTAssertEqual(result.overlapChangedPixels, 0)
+        XCTAssertEqual(result.overlapMaxChannelDelta, 0)
+    }
+
+    func testOverlapMeasuresIgnoreAreaThatExistsInOnlyOneImage() {
+        let report = makeReport()
+        let expected = solidBitmap(width: 4, height: 4, color: (100, 100, 100, 255))
+        let actual = solidBitmap(width: 4, height: 5, color: (100, 100, 228, 255))
+
+        let result = report.compareSnapshotBitmaps(
+            expected: expected, actual: actual, tolerance: 0)
+
+        XCTAssertEqual(result.changedPixels, 20)
+        XCTAssertEqual(result.maxChannelDelta, 255)
+        XCTAssertEqual(result.overlapPixels, 16)
+        XCTAssertEqual(result.overlapChangedPixels, 16)
+        XCTAssertEqual(result.overlapMaxChannelDelta, 128)
     }
 
     func testToleranceSuppressesSmallChannelDifferences() {
@@ -134,6 +152,10 @@ final class SnapshotComparisonTests: XCTestCase {
         XCTAssertEqual(comparison.changedPixels, 8)
         XCTAssertEqual(comparison.totalPixels, 16)
         XCTAssertEqual(comparison.changedFraction, 0.5, accuracy: 0.000_001)
+        XCTAssertEqual(comparison.overlapPixels, 8)
+        XCTAssertEqual(comparison.overlapChangedPixels, 0)
+        XCTAssertEqual(comparison.overlapChangedFraction, 0)
+        XCTAssertEqual(comparison.tolerance, report.snapshotTolerance)
         XCTAssertTrue(comparison.failureAssociated)
         XCTAssertTrue(comparison.diffSynthesized)
 
@@ -209,6 +231,8 @@ final class SnapshotComparisonTests: XCTestCase {
                 "name", "expected", "actual", "diff", "sizeMismatch", "widthDelta", "heightDelta",
                 "changedPixels", "totalPixels", "changedFraction", "maxChannelDelta",
                 "boundingBoxes", "failureAssociated", "diffSynthesized",
+                "overlapChangedPixels", "overlapPixels", "overlapChangedFraction",
+                "overlapMaxChannelDelta", "tolerance",
             ])
         XCTAssertTrue(object["diff"] is NSNull)
         XCTAssertEqual(object["name"] as? String, "Card")
@@ -241,7 +265,11 @@ final class SnapshotComparisonTests: XCTestCase {
             maxChannelDelta: 255,
             boundingBoxes: [],
             failureAssociated: true,
-            diffSynthesized: true)
+            diffSynthesized: true,
+            overlapChangedPixels: 2,
+            overlapPixels: 8,
+            overlapChangedFraction: 0.25,
+            overlapMaxChannelDelta: 40)
 
         XCTAssertTrue(report.renderSnapshotDiffSection(comparisons: []).isEmpty)
 
@@ -250,7 +278,8 @@ final class SnapshotComparisonTests: XCTestCase {
         XCTAssertTrue(html.contains("<img src=\"../attachments/1.png\""))
         XCTAssertTrue(html.contains("<img src=\"../attachments/2.png\""))
         XCTAssertTrue(html.contains("<img src=\"../attachments/1.synth-diff.png\""))
-        XCTAssertTrue(html.contains("50.00%"))
+        XCTAssertTrue(html.contains("25.00% (2 / 8 px)"), "The fallback reports the overlap only.")
+        XCTAssertTrue(html.contains("<td data-label=\"Max channel delta (overlap)\">40</td>"))
 
         let deviceHTML = report.renderSnapshotDiffSection(
             comparisons: [comparison],

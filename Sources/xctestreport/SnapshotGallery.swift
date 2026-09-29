@@ -112,7 +112,12 @@ extension XCTestReport {
             maxChannelDelta: comparison.maxChannelDelta,
             boundingBoxes: comparison.boundingBoxes,
             failureAssociated: comparison.failureAssociated,
-            diffSynthesized: comparison.diffSynthesized)
+            diffSynthesized: comparison.diffSynthesized,
+            overlapChangedPixels: comparison.overlapChangedPixels,
+            overlapPixels: comparison.overlapPixels,
+            overlapChangedFraction: comparison.overlapChangedFraction,
+            overlapMaxChannelDelta: comparison.overlapMaxChannelDelta,
+            tolerance: comparison.tolerance)
     }
 
     // MARK: - Page

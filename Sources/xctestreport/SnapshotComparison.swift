@@ -96,11 +96,22 @@ extension XCTestReport {
         let boundingBoxes: [SnapshotBoundingBox]
         let failureAssociated: Bool
         let diffSynthesized: Bool
+        /// The same measures restricted to the area both images cover, which is what snapshot
+        /// libraries report in their failure message. The totals above also count the area
+        /// that exists in only one image as changed.
+        var overlapChangedPixels = 0
+        var overlapPixels = 0
+        var overlapChangedFraction = 0.0
+        var overlapMaxChannelDelta = 0
+        /// Per-channel tolerance the counts above were measured with.
+        var tolerance = 0
 
         enum CodingKeys: String, CodingKey {
             case name, expected, actual, diff, sizeMismatch, widthDelta, heightDelta
             case changedPixels, totalPixels, changedFraction, maxChannelDelta, boundingBoxes
             case failureAssociated, diffSynthesized
+            case overlapChangedPixels, overlapPixels, overlapChangedFraction, overlapMaxChannelDelta
+            case tolerance
         }
 
         func encode(to encoder: Encoder) throws {
@@ -120,6 +131,11 @@ extension XCTestReport {
             try container.encode(boundingBoxes, forKey: .boundingBoxes)
             try container.encode(failureAssociated, forKey: .failureAssociated)
             try container.encode(diffSynthesized, forKey: .diffSynthesized)
+            try container.encode(overlapChangedPixels, forKey: .overlapChangedPixels)
+            try container.encode(overlapPixels, forKey: .overlapPixels)
+            try container.encode(overlapChangedFraction, forKey: .overlapChangedFraction)
+            try container.encode(overlapMaxChannelDelta, forKey: .overlapMaxChannelDelta)
+            try container.encode(tolerance, forKey: .tolerance)
         }
     }
 
@@ -137,6 +153,9 @@ extension XCTestReport {
         let changedPixels: Int
         let maxChannelDelta: Int
         let boundingBoxes: [SnapshotBoundingBox]
+        var overlapChangedPixels = 0
+        var overlapPixels = 0
+        var overlapMaxChannelDelta = 0
     }
 
     var snapshotDiffEnabled: Bool { !noSnapshotDiff }
@@ -252,6 +271,9 @@ extension XCTestReport {
 
         let totalPixels = result.width * result.height
         let fraction = totalPixels > 0 ? Double(result.changedPixels) / Double(totalPixels) : 0
+        let overlapFraction =
+            result.overlapPixels > 0
+            ? Double(result.overlapChangedPixels) / Double(result.overlapPixels) : 0
         let sizeMismatch =
             expectedBitmap.width != actualBitmap.width || expectedBitmap.height != actualBitmap.height
         return SnapshotComparison(
@@ -274,7 +296,12 @@ extension XCTestReport {
             maxChannelDelta: result.maxChannelDelta,
             boundingBoxes: result.boundingBoxes,
             failureAssociated: failureAssociated,
-            diffSynthesized: diffSynthesized)
+            diffSynthesized: diffSynthesized,
+            overlapChangedPixels: result.overlapChangedPixels,
+            overlapPixels: result.overlapPixels,
+            overlapChangedFraction: (overlapFraction * 1_000_000).rounded() / 1_000_000,
+            overlapMaxChannelDelta: result.overlapMaxChannelDelta,
+            tolerance: max(0, snapshotTolerance))
     }
 
     func snapshotDeviceInfo(testDetails: TestDetails?, fallbackDevice: Device?) -> SnapshotDeviceInfo {
@@ -312,6 +339,8 @@ extension XCTestReport {
         var changed = [Bool](repeating: false, count: max(0, width * height))
         var changedPixels = 0
         var maxChannelDelta = 0
+        var overlapChangedPixels = 0
+        var overlapMaxChannelDelta = 0
         let boundedTolerance = max(0, tolerance)
 
         expected.pixels.withUnsafeBufferPointer { expectedBuffer in
@@ -339,10 +368,10 @@ extension XCTestReport {
                                     - Int(actualBuffer[actualIndex + channel]))
                             if delta > pixelDelta { pixelDelta = delta }
                         }
-                        if pixelDelta > maxChannelDelta { maxChannelDelta = pixelDelta }
+                        if pixelDelta > overlapMaxChannelDelta { overlapMaxChannelDelta = pixelDelta }
                         if pixelDelta > boundedTolerance {
                             changed[rowOffset + x] = true
-                            changedPixels += 1
+                            overlapChangedPixels += 1
                         }
                     }
                 }
@@ -353,9 +382,12 @@ extension XCTestReport {
             width: width,
             height: height,
             changed: changed,
-            changedPixels: changedPixels,
-            maxChannelDelta: maxChannelDelta,
-            boundingBoxes: snapshotBoundingBoxes(changed: changed, width: width, height: height))
+            changedPixels: changedPixels + overlapChangedPixels,
+            maxChannelDelta: max(maxChannelDelta, overlapMaxChannelDelta),
+            boundingBoxes: snapshotBoundingBoxes(changed: changed, width: width, height: height),
+            overlapChangedPixels: overlapChangedPixels,
+            overlapPixels: min(expected.width, actual.width) * min(expected.height, actual.height),
+            overlapMaxChannelDelta: overlapMaxChannelDelta)
     }
 
     /// Connected runs of changed pixels, coalesced into a small set of rectangles.

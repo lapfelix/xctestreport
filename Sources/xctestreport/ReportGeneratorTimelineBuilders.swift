@@ -180,6 +180,15 @@ extension XCTestReport {
         return trimmed.isEmpty ? rawName : trimmed
     }
 
+    /// Label shown on a timeline attachment row. Kept apart from `cleanedAttachmentLabel`, which
+    /// also keys the attachment lookup.
+    func timelineAttachmentDisplayLabel(_ rawName: String) -> String {
+        if rawName.lowercased().contains("kxctattachmentlegacydiagnosticreportdata") {
+            return "Crash report"
+        }
+        return cleanedAttachmentLabel(rawName)
+    }
+
     func isSynthesizedEventAttachmentName(_ rawName: String) -> Bool {
         let lowered = rawName.lowercased()
         return lowered.contains("synthesized event")
@@ -1533,8 +1542,7 @@ extension XCTestReport {
                 attachmentList = ""
             } else {
                 let renderedAttachments = node.attachments.map { attachment -> String in
-                    let cleanedLabel = cleanedAttachmentLabel(attachment.name)
-                    let attachmentName = htmlEscape(cleanedLabel)
+                    let attachmentName = htmlEscape(timelineAttachmentDisplayLabel(attachment.name))
                     let previewRelativePath = preferredAttachmentPreviewPath(
                         name: attachment.name, relativePath: attachment.relativePath)
                     let previewKind = attachmentPreviewKind(
@@ -1550,9 +1558,14 @@ extension XCTestReport {
                         {
                             bundle?.addAttachment(entryName: originalEntry)
                         }
-                        let sourceAttributes = mediaSourceAttributes(
+                        var sourceAttributes = mediaSourceAttributes(
                             relativePath: relativePath, attributeName: "href",
                             snapshotComparisonSources: snapshotComparisonSources, bundle: bundle)
+                        if sourceAttributes.contains("data-bundle-src") {
+                            // Unpacked by script on click; the placeholder href keeps it focusable.
+                            sourceAttributes += previewKind == "file"
+                                ? " href=\"#\"" : " href=\"#\" aria-haspopup=\"dialog\""
+                        }
                         linkOrText = """
                             <a class="timeline-attachment-link"\(sourceAttributes) target="_blank" rel="noopener" data-preview-kind="\(previewKind)" data-preview-title="\(attachmentName)" data-attachment-name="\(htmlEscape(attachmentFileName(fromRelativePath: relativePath)))">
                                 <span class="timeline-attachment-icon">\(iconLabel)</span>

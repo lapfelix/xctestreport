@@ -20,8 +20,9 @@
     png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
     heic: 'image/heic', webp: 'image/webp', bmp: 'image/bmp', tiff: 'image/tiff',
     svg: 'image/svg+xml', pdf: 'application/pdf', json: 'application/json',
-    html: 'text/html', htm: 'text/html', txt: 'text/plain', log: 'text/plain',
-    crash: 'text/plain', ips: 'text/plain', plist: 'text/plain',
+    html: 'text/html; charset=utf-8', htm: 'text/html; charset=utf-8',
+    txt: 'text/plain; charset=utf-8', log: 'text/plain; charset=utf-8',
+    crash: 'text/plain; charset=utf-8', ips: 'text/plain; charset=utf-8', plist: 'text/plain; charset=utf-8',
     mp4: 'video/mp4', mov: 'video/quicktime', m4v: 'video/x-m4v'
   };
 
@@ -393,7 +394,9 @@
   var previewText = previewModal ? previewModal.querySelector('[data-attachment-text]') : null;
   var previewFrame = previewModal ? previewModal.querySelector('[data-attachment-frame]') : null;
   var previewEmpty = previewModal ? previewModal.querySelector('[data-attachment-empty]') : null;
-  var plistPreviewRequestToken = 0;
+  var previewCrash = previewModal ? previewModal.querySelector('[data-attachment-crash]') : null;
+  var previewRequestToken = 0;
+  var previewOpener = null;
   var hierarchyOpenToggle = root.querySelector('[data-hierarchy-open]');
   var hierarchyPanel = root.querySelector('[data-hierarchy-panel]');
   var hierarchyToggle = hierarchyPanel ? hierarchyPanel.querySelector('[data-hierarchy-toggle]') : null;
@@ -870,8 +873,16 @@
     updateFromVideoTime();
   }
 
+  function isPreviewOpen() {
+    return !!(previewModal && previewModal.open);
+  }
+
+  function isCurrentPreviewRequest(requestToken) {
+    return isPreviewOpen() && requestToken === previewRequestToken;
+  }
+
   function resetAttachmentPreviewContent() {
-    plistPreviewRequestToken += 1;
+    previewRequestToken += 1;
     if (previewImage) {
       previewImage.style.display = 'none';
       previewImage.removeAttribute('src');
@@ -885,6 +896,10 @@
       previewText.style.display = 'none';
       previewText.textContent = '';
     }
+    if (previewCrash) {
+      previewCrash.style.display = 'none';
+      previewCrash.textContent = '';
+    }
     if (previewFrame) {
       previewFrame.style.display = 'none';
       previewFrame.removeAttribute('src');
@@ -892,12 +907,22 @@
     if (previewEmpty) {
       previewEmpty.style.display = 'none';
     }
+    if (previewOpen) {
+      previewOpen.removeAttribute('href');
+      previewOpen.removeAttribute('download');
+    }
   }
 
   function closeAttachmentPreview() {
-    if (!previewModal || previewModal.hidden) return;
-    previewModal.hidden = true;
+    if (!isPreviewOpen()) return;
+    previewModal.close();
+  }
+
+  function handleAttachmentPreviewClosed() {
     resetAttachmentPreviewContent();
+    var opener = previewOpener;
+    previewOpener = null;
+    if (opener && opener.isConnected) opener.focus({ preventScroll: true });
   }
 
   function setAttachmentTextPreview(message) {
@@ -925,6 +950,119 @@
     }
   }
 
+  function padEnd(value, length) {
+    var text = String(value);
+    while (text.length < length) text += ' ';
+    return text;
+  }
+
+  /// Mirrors crashReportPreview(fromIPS:) in ReportGeneratorStackTrace.swift: an .ips file is a
+  /// JSON header line followed by a JSON body.
+  function crashReportFromIPS(text) {
+    if (!text || text.charAt(0) !== '{') return null;
+    var newline = text.indexOf('\n');
+    if (newline < 0) return null;
+    var header = null;
+    var body = null;
+    try {
+      body = JSON.parse(text.slice(newline + 1));
+    } catch (error) {
+      return null;
+    }
+    if (!body || typeof body !== 'object' || !Array.isArray(body.usedImages)) return null;
+    try {
+      header = JSON.parse(text.slice(0, newline));
+    } catch (error) {}
+
+    var images = body.usedImages;
+    var threads = Array.isArray(body.threads) ? body.threads : [];
+    var faultingIndex = typeof body.faultingThread === 'number' ? body.faultingThread : null;
+    var faultingThread = faultingIndex != null && threads[faultingIndex] ? threads[faultingIndex] : null;
+    var exceptionFrames = Array.isArray(body.lastExceptionBacktrace) ? body.lastExceptionBacktrace : [];
+    var usesExceptionBacktrace = exceptionFrames.length > 0;
+    var frames = usesExceptionBacktrace
+      ? exceptionFrames
+      : (faultingThread && Array.isArray(faultingThread.frames) ? faultingThread.frames : []);
+    if (!frames.length) return null;
+
+    function location(frame) {
+      if (typeof frame.sourceFile !== 'string') return null;
+      return typeof frame.sourceLine === 'number' ? frame.sourceFile + ':' + frame.sourceLine : frame.sourceFile;
+    }
+    function frameLine(index, frame) {
+      var image = images[frame.imageIndex];
+      var imageName = image && typeof image.name === 'string' ? image.name : '???';
+      var line = padEnd(index, 4) + padEnd(imageName, 28);
+      if (typeof frame.symbol === 'string') {
+        line += ' ' + frame.symbol;
+        if (typeof frame.symbolLocation === 'number') line += ' + ' + frame.symbolLocation;
+      } else if (typeof frame.imageOffset === 'number') {
+        line += ' 0x' + frame.imageOffset.toString(16);
+      }
+      var frameLocation = location(frame);
+      if (frameLocation) line += ' (' + frameLocation + ')';
+      return line;
+    }
+
+    var lines = [];
+    var headline = typeof body.procName === 'string' ? body.procName : 'Process';
+    var bundleInfo = body.bundleInfo;
+    if (bundleInfo && typeof bundleInfo.CFBundleIdentifier === 'string') {
+      var version = typeof bundleInfo.CFBundleShortVersionString === 'string'
+        ? ' ' + bundleInfo.CFBundleShortVersionString : '';
+      headline += ' (' + bundleInfo.CFBundleIdentifier + version + ')';
+    }
+    headline += ' crashed';
+    var exception = body.exception;
+    if (exception && typeof exception.type === 'string' && exception.type) {
+      headline += ': ' + exception.type + (typeof exception.signal === 'string' ? ' (' + exception.signal + ')' : '');
+    }
+    lines.push(headline);
+    if (faultingThread && typeof faultingThread.queue === 'string') {
+      lines.push('Queue: ' + faultingThread.queue);
+    }
+    for (var siteIndex = 0; siteIndex < frames.length; siteIndex += 1) {
+      var siteLocation = location(frames[siteIndex]);
+      if (siteLocation) {
+        var siteSymbol = typeof frames[siteIndex].symbol === 'string' ? ' in ' + frames[siteIndex].symbol : '';
+        lines.push('Crash site: ' + siteLocation + siteSymbol);
+        break;
+      }
+    }
+    lines.push('');
+    lines.push(usesExceptionBacktrace
+      ? 'Last exception backtrace:'
+      : 'Crashed thread ' + (faultingIndex != null ? faultingIndex : '?') + ':');
+    frames.forEach(function(frame, index) {
+      lines.push(frameLine(index, frame || {}));
+    });
+
+    var raw = (header ? JSON.stringify(header, null, 2) + '\n\n' : '') + JSON.stringify(body, null, 2);
+    return { summary: lines.join('\n'), raw: raw };
+  }
+
+  function showCrashReportPreview(crash) {
+    if (!previewCrash) return false;
+    if (previewTitle) previewTitle.textContent = 'Crash report';
+    var summary = document.createElement('pre');
+    summary.className = 'attachment-preview-crash-summary';
+    summary.textContent = crash.summary;
+    var rawDetails = document.createElement('details');
+    rawDetails.className = 'attachment-preview-crash-raw';
+    var rawSummary = document.createElement('summary');
+    rawSummary.textContent = 'Raw report (JSON)';
+    var rawText = document.createElement('pre');
+    rawText.textContent = crash.raw;
+    rawDetails.appendChild(rawSummary);
+    rawDetails.appendChild(rawText);
+    previewCrash.textContent = '';
+    previewCrash.appendChild(summary);
+    previewCrash.appendChild(rawDetails);
+    if (previewText) previewText.style.display = 'none';
+    previewCrash.style.display = 'block';
+    return true;
+  }
+
   function loadBinaryPlistPreview(source, requestToken) {
     var bytesPromise = source.entry
       ? bundleEntryBytes(source.entry).then(function(bytes) { return bytes.buffer; })
@@ -940,7 +1078,7 @@
         return maybeDecompressGzipBuffer(buffer);
       })
       .then(function(buffer) {
-        if (!previewModal || previewModal.hidden || requestToken !== plistPreviewRequestToken) return;
+        if (!isCurrentPreviewRequest(requestToken)) return;
         var bytes = new Uint8Array(buffer);
         var isBinaryPlist = bytes.length >= 8
           && bytes[0] === 0x62
@@ -965,10 +1103,12 @@
         if (!decodedText || !decodedText.trim()) {
           throw new Error('Preview payload is empty.');
         }
+        var crash = crashReportFromIPS(decodedText);
+        if (crash && showCrashReportPreview(crash)) return;
         setAttachmentTextPreview(decodedText);
       })
       .catch(function(error) {
-        if (!previewModal || previewModal.hidden || requestToken !== plistPreviewRequestToken) return;
+        if (!isCurrentPreviewRequest(requestToken)) return;
         var message = (error && error.message) ? error.message : String(error);
         setAttachmentTextPreview('Unable to parse this binary plist preview.\n\n' + message);
       });
@@ -989,44 +1129,67 @@
     });
   }
 
+  function openBundledAttachmentInNewTab(link) {
+    var entry = link.getAttribute('data-bundle-src');
+    if (!entry) return;
+    // Opened synchronously so the click still counts as a user gesture for popup blockers.
+    var tab = window.open('', '_blank');
+    bundleEntryObjectURL(entry).then(function(objectURL) {
+      if (tab && !tab.closed) {
+        tab.opener = null;
+        tab.location.href = objectURL;
+      } else {
+        window.open(objectURL, '_blank', 'noopener');
+      }
+    }).catch(function(error) {
+      if (tab && !tab.closed) tab.close();
+      console.warn('Failed to extract bundled attachment', entry, error);
+    });
+  }
+
   function openAttachmentPreview(link) {
     if (!previewModal || !link) return false;
     var kind = link.dataset.previewKind || 'file';
     if (kind === 'file') return false;
 
     var entry = link.getAttribute('data-bundle-src');
-    var href = link.getAttribute('href');
+    var href = entry ? null : link.getAttribute('href');
     if (!entry && !href) return false;
     var source = { entry: entry, href: href };
     var title = link.dataset.previewTitle || link.textContent || 'Attachment';
     // Blob URLs carry no filename, so the original one rides along on the link.
     var fileName = link.dataset.attachmentName || '';
 
-    if (previewTitle) previewTitle.textContent = title;
     resetAttachmentPreviewContent();
+    var requestToken = previewRequestToken;
+    if (previewTitle) previewTitle.textContent = title;
 
     if (previewOpen) {
       if (entry) {
-        previewOpen.removeAttribute('href');
         bundleEntryObjectURL(entry).then(function(objectURL) {
+          if (!isCurrentPreviewRequest(requestToken)) return;
           previewOpen.href = objectURL;
           if (fileName) previewOpen.setAttribute('download', fileName);
         }).catch(function() {});
       } else {
         previewOpen.href = href;
-        previewOpen.removeAttribute('download');
       }
     }
 
+    // Late results for a closed or replaced preview are dropped. Bundle blob URLs are not revoked
+    // here: the bundle caches them per entry and hands the same URL to the next preview.
     function assignSource(element) {
       if (!entry) {
         element.src = href;
         return;
       }
       bundleEntryObjectURL(entry).then(function(objectURL) {
+        if (!isCurrentPreviewRequest(requestToken)) return;
         element.src = objectURL;
       }).catch(function(error) {
+        if (!isCurrentPreviewRequest(requestToken)) return;
         console.warn('Failed to load bundled attachment', entry, error);
+        element.style.display = 'none';
         if (previewEmpty) previewEmpty.style.display = 'flex';
       });
     }
@@ -1040,8 +1203,6 @@
     } else if ((kind === 'plist' || kind === 'text') && previewText) {
       // Text attachments are frequently gzipped plutil output or a raw binary plist, neither of
       // which an iframe can render, so they go through the same decode path as plists.
-      var requestToken = plistPreviewRequestToken + 1;
-      plistPreviewRequestToken = requestToken;
       setAttachmentTextPreview('Loading preview...');
       loadBinaryPlistPreview(source, requestToken);
     } else if (previewFrame && (kind === 'json' || kind === 'pdf' || kind === 'html')) {
@@ -1051,7 +1212,12 @@
       previewEmpty.style.display = 'flex';
     }
 
-    previewModal.hidden = false;
+    if (!previewModal.open) {
+      previewOpener = link;
+      previewModal.showModal();
+      var closeButton = previewModal.querySelector('.attachment-preview-close');
+      if (closeButton) closeButton.focus({ preventScroll: true });
+    }
     return true;
   }
 
@@ -2973,13 +3139,25 @@
 
     var attachmentLink = event.target.closest('.timeline-attachment-link[data-preview-kind]');
     if (attachmentLink) {
-      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      var isBundled = !!attachmentLink.getAttribute('data-bundle-src');
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+        // A bundled entry has no URL the browser could follow, so do what the modifier means.
+        if (isBundled) {
+          event.preventDefault();
+          if (event.altKey) {
+            downloadBundledAttachment(attachmentLink);
+          } else {
+            openBundledAttachmentInNewTab(attachmentLink);
+          }
+        }
+        return;
+      }
       if (openAttachmentPreview(attachmentLink)) {
         event.preventDefault();
         return;
       }
       // Nothing to preview, and a bundled entry has no URL for the browser to follow.
-      if (attachmentLink.getAttribute('data-bundle-src')) {
+      if (isBundled) {
         event.preventDefault();
         downloadBundledAttachment(attachmentLink);
       }
@@ -3052,6 +3230,14 @@
     updateFromVideoTime();
   });
 
+  root.addEventListener('auxclick', function(event) {
+    if (event.button !== 1) return;
+    var attachmentLink = event.target.closest('.timeline-attachment-link[data-bundle-src]');
+    if (!attachmentLink) return;
+    event.preventDefault();
+    openBundledAttachmentInNewTab(attachmentLink);
+  });
+
   root.addEventListener('dblclick', function(event) {
     var node = event.target.closest('.timeline-event[data-event-time]');
     if (!node) return;
@@ -3087,6 +3273,7 @@
         });
       }
     );
+    previewModal.addEventListener('close', handleAttachmentPreviewClosed);
   }
 
   prevButton.addEventListener('click', function() {
@@ -3268,11 +3455,7 @@
   });
 
   window.addEventListener('keydown', function(event) {
-    if (previewModal && !previewModal.hidden && event.key === 'Escape') {
-      event.preventDefault();
-      closeAttachmentPreview();
-      return;
-    }
+    if (isPreviewOpen()) return;
     if (event.key === 'Escape') {
       if (hierarchyCandidateList && hierarchyCandidateList.children.length) {
         event.preventDefault();

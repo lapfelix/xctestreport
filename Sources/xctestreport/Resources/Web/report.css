@@ -958,7 +958,7 @@ tr.skipped {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 }
 
-.attachment-preview-modal[hidden] {
+.attachment-preview-modal:not([open]) {
     display: none;
 }
 
@@ -966,8 +966,21 @@ tr.skipped {
     position: fixed;
     inset: 0;
     z-index: 1200;
+    width: auto;
+    height: auto;
+    max-width: none;
+    max-height: none;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
     display: grid;
     place-items: center;
+}
+
+.attachment-preview-modal::backdrop {
+    background: transparent;
 }
 
 .attachment-preview-backdrop {
@@ -1076,6 +1089,44 @@ tr.skipped {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
     font-size: 0.74rem;
     line-height: 1.38;
+}
+
+.attachment-preview-crash {
+    overflow: auto;
+    padding: 12px;
+    background: #F7FAFF;
+    color: #2B3951;
+}
+
+.attachment-preview-crash pre {
+    margin: 0;
+    white-space: pre;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: 0.74rem;
+    line-height: 1.45;
+}
+
+.attachment-preview-crash-summary::first-line {
+    font-weight: 700;
+}
+
+.attachment-preview-crash-raw {
+    margin-top: 14px;
+    border-top: 1px solid #E2E9F5;
+    padding-top: 10px;
+}
+
+.attachment-preview-crash-raw > summary {
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #2A4D86;
+}
+
+.attachment-preview-crash-raw > pre {
+    margin-top: 8px;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
 .attachment-preview-frame {
@@ -3050,9 +3101,18 @@ th.sortable-duration[data-sort="asc"]::after { content: " \2191"; opacity: 1; }
         background: #111827;
     }
 
-    .attachment-preview-text {
+    .attachment-preview-text,
+    .attachment-preview-crash {
         background: #0E1624;
         color: #E5EEFF;
+    }
+
+    .attachment-preview-crash-raw {
+        border-top-color: #33415A;
+    }
+
+    .attachment-preview-crash-raw > summary {
+        color: #9CC0FF;
     }
 
     .attachment-preview-empty {

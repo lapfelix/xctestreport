@@ -49,11 +49,11 @@
         </div>
     </div>
 </div>
-<div class="attachment-preview-modal" data-attachment-modal hidden>
+<dialog class="attachment-preview-modal" data-attachment-modal aria-labelledby="attachment-preview-title">
     <div class="attachment-preview-backdrop" data-attachment-close></div>
-    <div class="attachment-preview-dialog" role="dialog" aria-modal="true" aria-label="Attachment preview">
+    <div class="attachment-preview-dialog">
         <div class="attachment-preview-header">
-            <div class="attachment-preview-title" data-attachment-title>Attachment Preview</div>
+            <div class="attachment-preview-title" id="attachment-preview-title" data-attachment-title>Attachment Preview</div>
             <div class="attachment-preview-actions">
                 <a class="attachment-preview-open" data-attachment-open href="#" target="_blank" rel="noopener">Open file</a>
                 <button type="button" class="attachment-preview-close" data-attachment-close>Close</button>
@@ -63,11 +63,12 @@
             <img class="attachment-preview-image" data-attachment-image alt="">
             <video class="attachment-preview-video" data-attachment-video controls preload="metadata"></video>
             <pre class="attachment-preview-text" data-attachment-text></pre>
+            <div class="attachment-preview-crash" data-attachment-crash></div>
             <iframe class="attachment-preview-frame" data-attachment-frame title="Attachment preview"></iframe>
             <div class="attachment-preview-empty" data-attachment-empty>Preview unavailable for this attachment.</div>
         </div>
     </div>
-</div>
+</dialog>
 <script type="application/json" data-timeline-run-states data-bundle-src="{{run_states_src}}">{{run_states_json}}</script>
 <script type="application/json" data-timeline-screenshots data-bundle-src="{{screenshot_src}}">{{screenshot_json}}</script>
 <script src="../web/plist-preview.js"></script>

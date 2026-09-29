@@ -683,15 +683,15 @@ extension XCTestReport {
                 suiteSections[suite]?.append((index: -1, html:
                     """
                     <div class="suite" data-suite-name="\(htmlEscape(suite.lowercased()))" data-total-tests="\(suiteCounts.totalTests)" data-failed-tests="\(suiteCounts.failedTests)" data-percent-passed="\(suiteCounts.percentagePassed)" data-suite-duration="\(totalDuration)" data-avg-duration="\(avgDuration)"><h2 class="collapsible">
-                        <span class="suite-name">\(suite)</span>
+                        <span class="suite-name">\(htmlEscape(suite))</span>
                         <span class="suite-stats">
                             <span class="stats-number">\(suiteCounts.passedTests)/\(suiteCounts.totalTests)</span> Passed
                             <span class="stats-percent">(\(String(format: "%.1f", suiteCounts.percentagePassed))%)</span>
                             <span class="suite-duration">\(durationText)</span>
                         </span>
-                    </h2><div class="content">
+                    </h2><div class="content"><div class="content-inner">
                     <table class="data-table suite-tests-table" style="margin-top:0px">
-                    <thead><tr><th scope="col">Test Name</th><th scope="col">Status</th><th scope="col" class="sortable-duration">Duration</th></tr></thead>
+                    <thead><tr><th scope="col">Test Name</th><th scope="col">Status</th><th scope="col" class="sortable-duration" aria-sort="none"><button type="button" class="sort-duration-btn">Duration</button></th></tr></thead>
                     <tbody>
                     """))
             }
@@ -853,7 +853,7 @@ extension XCTestReport {
 
         // Close all suite sections
         for suite in groupedTests.keys {
-            suiteSections[suite]?.append((index: Int.max, html: "</tbody></table></div></div>"))
+            suiteSections[suite]?.append((index: Int.max, html: "</tbody></table></div></div></div>"))
         }
 
         var buildResultsHTML = ""

@@ -1941,7 +1941,7 @@ a:hover {
     min-width: 0;
     overflow-wrap: break-word;
     word-break: normal;
-    hyphens: auto;
+    hyphens: none;
 }
 
 .suite-stats {
@@ -1956,16 +1956,24 @@ a:hover {
     min-width: 0;
 }
 
+/* Animating grid rows between 0fr and 1fr collapses to the content's real height, so
+   long suites are never clipped the way a fixed max-height would clip them. */
 .content {
-    max-height: 2000px;
+    display: grid;
+    grid-template-rows: 1fr;
     opacity: 1;
-    transition: max-height 0.3s ease-in-out, opacity 0.2s ease-in-out;
+    transition: grid-template-rows 0.3s ease-in-out, opacity 0.2s ease-in-out, visibility 0.3s;
+}
+
+.content-inner {
+    min-height: 0;
     overflow: hidden;
 }
 
 .collapsed + .content {
-    max-height: 0;
+    grid-template-rows: 0fr;
     opacity: 0;
+    visibility: hidden;
 }
 
 .suite {
@@ -2211,9 +2219,9 @@ th.sortable-duration[data-sort="asc"]::after { content: " \2191"; opacity: 1; }
         white-space: normal;
         overflow: visible;
         text-overflow: clip;
-        overflow-wrap: break-word;
+        overflow-wrap: anywhere;
         word-break: normal;
-        hyphens: auto;
+        hyphens: none;
     }
 
     .suite-stats {
@@ -2241,6 +2249,11 @@ th.sortable-duration[data-sort="asc"]::after { content: " \2191"; opacity: 1; }
     .suite-tests-table td {
         display: block;
         width: 100%;
+    }
+
+    /* Beat the desktop column widths, which use the more specific :nth-child. */
+    .suite-tests-table td:nth-child(n) {
+        width: auto;
     }
 
     .suite-tests-table tr {
@@ -2288,9 +2301,9 @@ th.sortable-duration[data-sort="asc"]::after { content: " \2191"; opacity: 1; }
 
     .suite-tests-table td a {
         white-space: normal;
-        overflow-wrap: break-word;
+        overflow-wrap: anywhere;
         word-break: normal;
-        hyphens: auto;
+        hyphens: none;
     }
 
     .suite-tests-table td[data-label="Status"] {
@@ -2396,6 +2409,7 @@ th.sortable-duration[data-sort="asc"]::after { content: " \2191"; opacity: 1; }
         height: auto;
         min-height: 100dvh;
         grid-template-rows: auto auto auto;
+        align-content: start;
     }
 
     .test-detail-page .test-main-content {
@@ -4209,8 +4223,8 @@ input::placeholder { color: var(--report-muted); opacity: 1; }
     .report-index-page .report-counts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
     #review-failures { grid-column: 1 / -1; width: 100%; }
     .report-index-page .summary-actions .test-search { width: 100%; min-width: 0; flex-basis: 100%; }
-    .report-index-page .status-chips { display: flex; flex: 1; }
-    .report-index-page .status-chip { flex: 1; }
+    .report-index-page .status-chips { display: flex; flex: 1; flex-wrap: wrap; }
+    .report-index-page .status-chip { flex: 1; padding-left: 6px; padding-right: 6px; white-space: nowrap; }
     .report-index-page .suite-sort-options { gap: 6px; }
     .report-index-page .suite-name { white-space: normal; overflow-wrap: anywhere; }
     .test-detail-page .test-header-compact { grid-template-columns: 1fr auto; gap: 10px; }

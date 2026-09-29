@@ -3,13 +3,6 @@
   var i;
 
   for (i = 0; i < coll.length; i++) {
-    var content = coll[i].nextElementSibling;
-    if (content) {
-      content.style.display = 'block';
-    }
-  }
-
-  for (i = 0; i < coll.length; i++) {
     coll[i].tabIndex = 0;
     coll[i].setAttribute('role', 'button');
     coll[i].setAttribute('aria-expanded', 'true');

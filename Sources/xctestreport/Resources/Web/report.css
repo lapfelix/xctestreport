@@ -3562,6 +3562,22 @@ th.sortable-duration[data-sort="asc"]::after { content: " \2191"; opacity: 1; }
     font-size: 0.76rem;
 }
 
+.snapdiff-align {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.snapdiff-align-label {
+    font-size: 0.76rem;
+    font-weight: 600;
+}
+
+.snapdiff-align .snapdiff-btn {
+    padding: 4px 10px;
+    font-size: 0.78rem;
+}
+
 .snapdiff-toolbar {
     display: grid;
     gap: 8px;

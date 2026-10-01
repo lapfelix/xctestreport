@@ -132,7 +132,9 @@
         var doc = frameDocument(frame);
         frame.shellUnusable = !(doc && doc.documentElement.classList.contains('report-shell-framed'));
         if (frame !== current) { return; }
-        if (frame.shellUnusable) { navigateTo(frame, path); } else { syncTitle(); }
+        if (frame.shellUnusable) { navigateTo(frame, path); return; }
+        syncTitle();
+        preloadNeighbors(path);
       });
       layer.appendChild(frame);
       frames[path] = frame;
@@ -190,6 +192,77 @@
       window.location.replace(href);
     }
 
+    function rowLinks() {
+      return Array.prototype.slice.call(document.querySelectorAll('.suite-tests-table tbody tr td a[href]'));
+    }
+
+    function isFilteredOut(link) {
+      var row = link.closest('tr');
+      var suite = link.closest('.suite');
+      return (row && row.style.display === 'none') || (suite && suite.style.display === 'none');
+    }
+
+    // Describes the index's current filters, e.g. Failed or Flaky, "login".
+    function filterLabel() {
+      var chips = Array.prototype.map.call(document.querySelectorAll('.status-chip[aria-pressed="true"]'), function(chip) {
+        return chip.getAttribute('data-label') || chip.textContent.trim();
+      });
+      var search = document.getElementById('test-search');
+      var query = search ? search.value.trim() : '';
+      var label = chips.join(' or ');
+      if (query) { label += (label ? ', ' : '') + '\u201c' + query + '\u201d'; }
+      return label;
+    }
+
+    // The tests before and after this one, in the order and under the filters the index shows.
+    // A test the filters hide (opened from a link, say) steps through every test instead.
+    function neighbors(path) {
+      var all = rowLinks();
+      var list = all.filter(function(link) { return !isFilteredOut(link); });
+      var label = filterLabel();
+      var paths = list.map(testPath);
+      var index = paths.indexOf(path);
+      if (index < 0) {
+        list = all;
+        paths = all.map(testPath);
+        index = paths.indexOf(path);
+        label = '';
+      }
+      if (index < 0) { return null; }
+      function entry(i) {
+        if (i < 0 || i >= list.length) { return null; }
+        return { href: new URL(paths[i], window.location.href).href, path: paths[i], name: list[i].textContent.trim() };
+      }
+      return { position: index + 1, total: list.length, label: label, previous: entry(index - 1), next: entry(index + 1) };
+    }
+
+    // Waits until the page on screen has settled, so the neighbours don't compete with it.
+    var neighborTimer = null;
+    function preloadNeighbors(path) {
+      clearTimeout(neighborTimer);
+      neighborTimer = setTimeout(function() {
+        var run = function() {
+          if (!current || current !== frames[path]) { return; }
+          var nav = neighbors(path);
+          if (!nav) { return; }
+          [nav.next, nav.previous].forEach(function(entry) {
+            if (entry) { frameFor(entry.path); }
+          });
+        };
+        if (window.requestIdleCallback) { requestIdleCallback(run, { timeout: 1000 }); } else { run(); }
+      }, 600);
+    }
+
+    function markLastViewed(path) {
+      Array.prototype.forEach.call(document.querySelectorAll('tr.is-last-viewed'), function(row) {
+        row.classList.remove('is-last-viewed');
+      });
+      var link = rowLinks().filter(function(candidate) { return testPath(candidate) === path; })[0];
+      if (!link) { return; }
+      link.closest('tr').classList.add('is-last-viewed');
+      returnFocus = link;
+    }
+
     function show(path) {
       var frame = frameFor(path);
       if (frame.shellUnusable) { navigateTo(frame, path); return; }
@@ -200,6 +273,9 @@
       current = frame;
       frame.classList.add('is-active');
       activate(frame);
+      markLastViewed(path);
+      var doc = frameDocument(frame);
+      if (doc && doc.readyState === 'complete' && !frame.shellUnusable) { preloadNeighbors(path); }
       document.documentElement.classList.add('report-shell-open');
       layer.classList.add('is-open');
       syncTitle();
@@ -215,7 +291,11 @@
       document.documentElement.classList.remove('report-shell-open');
       document.title = indexTitle;
       if (returnFocus && document.contains(returnFocus)) {
+        // Stepping through tests can end far from where the list was left; bring the last one
+        // into view.
         returnFocus.focus({ preventScroll: true });
+        var row = returnFocus.closest('tr');
+        if (row) { row.scrollIntoView({ block: 'nearest' }); }
       }
     }
 
@@ -294,7 +374,6 @@
       var path = testPath(link);
       if (!path || !isPlainClick(event) || link.target) { return; }
       event.preventDefault();
-      returnFocus = link;
       open(path, { push: true });
     });
 
@@ -309,7 +388,11 @@
         var path = reportRelativePath(href, base);
         if (path) { frameFor(path); }
       },
-      close: close
+      close: close,
+      navFor: function(href, base) {
+        var path = reportRelativePath(href, base);
+        return path ? neighbors(path) : null;
+      }
     };
 
     syncWithLocation();
@@ -325,7 +408,10 @@
 
   function initFramedPage(shell) {
     document.documentElement.classList.add('report-shell-framed');
-    window.XCTestReportFrame = { activate: resumeVideos, deactivate: suspendVideos };
+    window.XCTestReportFrame = {
+      activate: function() { resumeVideos(); renderListNav(); },
+      deactivate: suspendVideos
+    };
 
     var root = indexURL(window.location.href);
 
@@ -356,12 +442,71 @@
       }
     });
 
+    // Previous/next test as the index lists them, replacing the failure-only links the page
+    // ships with (the index's Failed filter gives the same list).
+    function renderListNav() {
+      var existing = document.querySelector('.test-list-nav');
+      if (existing) { existing.remove(); }
+      var nav = shell.navFor(window.location.href, window.location.href);
+      var anchor = document.querySelector('.test-failure-nav') || document.querySelector('.test-duration-pill');
+      var hasNav = !!(nav && nav.total > 1 && anchor);
+      document.documentElement.classList.toggle('report-shell-has-list-nav', hasNav);
+      if (!hasNav) { return; }
+
+      function link(entry, rel, label, key, glyph) {
+        var element;
+        if (entry) {
+          element = document.createElement('a');
+          element.href = entry.href;
+          element.rel = rel;
+          element.title = label + ': ' + entry.name + ' (' + key + ')';
+          element.setAttribute('aria-label', element.title);
+        } else {
+          element = document.createElement('span');
+          element.className = 'is-disabled';
+          element.setAttribute('aria-hidden', 'true');
+        }
+        element.classList.add('test-failure-nav-link');
+        element.textContent = glyph;
+        return element;
+      }
+
+      var element = document.createElement('nav');
+      element.className = 'test-failure-nav test-list-nav';
+      element.setAttribute('aria-label', 'Tests');
+      var count = document.createElement('span');
+      count.className = 'test-failure-nav-count';
+      count.textContent = nav.position + ' of ' + nav.total;
+      if (nav.label) {
+        var filter = document.createElement('span');
+        filter.className = 'test-list-nav-filter';
+        filter.textContent = nav.label;
+        count.appendChild(filter);
+      }
+      count.title = nav.label ? 'Tests shown in the report: ' + nav.label : 'All tests in the report';
+      element.appendChild(link(nav.previous, 'prev', 'Previous test', 'K', '\u2039'));
+      element.appendChild(count);
+      element.appendChild(link(nav.next, 'next', 'Next test', 'J', '\u203a'));
+      anchor.insertAdjacentElement('afterend', element);
+    }
+    renderListNav();
+
+    function isTyping(target) {
+      return !!target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
+    }
+
     window.addEventListener('keydown', function(event) {
-      if (event.key !== 'Escape' || event.defaultPrevented) { return; }
-      if (document.querySelector('dialog[open]')) { return; }
-      var target = event.target;
-      if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) { return; }
-      shell.close();
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) { return; }
+      if (document.querySelector('dialog[open]') || isTyping(event.target)) { return; }
+      if (event.key === 'Escape') {
+        shell.close();
+      } else if (event.key === 'j' || event.key === 'k') {
+        var target = document.querySelector('.test-list-nav a[rel="' + (event.key === 'j' ? 'next' : 'prev') + '"]');
+        if (target) {
+          event.preventDefault();
+          target.click();
+        }
+      }
     });
   }
 })();

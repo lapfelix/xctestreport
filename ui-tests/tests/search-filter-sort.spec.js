@@ -165,3 +165,29 @@ test('suite headings can be collapsed and expanded with the keyboard', async ({p
   await page.keyboard.press('Space');
   await expect(head).toHaveAttribute('aria-expanded','true');
 });
+
+test('chips show how many tests they match', async ({ page }) => {
+  await page.goto(await reportURL());
+  await expect(page.locator('.status-chip[data-status="passed"] .status-chip-count')).toHaveText('3');
+  await expect(page.locator('.status-chip[data-status="failed"] .status-chip-count')).toHaveText('1');
+  await expect(page.locator('.status-chip[data-status="skipped"] .status-chip-count')).toHaveText('1');
+});
+
+test('slash focuses search, Escape clears it, and J/K move through visible tests', async ({ page }) => {
+  await page.goto(await reportURL());
+  await page.keyboard.press('/');
+  await expect(page.locator('#test-search')).toBeFocused();
+  await page.keyboard.type('login');
+  await expect(page.locator('.suite-tests-table tbody tr:visible')).toHaveCount(3);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#test-search')).toHaveValue('');
+  await expect(page.locator('.suite-tests-table tbody tr:visible')).toHaveCount(5);
+
+  await page.locator('.status-chip[data-status="passed"]').click();
+  await page.locator('body').press('j');
+  await expect(page.getByRole('link', { name: 'testValidLogin' })).toBeFocused();
+  await page.locator('body').press('j');
+  await expect(page.getByRole('link', { name: 'testAlpha' })).toBeFocused();
+  await page.locator('body').press('k');
+  await expect(page.getByRole('link', { name: 'testValidLogin' })).toBeFocused();
+});

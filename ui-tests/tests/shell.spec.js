@@ -10,8 +10,8 @@ function fill(template, values) {
 }
 
 function indexPage() {
-  const rows = ['Alpha', 'Beta', 'Blocked', 'Stale'].map((name) =>
-    `<tr class="failed" data-status="failed" data-duration="1"><td><a href="tests/test_${name}().html">test${name}</a></td><td>Failed</td><td>1s</td></tr>`).join('');
+  const rows = [['Alpha', 'failed'], ['Beta', 'passed'], ['Gamma', 'failed'], ['Blocked', 'failed'], ['Stale', 'failed']].map(([name, status]) =>
+    `<tr class="${status}" data-status="${status}" data-duration="1"><td><a href="tests/test_${name}().html">test${name}</a></td><td>${status}</td><td data-label="Duration">1s</td></tr>`).join('');
   return fill(fs.readFileSync(path.join(WEB_DIR, 'templates', 'index.html'), 'utf8'), {
     report_title: 'Shell',
     suite_sections_html: `<div class="suite"><h2 class="collapsible"><span class="suite-name">Suite</span></h2>` +
@@ -38,6 +38,7 @@ test.beforeAll(async () => {
     '/index.html': indexPage(),
     '/tests/test_Alpha().html': testPage('Alpha', 'Beta'),
     '/tests/test_Beta().html': testPage('Beta', 'Alpha'),
+    '/tests/test_Gamma().html': testPage('Gamma', 'Alpha'),
     '/report.md': '# report',
     '/tests/test_Blocked().html': testPage('Blocked', 'Alpha'),
     // A test page from an older report whose shell script doesn't know about framing.
@@ -100,7 +101,7 @@ test('hovering a test link preloads its page', async ({ page }) => {
 test('preloaded pages hold their videos until shown, and give them up when hidden', async ({ page }) => {
   await page.goto(baseURL + 'index.html');
   await page.getByRole('link', { name: 'testBeta' }).hover();
-  const frame = page.frameLocator('.report-shell-frame');
+  const frame = page.frameLocator('.report-shell-frame[src*="Beta"]');
   await expect(frame.locator('video')).toHaveJSProperty('preload', 'none');
   await page.getByRole('link', { name: 'testBeta' }).click();
   await expect(activeFrame(page).locator('video')).toHaveJSProperty('preload', 'metadata');
@@ -131,15 +132,54 @@ test('the browser Back button closes the test', async ({ page }) => {
   await expect(layerOpen(page)).toHaveCount(1);
 });
 
-test('failure links switch tests in place, and Back still goes to the index', async ({ page }) => {
+const listNav = (page) => activeFrame(page).locator('.test-list-nav');
+
+test('next/previous follow the index list, and Back still goes to the index', async ({ page }) => {
   await page.goto(baseURL + 'index.html');
   await page.getByRole('link', { name: 'testAlpha' }).click();
-  await activeFrame(page).locator('.test-failure-nav-link').click();
+  await expect(listNav(page).locator('.test-failure-nav-count')).toHaveText('1 of 5');
+  // The page's own failure-only links give way to the list.
+  await expect(activeFrame(page).locator('.test-failure-nav:not(.test-list-nav)')).toBeHidden();
+  await expect(listNav(page).locator('[rel="prev"]')).toHaveCount(0);
+  await listNav(page).locator('a[rel="next"]').click();
   await expect(page).toHaveURL(/#test=tests\/test_Beta\(\)\.html$/);
   await expect(activeFrame(page).locator('.test-title-compact')).toHaveText('Beta');
+  await expect(listNav(page).locator('.test-failure-nav-count')).toHaveText('2 of 5');
   await page.goBack();
   await expect(layerOpen(page)).toHaveCount(0);
   await expect(page).toHaveURL(/index\.html$/);
+});
+
+test('next/previous respect the index filters, and J/K step through them', async ({ page }) => {
+  await page.goto(baseURL + 'index.html');
+  await page.locator('.status-chip[data-status="failed"]').click();
+  await page.getByRole('link', { name: 'testAlpha' }).click();
+  await expect(listNav(page).locator('.test-failure-nav-count')).toHaveText('1 of 4Failed');
+  await expect(listNav(page).locator('.test-list-nav-filter')).toHaveText('Failed');
+  await activeFrame(page).locator('body').press('j');
+  // Beta passed, so the Failed filter skips it.
+  await expect(activeFrame(page).locator('.test-title-compact')).toHaveText('Gamma');
+  await activeFrame(page).locator('body').press('k');
+  await expect(activeFrame(page).locator('.test-title-compact')).toHaveText('Alpha');
+});
+
+test('neighbouring tests preload, and the index marks the last test viewed', async ({ page }) => {
+  await page.goto(baseURL + 'index.html');
+  await page.getByRole('link', { name: 'testBeta' }).click();
+  await expect(page.locator('.report-shell-frame[src*="Alpha"]')).toHaveCount(1);
+  await expect(page.locator('.report-shell-frame[src*="Gamma"]')).toHaveCount(1);
+  await activeFrame(page).locator('body').press('j');
+  await expect(activeFrame(page).locator('.test-title-compact')).toHaveText('Gamma');
+  await activeFrame(page).locator('body').press('Escape');
+  await expect(page.locator('tr.is-last-viewed')).toHaveCount(1);
+  await expect(page.locator('tr.is-last-viewed')).toContainText('testGamma');
+  await expect(page.getByRole('link', { name: 'testGamma' })).toBeFocused();
+});
+
+test('clicking anywhere on a row opens its test', async ({ page }) => {
+  await page.goto(baseURL + 'index.html');
+  await page.locator('tr', { hasText: 'testGamma' }).locator('td[data-label="Duration"]').click();
+  await expect(activeFrame(page).locator('.test-title-compact')).toHaveText('Gamma');
 });
 
 test('a #test= link opens that test directly, and Escape closes it', async ({ page }) => {

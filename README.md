@@ -104,6 +104,11 @@ and scroll intact. The address becomes `index.html#test=tests/<page>.html`, whic
 Every test page is still a standalone file, so direct links and plain static hosting work
 unchanged. Modifier-clicks open a new tab as usual.
 
+Inside a test, the ‹ › arrows in the header (or J and K) step to the previous and next test in the
+order the index shows, under its current search and Show only filters, and the neighbouring tests
+load in the background. Back returns to the index with the last test viewed marked. On the index,
+/ focuses the search and J and K move through the tests on screen.
+
 Add a header note (shown under the title), handy in CI to label the run:
 
 ```bash

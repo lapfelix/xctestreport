@@ -4486,3 +4486,59 @@ body.test-detail-page { background: var(--report-bg); }
 }
 .report-shell-layer.is-open .report-shell-frame.is-active { visibility: visible; }
 html.report-shell-open, html.report-shell-open body { overflow: hidden; }
+
+/* Index polish: chip counts, clickable rows, the last test viewed. */
+.report-index-page .status-chip-count {
+    margin-left: 6px;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.7;
+}
+.report-index-page .status-chip.is-empty:not([aria-pressed="true"]) { opacity: 0.55; }
+.report-index-page .suite-tests-table tbody tr { cursor: pointer; }
+.report-index-page .suite-tests-table tbody tr:hover td { background: var(--report-soft); }
+.report-index-page .suite-tests-table tbody tr.is-last-viewed td:first-child {
+    box-shadow: inset 3px 0 0 var(--report-accent);
+}
+
+/* Previous/next test as the index lists them (report-shell.js). */
+.report-shell-has-list-nav .test-failure-nav:not(.test-list-nav) { display: none; }
+.test-list-nav .test-failure-nav-count { display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.test-list-nav-filter {
+    max-width: 16em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 12px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--report-soft);
+}
+
+/* Phones: one compact card per test (name, then status and duration) instead of three
+   labelled blocks. */
+@media (max-width: 767px) {
+    /* Collapsed table borders would swallow the row padding. */
+    .report-index-page .suite-tests-table { display: block; border-collapse: separate; padding: 0 8px 4px; box-sizing: border-box; }
+    .report-index-page .suite-tests-table tr {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 4px 12px;
+        padding: 10px 12px;
+        width: auto;
+        box-sizing: border-box;
+    }
+    .report-index-page .suite-tests-table td,
+    .report-index-page .suite-tests-table td:last-child {
+        padding: 0;
+        border: 0;
+        background: transparent;
+    }
+    .report-index-page .suite-tests-table tbody tr:hover td { background: transparent; }
+    .report-index-page .suite-tests-table td::before { display: none; }
+    .report-index-page .suite-tests-table td:first-child { grid-column: 1 / -1; font-weight: 500; }
+    .report-index-page .suite-tests-table td[data-label="Status"] { font-size: 13px; }
+    .report-index-page .suite-tests-table td[data-label="Duration"] { font-size: 13px; text-align: right; }
+    .report-index-page .suite-tests-table tbody tr.is-last-viewed td:first-child { box-shadow: none; }
+    .report-index-page .suite-tests-table tbody tr.is-last-viewed { box-shadow: inset 3px 0 0 var(--report-accent); }
+    .test-list-nav-filter { max-width: 9em; }
+}

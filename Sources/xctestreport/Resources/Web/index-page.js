@@ -269,6 +269,75 @@
     container.appendChild(details);
   })();
 
+  // Each chip shows how many tests it would match.
+  chips.forEach(function(chip) {
+    var selector = chip.hasAttribute('data-status')
+      ? 'tr[data-status="' + chip.getAttribute('data-status') + '"]'
+      : 'tr[data-flaky="true"]';
+    var count = document.querySelectorAll('.suite-tests-table tbody ' + selector).length;
+    chip.setAttribute('data-label', chip.textContent.trim());
+    var badge = document.createElement('span');
+    badge.className = 'status-chip-count';
+    badge.textContent = String(count);
+    chip.appendChild(badge);
+    chip.classList.toggle('is-empty', count === 0);
+  });
+
+  // The whole row opens its test, not just the name.
+  Array.prototype.forEach.call(document.querySelectorAll('.suite-tests-table tbody'), function(tbody) {
+    tbody.addEventListener('click', function(event) {
+      if (event.defaultPrevented || event.button !== 0) { return; }
+      if (event.target.closest('a, button, input, summary')) { return; }
+      if (String(window.getSelection ? window.getSelection() : '') !== '') { return; }
+      var row = event.target.closest('tr');
+      var link = row && row.querySelector('td a[href]');
+      if (!link) { return; }
+      if (event.metaKey || event.ctrlKey) {
+        window.open(link.href, '_blank');
+      } else {
+        link.click();
+      }
+    });
+  });
+
+  // Keyboard: / searches, J/K move through the tests on screen.
+  function visibleTestLinks() {
+    return Array.prototype.filter.call(document.querySelectorAll('.suite-tests-table tbody tr td a[href]'), function(link) {
+      return link.offsetParent !== null;
+    });
+  }
+
+  document.addEventListener('keydown', function(event) {
+    if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) { return; }
+    var target = event.target;
+    var typing = !!target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
+    if (typing) {
+      if (event.key === 'Escape' && target === searchInput && searchInput.value !== '') {
+        searchInput.value = '';
+        applyFilter();
+      }
+      return;
+    }
+    if (event.key === '/' && searchInput) {
+      event.preventDefault();
+      searchInput.focus();
+      searchInput.select();
+    } else if (event.key === 'j' || event.key === 'k') {
+      var links = visibleTestLinks();
+      if (links.length === 0) { return; }
+      event.preventDefault();
+      var index = links.indexOf(document.activeElement);
+      if (index < 0) {
+        var last = document.querySelector('tr.is-last-viewed td a[href]');
+        index = last ? links.indexOf(last) : -1;
+        if (index < 0) { index = event.key === 'j' ? -1 : links.length; }
+      }
+      index = Math.max(0, Math.min(links.length - 1, index + (event.key === 'j' ? 1 : -1)));
+      links[index].focus();
+      links[index].closest('tr').scrollIntoView({ block: 'nearest' });
+    }
+  });
+
   // Mirrors formatCompactDuration in ReportIndexHelpers.swift.
   function formatDuration(seconds) {
     if (!(seconds > 0) || !isFinite(seconds)) { return '0s'; }

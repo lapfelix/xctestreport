@@ -41,6 +41,8 @@ extension XCTestReport {
         try copyWebAsset(
             named: "report-shell", withExtension: "js", subdirectory: "Web", to: directory)
         try copyWebAsset(
+            named: "notes", withExtension: "js", subdirectory: "Web", to: directory)
+        try copyWebAsset(
             named: "bundle-reader", withExtension: "js", subdirectory: "Web", to: directory)
         try copyWebAsset(
             named: "plist-preview", withExtension: "js", subdirectory: "Web", to: directory)

@@ -7,7 +7,7 @@
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="web/report.css">
 </head>
-<body class="report-index-page">
+<body class="report-index-page"{{notes_body_attributes}}>
 <header class="report-heading"><span class="report-brand">xctestreport</span><h1>Test results <span>{{report_title}}</span></h1>
 {{header_note_html}}
 <nav class="report-nav"><a href="index.html" aria-current="page">Test results</a>{{snapshot_gallery_nav_html}}<a href="report.md">Markdown</a></nav></header>
@@ -49,6 +49,7 @@
 {{suite_sections_html}}
 <p role="status" id="no-match" class="no-match" style="display:none">No tests match.</p>
 <script src="web/index-page.js"></script>
+{{notes_script_html}}
 <script src="web/report-shell.js"></script>
 </body>
 </html>

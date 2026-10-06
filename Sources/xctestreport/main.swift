@@ -68,6 +68,12 @@ struct XCTestReport: ParsableCommand {
     )
     var snapshotTolerance: Int = 12
 
+    @Flag(
+        name: .customLong("no-notes"),
+        help: "Leave out the review-notes panel (included by default). Notes are saved only in the viewer's browser."
+    )
+    var noNotes: Bool = false
+
     struct RuntimeError: Error {
         let message: String
     }

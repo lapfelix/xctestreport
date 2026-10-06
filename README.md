@@ -7,6 +7,8 @@ Generate static HTML reports from XCTest `.xcresult` bundles.
 - Search box, "Show only" chips (passed, failed, skipped, flaky; combine to see several), and Duration-column sort
   on the main page, plus a collapsible "Slowest tests" section.
 - Optional custom header note under the title (`--header-note`), e.g. the branch under test.
+- Review notes on tests and suites, optionally pinned to a moment in the recording, copied in
+  one go for an agent (see [Review notes](#review-notes)).
 - Writes an agent/LLM-readable `report.md`, a failures-only `failures.md`, and per-test Markdown (see below).
 - Renders timeline + scrubber + media previews for test activities.
 - Exports attachments and supports video, image, text, and plist preview flows.
@@ -47,6 +49,25 @@ hosted remotely. Point an agent at `report.md` and let it follow the links.
 The Markdown is ASCII-only (typographic punctuation is folded, anything else becomes
 `?`), so it never mojibakes when a host serves `.md` as non-UTF-8 `text/plain`.
 
+## Review notes
+
+For handing a reviewed run to an agent. On a test page, the note button in the header
+opens a small notes panel. Each note can carry the current playback time and the step
+running at that moment (the "Add current time" box, on by default), and clicking that
+time later jumps the video and timeline back to it. A test can have several notes. On
+the index, hovering a suite heading shows the same button for notes on the whole
+suite, and tests with notes get a small note icon.
+
+Once there's a note, **Copy all notes** appears in the index toolbar. It copies every
+note as Markdown, grouped by suite and test, with absolute links to each test's page,
+its `agent-tests.md` section and its bundle (`test.md`, video, screenshots), so an
+agent can follow up from the notes alone. Its menu also copies JSON or downloads
+either format.
+
+Notes are saved only in the viewer's browser (`localStorage`), keyed per report, so
+reports hosted side by side don't share notes, and regenerating the same `.xcresult`
+keeps them. They're never uploaded. `--no-notes` leaves the feature out.
+
 ## Requirements
 - macOS with Xcode command-line tools (`xcrun xcresulttool`).
 - Swift 5.5+ (SwiftPM build).
@@ -63,7 +84,7 @@ cp .build/release/xctestreport /usr/local/bin/xctestreport
 
 ## CLI
 ```bash
-USAGE: xctestreport <xcresult-path> <output-dir> [--compress-video] [--video-height <video-height>] [--header-note <header-note>] [--keep-loose-attachments] [--no-snapshot-diff] [--snapshot-tolerance <snapshot-tolerance>]
+USAGE: xctestreport <xcresult-path> <output-dir> [--compress-video] [--video-height <video-height>] [--header-note <header-note>] [--keep-loose-attachments] [--no-snapshot-diff] [--snapshot-tolerance <snapshot-tolerance>] [--no-notes]
 
 ARGUMENTS:
   <xcresult-path>         Path to the .xcresult file.
@@ -83,6 +104,7 @@ OPTIONS:
   --snapshot-tolerance <n>
                           Per-channel tolerance (0-255) below which a snapshot
                           pixel counts as unchanged. Default: 12.
+  --no-notes              Leave out the review-notes panel (included by default).
   -h, --help              Show help information.
 ```
 
@@ -217,6 +239,7 @@ no browser can decode zstd natively. The archive always holds bytes the page can
 - CSS: `Sources/xctestreport/Resources/Web/report.css`
 - JS: `Sources/xctestreport/Resources/Web/index-page.js`
 - JS: `Sources/xctestreport/Resources/Web/report-shell.js` (opens test pages over the index)
+- JS: `Sources/xctestreport/Resources/Web/notes.js` (review notes and their export)
 - JS: `Sources/xctestreport/Resources/Web/bundle-reader.js`
 - JS: `Sources/xctestreport/Resources/Web/timeline-view.js`
 - JS: `Sources/xctestreport/Resources/Web/plist-preview.js`

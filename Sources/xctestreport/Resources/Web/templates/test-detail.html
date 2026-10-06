@@ -8,7 +8,7 @@
 <link rel="stylesheet" href="../web/report.css">
 <script src="../web/bundle-reader.js"></script>
 </head>
-<body class="test-detail-page" data-report-bundle="{{bundle_src}}">
+<body class="test-detail-page" data-report-bundle="{{bundle_src}}"{{notes_body_attributes}}>
 <div class="test-detail-shell">
     <header class="test-header-compact">
         <a class="test-back-link" href="../index.html" aria-label="Back to report index">
@@ -33,6 +33,7 @@
     </main>
 </div>
 <script src="../web/snapshot-diff.js" defer></script>
+{{notes_script_html}}
 <script src="../web/report-shell.js" defer></script>
 </body>
 </html>

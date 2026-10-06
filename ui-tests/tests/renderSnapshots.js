@@ -59,6 +59,8 @@ function renderSnapshotDetail() {
     failure_nav_html: '<nav class="test-failure-nav" aria-label="Failed tests"><a class="test-failure-nav-link" rel="prev" href="detail.html" title="Previous failure: testPinButtonUnpinned()" aria-label="Previous failure: testPinButtonUnpinned()">&lsaquo;</a><span class="test-failure-nav-count">Failure 2 of 2</span><span class="test-failure-nav-link is-disabled" aria-hidden="true">&rsaquo;</span></nav>',
     timeline_and_video_section_html: '',
     bundle_src: 'detail.zip',
+    notes_body_attributes: '',
+    notes_script_html: '',
     snapshot_diff_html: `<section class="snapshot-diffs" data-snapshot-device="${encodeURIComponent(JSON.stringify(source[5].device))}" data-snapshot-comparisons="${encodeURIComponent(JSON.stringify([comparison]))}"></section>`
   };
   let html = fs.readFileSync(path.join(web, 'templates/test-detail.html'), 'utf8');

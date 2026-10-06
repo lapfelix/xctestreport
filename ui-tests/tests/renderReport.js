@@ -103,6 +103,8 @@ function renderReport(opts = {}) {
     suite_sections_html: suites.map(suiteSection).join('\n'),
     snapshot_gallery_link_html: opts.snapshotGalleryLinkHTML || '',
     snapshot_gallery_nav_html: opts.snapshotGalleryLinkHTML ? '<a href="snapshots.html">Snapshots</a>' : '',
+    notes_body_attributes: '',
+    notes_script_html: '',
   };
 
   let html = fs.readFileSync(TEMPLATE_PATH, 'utf8');

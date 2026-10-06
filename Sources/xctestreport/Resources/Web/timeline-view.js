@@ -3589,5 +3589,63 @@
     initializeTimelineFromCurrentData();
   }
 
+  // Titles from the outermost step down to the event's own row.
+  function eventTitlePath(eventId) {
+    var titles = [];
+    var node = eventNodeForId(eventId);
+    var item = node ? node.closest('li.timeline-node') : null;
+    while (item) {
+      var title = item.querySelector('.timeline-event .timeline-title');
+      if (title) titles.unshift(title.textContent.trim());
+      item = item.parentElement ? item.parentElement.closest('li.timeline-node') : null;
+    }
+    return titles;
+  }
+
+  // Used by notes.js to stamp notes with the playhead and to jump back to them.
+  window.XCTestReportTimeline = {
+    current: function() {
+      var video = getActiveVideo();
+      var offset = video
+        ? (scrubPreviewActive ? scrubPreviewTime : Number(video.currentTime || 0))
+        : (virtualCurrentTime || 0);
+      var absoluteTime = currentAbsoluteTime();
+      var index = activeEventIndex >= 0 && activeEventIndex < events.length
+        ? activeEventIndex
+        : eventIndexForAbsoluteTime(absoluteTime);
+      var event = index >= 0 ? events[index] : null;
+      var path = event ? eventTitlePath(event.id) : [];
+      var option = runSelector && runStates.length > 1 ? runSelector.options[activeRunIndex] : null;
+      return {
+        seconds: offset,
+        label: formatSeconds(offset),
+        absoluteTime: absoluteTime,
+        run: activeRunIndex,
+        runLabel: option ? option.textContent.trim() : '',
+        eventId: event ? event.id : null,
+        step: event ? (path[path.length - 1] || event.title || '') : '',
+        section: path.length > 1 ? path[0] : ''
+      };
+    },
+    seek: function(target) {
+      if (!target) return;
+      var run = Number(target.run) || 0;
+      if (run !== activeRunIndex && run < runStates.length) {
+        stopTouchAnimation();
+        stopVirtualPlayback();
+        if (runSelector) runSelector.value = String(run);
+        applyRunState(run, false);
+      }
+      var index = eventIndexById(target.eventId);
+      if (index >= 0) {
+        jumpToEventByIndex(index, true, target.absoluteTime);
+      } else if (Number.isFinite(Number(target.absoluteTime))) {
+        setAbsoluteTime(Number(target.absoluteTime));
+        scrubPreviewActive = false;
+        updateFromVideoTime();
+      }
+    }
+  };
+
   refreshLayoutSplitterState();
 })();

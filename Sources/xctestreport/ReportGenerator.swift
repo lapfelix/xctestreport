@@ -244,6 +244,8 @@ extension XCTestReport {
             return "Unknown Suite"
         }
         let testDetailTemplate = webTemplates.testDetailTemplate
+        let reviewNotesReportID = Self.reviewNotesReportID(
+            title: summary.title, startTime: summary.startTime, finishTime: summary.finishTime)
         let indexTemplate = webTemplates.indexTemplate
         let timelineTemplate = webTemplates.timelineSectionTemplate
         let failureNavigationByPage = Self.failureNavigation(for: allTests)
@@ -550,6 +552,14 @@ extension XCTestReport {
                                 "timeline_and_video_section_html": timelineAndVideoSection,
                                 "snapshot_diff_html": snapshotDiffHtml,
                                 "bundle_src": htmlEscape(bundleFileName),
+                                "notes_body_attributes": self.reviewNotesBodyAttributes(
+                                    reportID: reviewNotesReportID, reportRoot: "../",
+                                    extra: [
+                                        ("data-test-id", test.nodeIdentifier ?? test.name),
+                                        ("data-test-name", test.name),
+                                        ("data-test-suite", suiteName),
+                                    ]),
+                                "notes_script_html": self.reviewNotesScriptHTML(webDirectory: "../web"),
                             ],
                             templateName: "test-detail.html")
                     } catch {
@@ -662,12 +672,13 @@ extension XCTestReport {
             let durationText = formatCompactDuration(totalDuration)
 
             let avgDuration = totalDuration / Double(max(tests.count, 1))
+            let suiteNotesAttribute = reviewNotesEnabled ? " data-suite=\"\(htmlEscape(suite))\"" : ""
 
             suiteHTMLQueue.sync {
                 suiteSections[suite] = []
                 suiteSections[suite]?.append((index: -1, html:
                     """
-                    <div class="suite" data-suite-name="\(htmlEscape(suite.lowercased()))" data-total-tests="\(suiteCounts.totalTests)" data-failed-tests="\(suiteCounts.failedTests)" data-percent-passed="\(suiteCounts.percentagePassed)" data-suite-duration="\(totalDuration)" data-avg-duration="\(avgDuration)"><h2 class="collapsible">
+                    <div class="suite" data-suite-name="\(htmlEscape(suite.lowercased()))"\(suiteNotesAttribute) data-total-tests="\(suiteCounts.totalTests)" data-failed-tests="\(suiteCounts.failedTests)" data-percent-passed="\(suiteCounts.percentagePassed)" data-suite-duration="\(totalDuration)" data-avg-duration="\(avgDuration)"><h2 class="collapsible">
                         <span class="suite-name">\(htmlEscape(suite))</span>
                         <span class="suite-stats">
                             <span class="stats-number">\(suiteCounts.passedTests)/\(suiteCounts.totalTests)</span> Passed
@@ -747,8 +758,11 @@ extension XCTestReport {
 
                     let durationSeconds = parseDuration(duration) ?? 0
                     let flakyAttribute = isFlaky ? " data-flaky=\"true\"" : ""
+                    let notesAttributes = self.reviewNotesEnabled
+                        ? " data-test-id=\"\(htmlEscape(test.nodeIdentifier ?? test.name))\" data-md=\"\(htmlEscape(self.agentMarkdownAnchorLink(identifier: test.nodeIdentifier, name: test.name)))\""
+                        : ""
                     let testRow =
-                        "<tr\(rowClass) data-status=\"\(statusClass)\"\(flakyAttribute) data-duration=\"\(durationSeconds)\"><td data-label=\"Test Name\"><a href=\"\(escapedPageName)\">\(escapedTestName)</a></td><td data-label=\"Status\" class=\"\(statusClass)\">\(escapedResult)\(statusEmoji)</td><td data-label=\"Duration\">\(htmlEscape(formatCompactDuration(durationSeconds)))</td></tr>"
+                        "<tr\(rowClass) data-status=\"\(statusClass)\"\(flakyAttribute)\(notesAttributes) data-duration=\"\(durationSeconds)\"><td data-label=\"Test Name\"><a href=\"\(escapedPageName)\">\(escapedTestName)</a></td><td data-label=\"Status\" class=\"\(statusClass)\">\(escapedResult)\(statusEmoji)</td><td data-label=\"Duration\">\(htmlEscape(formatCompactDuration(durationSeconds)))</td></tr>"
 
                     suiteHTMLQueue.sync {
                         suiteSections[suite]?.append((index: testIndex, html: testRow))
@@ -908,6 +922,9 @@ extension XCTestReport {
                 "snapshot_gallery_link_html": snapshotGalleryIndexLinkHTML,
                 "snapshot_gallery_nav_html": snapshotGalleryIndexLinkHTML.isEmpty
                     ? "" : "<a href=\"\(snapshotGalleryFileName)\">Snapshots</a>",
+                "notes_body_attributes": reviewNotesBodyAttributes(
+                    reportID: reviewNotesReportID, reportRoot: "./"),
+                "notes_script_html": reviewNotesScriptHTML(webDirectory: "web"),
             ],
             templateName: "index.html")
 

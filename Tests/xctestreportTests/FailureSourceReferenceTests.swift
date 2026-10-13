@@ -21,7 +21,7 @@ final class FailureSourceReferenceTests: XCTestCase {
         XCTAssertEqual(runs.first?.children?.first?.children?.first?.children?.first?
             .sourceLocation?.lineNumber, 114)
 
-        let html = XCTestReport().renderSourceReferenceSection(
+        let html = makeTestReport().renderSourceReferenceSection(
             from: runs, testIdentifierURL: nil)
         XCTAssertTrue(html.contains("<li><code>/src/A&amp;B Tests.swift:114</code></li>"), html)
         XCTAssertFalse(html.contains("<li><code></code></li>"), html)
@@ -38,7 +38,7 @@ final class FailureSourceReferenceTests: XCTestCase {
             ]}]
             """)
         XCTAssertEqual(
-            XCTestReport().renderSourceReferenceSection(from: runs, testIdentifierURL: nil), "")
+            makeTestReport().renderSourceReferenceSection(from: runs, testIdentifierURL: nil), "")
     }
 
     func testNamedReferenceKeepsNameAndShowsExplicitLocation() throws {
@@ -51,7 +51,7 @@ final class FailureSourceReferenceTests: XCTestCase {
               ]}
             ]}]
             """)
-        let html = XCTestReport().renderSourceReferenceSection(from: runs, testIdentifierURL: nil)
+        let html = makeTestReport().renderSourceReferenceSection(from: runs, testIdentifierURL: nil)
         XCTAssertTrue(
             html.contains("<li><code>MyTests.testA()</code><br><code>/src/MyTests.swift:7</code></li>"),
             html)

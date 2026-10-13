@@ -5,7 +5,7 @@ import XCTest
 
 final class ScreenshotSourcesTests: XCTestCase {
     func testRepeatedScreenshotNamesResolveByPayloadAcrossRetries() {
-        let report = XCTestReport()
+        let report = makeTestReport()
         let activities = XCTestReport.TestActivities(testIdentifier: "Suite/test()", testRuns: [
             run(start: 100, payload: "first"), run(start: 200, payload: "second")
         ])
@@ -21,7 +21,7 @@ final class ScreenshotSourcesTests: XCTestCase {
     }
 
     func testManifestTimestampIsPreservedWhenNoPayloadMatchExists() {
-        let report = XCTestReport()
+        let report = makeTestReport()
         let sources = report.buildScreenshotSources(
             for: "Suite/test()",
             activities: XCTestReport.TestActivities(testIdentifier: "Suite/test()", testRuns: [
@@ -39,7 +39,7 @@ final class ScreenshotSourcesTests: XCTestCase {
             title: "Take screenshot", startTime: 100, isAssociatedWithFailure: false,
             attachments: [XCTestReport.TestActivityAttachment(name: "Screenshot", timestamp: nil, payloadId: "shared")],
             childActivities: nil, failureBranchStyle: nil)])
-        let sources = XCTestReport().buildScreenshotSources(
+        let sources = makeTestReport().buildScreenshotSources(
             for: "Suite/test()",
             activities: XCTestReport.TestActivities(testIdentifier: "Suite/test()", testRuns: [
                 untimed, run(start: 200, payload: "shared")
@@ -50,7 +50,7 @@ final class ScreenshotSourcesTests: XCTestCase {
     }
 
     func testBundledTimelineKeepsOnlyOneFullPayload() throws {
-        let report = XCTestReport()
+        let report = makeTestReport()
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
         let template = try String(contentsOf: root.appendingPathComponent(

@@ -98,7 +98,7 @@ final class TestDetailsIndexTests: XCTestCase {
     // MARK: - Helpers
 
     private func makeReport() -> XCTestReport {
-        var report = XCTestReport()
+        var report = makeTestReport()
         report.xcresultPath = ""
         report.outputDir = NSTemporaryDirectory()
         return report

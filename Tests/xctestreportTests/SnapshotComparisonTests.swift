@@ -522,7 +522,7 @@ final class SnapshotComparisonTests: XCTestCase {
     // MARK: - Helpers
 
     private func makeReport(outputDir: String = NSTemporaryDirectory()) -> XCTestReport {
-        var report = XCTestReport()
+        var report = makeTestReport()
         report.xcresultPath = ""
         report.outputDir = outputDir
         // ArgumentParser property wrappers only hold a value once parsed or assigned.

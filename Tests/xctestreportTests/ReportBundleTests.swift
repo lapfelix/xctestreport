@@ -6,7 +6,7 @@ import XCTest
 final class ReportBundleTests: XCTestCase {
 
     private func makeReport(outputDir: String = NSTemporaryDirectory()) -> XCTestReport {
-        var report = XCTestReport()
+        var report = makeTestReport()
         report.xcresultPath = ""
         report.outputDir = outputDir
         report.noSnapshotDiff = false

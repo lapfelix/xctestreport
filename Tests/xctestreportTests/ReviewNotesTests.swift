@@ -11,7 +11,7 @@ final class ReviewNotesTests: XCTestCase {
     }
 
     func testPagesCarryEscapedNotesAttributesAndScript() {
-        var report = XCTestReport()
+        var report = makeTestReport()
         report.noNotes = false
         XCTAssertEqual(
             report.reviewNotesBodyAttributes(
@@ -23,7 +23,7 @@ final class ReviewNotesTests: XCTestCase {
     }
 
     func testNoNotesLeavesPagesUntouched() {
-        var report = XCTestReport()
+        var report = makeTestReport()
         report.noNotes = true
         XCTAssertEqual(report.reviewNotesBodyAttributes(reportID: "abc", reportRoot: "./"), "")
         XCTAssertEqual(report.reviewNotesScriptHTML(webDirectory: "web"), "")

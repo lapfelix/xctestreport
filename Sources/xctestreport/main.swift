@@ -74,7 +74,7 @@ struct XCTestReport: ParsableCommand {
     var noNotes: Bool = false
 
     @Option(name: .customLong("baseline"), help: "Compare against this report directory instead of automatically selecting a previous run.")
-    var baseline: String? = nil
+    var baseline: String?
 
     // The final destination is retained while generation writes into a sibling staging directory.
     var generationOriginalOutputDir: String?

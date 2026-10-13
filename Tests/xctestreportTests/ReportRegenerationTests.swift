@@ -147,7 +147,7 @@ final class ReportRegenerationTests: XCTestCase {
     }
 
     private func makeReport(output: URL) -> XCTestReport {
-        var report = XCTestReport()
+        var report = makeTestReport()
         report.xcresultPath = output.appendingPathComponent("nonexistent.xcresult").path
         report.outputDir = output.path
         return report

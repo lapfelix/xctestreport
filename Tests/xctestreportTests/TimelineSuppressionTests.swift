@@ -119,7 +119,7 @@ final class TimelineSuppressionTests: XCTestCase {
     // MARK: - Helpers
 
     private func makeReport() -> XCTestReport {
-        var report = XCTestReport()
+        var report = makeTestReport()
         report.xcresultPath = ""
         report.outputDir = NSTemporaryDirectory()
         report.noSnapshotDiff = false

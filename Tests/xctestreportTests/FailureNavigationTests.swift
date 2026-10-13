@@ -33,7 +33,7 @@ final class FailureNavigationTests: XCTestCase {
     }
 
     func testRenderedLinksAreEscapedAndOmittedForASingleFailure() {
-        let report = XCTestReport()
+        let report = makeTestReport()
         let single = XCTestReport.failureNavigation(for: [node("A/testA()", result: "Failed")])
         XCTAssertEqual(report.renderFailureNavigation(single[XCTestReport.testPageName(for: node("A/testA()", result: "Failed"))]), "")
 

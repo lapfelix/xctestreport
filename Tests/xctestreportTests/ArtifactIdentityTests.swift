@@ -23,7 +23,7 @@ final class ArtifactIdentityTests: XCTestCase {
     }
 
     func testGalleryAnchorsDistinguishPunctuationAndFullTestIdentity() {
-        let report = XCTestReport()
+        let report = makeTestReport()
         let first = report.snapshotGalleryComparisonElementID(
             suite: "Suite", testName: "test()", comparisonName: "Card_light", identifier: "A/Suite/test()")
         let second = report.snapshotGalleryComparisonElementID(
@@ -36,7 +36,7 @@ final class ArtifactIdentityTests: XCTestCase {
     }
 
     func testAttachmentURLsEncodeReservedCharactersWithoutLosingUnicode() {
-        let report = XCTestReport()
+        let report = makeTestReport()
         let path = report.attachmentRelativePathForTestPage(fileName: "café #?%[].png")
         let url = URL(string: path, relativeTo: URL(string: "https://example.test/tests/detail.html")!)!
         XCTAssertEqual(url.path.removingPercentEncoding ?? url.path, "/attachments/café #?%[].png")

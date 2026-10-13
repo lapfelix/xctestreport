@@ -25,7 +25,7 @@ struct XCTestReport: ParsableCommand {
 
     @Flag(
         name: .customLong("html-only"),
-        help: "Reuse existing summary/tests_full/attachments in outputDir and only generate HTML."
+        help: "Regenerate HTML and Markdown using cached report data and per-test bundles."
     )
     var htmlOnly: Bool = false
 
@@ -50,8 +50,7 @@ struct XCTestReport: ParsableCommand {
     @Flag(
         name: .customLong("keep-loose-attachments"),
         help: """
-        Keep the loose copies of attachments that were packed into per-test bundles. \
-        Needed if you intend to re-run with --html-only, which re-reads the attachments directory.
+        Keep loose attachment copies alongside the per-test bundles.
         """
     )
     var keepLooseAttachments: Bool = false
@@ -74,23 +73,25 @@ struct XCTestReport: ParsableCommand {
     )
     var noNotes: Bool = false
 
-    struct RuntimeError: Error {
+    @Option(name: .customLong("baseline"), help: "Compare against this report directory instead of automatically selecting a previous run.")
+    var baseline: String?
+
+    // The final destination is retained while generation writes into a sibling staging directory.
+    var generationOriginalOutputDir: String?
+
+    struct RuntimeError: Error, CustomStringConvertible {
         let message: String
+        var description: String { message }
     }
 
     func run() throws {
-        do {
-            if compressVideo, videoHeight <= 0 {
-                throw RuntimeError(message: "--video-height must be greater than 0.")
-            }
-            if !(0...255).contains(snapshotTolerance) {
-                throw RuntimeError(message: "--snapshot-tolerance must be between 0 and 255.")
-            }
-            try generateHTMLReport()
-        } catch {
-            print("Error: \(error)")
-            throw error
+        if compressVideo, videoHeight <= 0 {
+            throw RuntimeError(message: "--video-height must be greater than 0.")
         }
+        if !(0...255).contains(snapshotTolerance) {
+            throw RuntimeError(message: "--snapshot-tolerance must be between 0 and 255.")
+        }
+        try generateHTMLReport()
     }
 }
 

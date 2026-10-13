@@ -41,13 +41,13 @@ into failures without the `.xcresult`:
   ```
 
   The same per-test Markdown is also stored inside each test's bundle as `test.md`
-  (`unzip -p tests/test_MySuite_testFoo\(\).zip test.md`).
+  (`unzip -p 'tests/<generated-test-name>.zip' test.md`; use the bundle name linked from the report).
 
 All links are relative, so the output folder works the same whether read locally or
 hosted remotely. Point an agent at `report.md` and let it follow the links.
 
-The Markdown is ASCII-only (typographic punctuation is folded, anything else becomes
-`?`), so it never mojibakes when a host serves `.md` as non-UTF-8 `text/plain`.
+Markdown preserves Unicode in test names, failure messages, and attachment content.
+Serve `.md` files with a UTF-8 charset so those details remain readable.
 
 ## Review notes
 
@@ -68,9 +68,13 @@ Notes are saved only in the viewer's browser (`localStorage`), keyed per report,
 reports hosted side by side don't share notes, and regenerating the same `.xcresult`
 keeps them. They're never uploaded. `--no-notes` leaves the feature out.
 
+Download a JSON backup from the notes menu to preserve IDs and playback context, including
+the selected event, recording run, and absolute time. Import restores those fields and accepts
+older version 1 backups as well as the current version 2 format.
+
 ## Requirements
-- macOS with Xcode command-line tools (`xcrun xcresulttool`).
-- Swift 5.5+ (SwiftPM build).
+- macOS with Xcode 16 or newer installed and selected with `xcode-select` (`xcrun xcresulttool`).
+- Swift 6.0+ to build, required by the pinned Swift Argument Parser dependency. The package uses Swift 5 language mode.
 - Optional: `ffmpeg` for `--compress-video`.
 - Optional: `gzip` for extra payload compression (fallbacks are automatic).
 
@@ -78,13 +82,17 @@ keeps them. They're never uploaded. `--no-notes` leaves the feature out.
 ```bash
 git clone https://github.com/lapfelix/xctestreport.git
 cd xctestreport
-swift build -c release
-cp .build/release/xctestreport /usr/local/bin/xctestreport
+Scripts/install.sh
+# Installs into ~/.local/bin. Add that directory to PATH if needed.
+# For another writable prefix: Scripts/install.sh /path/to/prefix
 ```
+
+The installer copies the SwiftPM resource bundle alongside the executable. Keep both together
+when moving an installation; the HTML templates and web assets live in that bundle.
 
 ## CLI
 ```bash
-USAGE: xctestreport <xcresult-path> <output-dir> [--compress-video] [--video-height <video-height>] [--header-note <header-note>] [--keep-loose-attachments] [--no-snapshot-diff] [--snapshot-tolerance <snapshot-tolerance>] [--no-notes]
+USAGE: xctestreport <xcresult-path> <output-dir> [options]
 
 ARGUMENTS:
   <xcresult-path>         Path to the .xcresult file.
@@ -92,13 +100,19 @@ ARGUMENTS:
 
 OPTIONS:
   --compress-video        Compress exported video attachments with ffmpeg (HEVC VideoToolbox).
-  --video-height <n>      Maximum compressed video dimension (longest edge). Default: 1024.
+  --fast-video            Favor fastest video compression settings (use with --compress-video).
+  --video-height <n>      Maximum compressed video dimension (longest edge). Default: 720.
+  --html-only             Regenerate from the cached report data and bundled attachments.
+                          The original .xcresult can be absent for reports with detail/activity caches.
   --header-note <note>    Custom note shown under the title on the report's main
                           page (e.g. "Branch: feature/new-thing").
   --keep-loose-attachments
                           Keep the loose copies of attachments that were packed into
-                          per-test bundles. Needed only if you intend to re-run with
-                          --html-only, which re-reads the attachments directory.
+                          per-test bundles (useful for external tools reading attachments directly).
+  --additional-tests-from <path>
+                          Append tests from another .xcresult bundle. Repeat for several bundles.
+                          Details and attachments resolve from the main merged bundle.
+  --baseline <report-dir> Compare against this report instead of automatically selecting a previous run.
   --no-snapshot-diff      Disable snapshot visual-diff detection and rendering
                           (enabled by default).
   --snapshot-tolerance <n>
@@ -158,7 +172,8 @@ swift run xctestreport /path/to/Test.xcresult ~/Desktop/xcresultout --header-not
 - Timeline run-state and screenshot payloads are compact-encoded JSON, deflated into the test's
   bundle as `timeline/runstates.json` and `timeline/screenshots.json`.
 - Loaded lazily by `timeline-view.js` through `web/bundle-reader.js`.
-- If the bundle cannot be read, the page falls back to the inline JSON in the page itself.
+- Bundled reports keep one authoritative copy of these payloads in the ZIP. If loading fails,
+  the timeline shows an error; older standalone pages can still use their inline JSON.
 
 ## Output Layout
 Typical output directory:
@@ -180,8 +195,14 @@ Typical output directory:
   everything else is bundled). Videos are named after their test (`Suite_testName.mp4`, then
   `-2`, `-3`, ...), and diagnostic reports keep an `.ips` extension.
 - `test_details.json` (per-test detail keyed by test identifier, used to compare against previous runs)
+- `test_activities.json`, `build_results.json`, `tests_inventory.json`, `report_metadata.json`
+  (cached data for regeneration and report history)
 
 A 403-test run that previously wrote 5,641 files now writes 889.
+
+Generated test filenames contain a readable identifier and a stable identity hash. This keeps
+paths bounded and distinguishes names whose punctuation or Unicode would otherwise collide.
+Use the links in the report to find a particular test's page or bundle.
 
 ## Per-test bundles
 
@@ -190,8 +211,8 @@ every attachment preview, the UI-hierarchy plists, and the test's agent Markdown
 stays a normal HTML file, so a test costs **two files** instead of the dozen-plus it used to.
 
 ```
-tests/test_MySuite_testFoo().html
-tests/test_MySuite_testFoo().zip
+tests/test_MySuite_testFoo-<hash>.html
+tests/test_MySuite_testFoo-<hash>.zip
   |-- timeline/runstates.json
   |-- timeline/screenshots.json
   |-- attachments/12.plist
@@ -202,8 +223,8 @@ tests/test_MySuite_testFoo().zip
 They are ordinary archives, so the shell works on them directly:
 
 ```bash
-unzip -l 'tests/test_MySuite_testFoo().zip'
-unzip -p 'tests/test_MySuite_testFoo().zip' test.md
+unzip -l 'tests/<generated-test-name>.zip'
+unzip -p 'tests/<generated-test-name>.zip' test.md
 ```
 
 ### How the browser reads them
@@ -281,14 +302,14 @@ and from the back-link in each test page's snapshot section (anchored at that co
   closing it releases pixel buffers, blink timers, and resize observers. Preview images load lazily.
 - Serve the report over HTTP to enable canvas-based heatmaps, tolerance, and pixel inspection.
   Static image comparisons remain available without JavaScript.
-- Xcode only attaches images when a snapshot assertion fails. A test that passed in a class that
+- Snapshot libraries typically retain comparison images when an assertion fails. A test that passed in a class that
   produced comparisons is still listed, as a compact "matched, no images" row - the result bundle
   carries no record of what it captured. The page says so; nothing is inferred from test names.
 
 ## Notes
 - Very large `.xcresult` bundles can still take time due to attachment export and test detail extraction.
-- Reading per-test bundles in the browser requires `DecompressionStream` (Chrome 80+, Safari 16.4+,
-  Firefox 113+).
+- Reading compressed entries in per-test bundles requires a browser with
+  `DecompressionStream('deflate-raw')`; use a current Chrome, Safari, or Firefox release.
 
 ### Real xcresult fixtures
 
@@ -300,9 +321,43 @@ and UI tests with screenshots, videos, or both. Run
 `output/xcresult-fixtures/`. The fixture README maps the cases to report features and
 shows how to generate sibling reports for history checks.
 
+`Scripts/test-real-fixtures.sh /absolute/path/to/empty/fixture-output` selects an available
+iOS 17+ simulator, generates both bundles and reports, verifies attachment bytes/ownership,
+outcomes, snapshots, media and history, then checks packed regeneration without the original
+sources and preservation on failure. Set `XCTESTREPORT_REAL_FIXTURES` to that directory to run
+the actual-report browser cases. CI requires this check in addition to the small installation fixture.
+
 ### Browser regression checks
 
-Run `npm --prefix ui-tests test`. The Playwright suite uses the shipping templates and assets,
+Install Node.js 20+ and set up the browser checks:
+
+```bash
+npm --prefix ui-tests ci
+npm --prefix ui-tests exec -- playwright install chromium webkit firefox
+swift test
+Scripts/test-installed-report.sh /absolute/path/to/empty/generated-report
+Scripts/test-real-fixtures.sh /absolute/path/to/empty/xcresult-fixtures
+XCTESTREPORT_GENERATED_REPORT=/absolute/path/to/empty/generated-report \
+  XCTESTREPORT_REAL_FIXTURES=/absolute/path/to/empty/xcresult-fixtures npm --prefix ui-tests test
+```
+
+The installation check builds in a temporary directory, installs the executable with its resource
+bundle, deletes the build directory, and generates a small report using the production renderer and
+ZIP writer. It regenerates again after loose attachments have been pruned, then verifies a corrupt-cache
+failure preserves the published pages and ZIPs. Its browser checks verify report navigation, snapshot
+inspection, and archived image bytes.
+The output directory must be empty before generation. CI requires this fixture and runs Chromium,
+WebKit, and Firefox; missing fixture output fails the checks.
+
+For front-end work without Swift, `npm --prefix ui-tests test` runs the template-based cases and
+skips the production-generated and actual-xcresult cases. To use a locally installed Chromium without downloading browsers:
+
+```bash
+PLAYWRIGHT_PROJECTS=chromium PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm --prefix ui-tests test
+```
+
+`PLAYWRIGHT_PROJECTS` also accepts a comma-separated subset such as `chromium,firefox`.
+The Playwright suite uses the shipping templates and assets,
 with real watchOS failure images served over HTTP. It covers gallery filtering, all comparison
 modes, synthesized diffs, tolerance, keyboard navigation, mobile light/dark layouts, unavailable
 images, no-JavaScript fallbacks, viewer cleanup, and a 180-comparison contact sheet.

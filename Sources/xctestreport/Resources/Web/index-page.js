@@ -1,41 +1,13 @@
 (function() {
-  var coll = document.getElementsByClassName('collapsible');
-  var i;
-
-  for (i = 0; i < coll.length; i++) {
-    coll[i].tabIndex = 0;
-    coll[i].setAttribute('role', 'button');
-    coll[i].setAttribute('aria-expanded', 'true');
-    coll[i].addEventListener('keydown', function(event) {
-      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.click(); }
-    });
-    coll[i].addEventListener('click', function() {
-      this.classList.toggle('collapsed');
-      this.setAttribute('aria-expanded', String(!this.classList.contains('collapsed')));
-    });
-  }
-
   var toggleAllBtn = document.getElementById('toggle-all');
-  if (toggleAllBtn) {
-    toggleAllBtn.textContent = 'Collapse All';
-    toggleAllBtn.addEventListener('click', function() {
-      var expanded = toggleAllBtn.textContent === 'Collapse All';
-      for (var j = 0; j < coll.length; j++) {
-        if (expanded) {
-          coll[j].classList.add('collapsed');
-        } else {
-          coll[j].classList.remove('collapsed');
-        }
-      }
-      Array.prototype.forEach.call(coll, function(head) { head.setAttribute('aria-expanded', String(!expanded)); });
-      toggleAllBtn.textContent = expanded ? 'Expand All' : 'Collapse All';
-    });
-  }
-
   var suites = Array.prototype.slice.call(document.getElementsByClassName('suite'));
   var searchInput = document.getElementById('test-search');
   var chips = Array.prototype.slice.call(document.getElementsByClassName('status-chip'));
   var noMatch = document.getElementById('no-match');
+  var durationSorters = [];
+  var suiteSortState = { key: 'name', direction: 'asc', apply: null };
+  var restoringState = false;
+  var debounce;
 
   var flakyChip = document.querySelector('.flaky-chip');
   if (flakyChip) { flakyChip.hidden = !document.querySelector('tr[data-flaky="true"]'); }
@@ -55,11 +27,17 @@
     return (link ? link.textContent : row.textContent).toLowerCase();
   }
 
-  function setCollapsed(suite, collapsed) {
+  function setCollapsed(suite, collapsed, userInitiated) {
     var head = suite.querySelector('.collapsible');
     if (!head) { return; }
     head.classList.toggle('collapsed', collapsed);
-    head.setAttribute('aria-expanded', String(!collapsed));
+    var button = head.querySelector('.suite-toggle');
+    if (button) { button.setAttribute('aria-expanded', String(!collapsed)); }
+    if (userInitiated && collapsedBeforeSearch !== null) {
+      var index = suites.indexOf(suite);
+      collapsedBeforeSearch[index] = collapsed;
+      searchCollapseOverrides[index] = collapsed;
+    }
   }
 
   function isCollapsed(suite) {
@@ -69,6 +47,100 @@
 
   // Collapse state from before the current search, restored once the search is cleared.
   var collapsedBeforeSearch = null;
+  var searchCollapseOverrides = {};
+  var previousQuery = '';
+
+  function visibleSuites() {
+    return suites.filter(function(suite) { return suite.style.display !== 'none'; });
+  }
+
+  function syncToggleAll() {
+    if (!toggleAllBtn) { return; }
+    var visible = visibleSuites();
+    toggleAllBtn.disabled = visible.length === 0;
+    toggleAllBtn.textContent = visible.some(function(suite) { return !isCollapsed(suite); }) ? 'Collapse All' : 'Expand All';
+  }
+
+  suites.forEach(function(suite, index) {
+    var head = suite.querySelector('.collapsible');
+    if (!head) { return; }
+    // Preserve heading navigation, including for reports generated with older markup.
+    head.removeAttribute('role');
+    head.removeAttribute('tabindex');
+    head.removeAttribute('aria-expanded');
+    var button = head.querySelector('.suite-toggle');
+    if (!button) {
+      button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'suite-toggle';
+      while (head.firstChild) { button.appendChild(head.firstChild); }
+      head.appendChild(button);
+    }
+    var content = suite.querySelector('.content');
+    if (content) {
+      if (!content.id) { content.id = 'suite-content-' + index; }
+      button.setAttribute('aria-controls', content.id);
+    }
+    setCollapsed(suite, isCollapsed(suite));
+    button.addEventListener('click', function() {
+      setCollapsed(suite, !isCollapsed(suite), true);
+      syncToggleAll();
+    });
+  });
+
+  if (toggleAllBtn) {
+    toggleAllBtn.addEventListener('click', function() {
+      var visible = visibleSuites();
+      var collapse = visible.some(function(suite) { return !isCollapsed(suite); });
+      visible.forEach(function(suite) { setCollapsed(suite, collapse, true); });
+      syncToggleAll();
+    });
+  }
+
+  function suiteName(suite) {
+    var name = suite.querySelector('.suite-name');
+    return name ? name.textContent.trim() : (suite.getAttribute('data-suite-name') || '');
+  }
+
+  function persistViewState() {
+    if (restoringState) { return; }
+    var url = new URL(window.location.href);
+    ['q', 'status', 'sort', 'test-sort'].forEach(function(key) { url.searchParams.delete(key); });
+    var query = searchInput ? searchInput.value.trim() : '';
+    if (query) { url.searchParams.set('q', query); }
+    var selected = chips.filter(function(chip) { return !chip.hidden && chip.getAttribute('aria-pressed') === 'true'; })
+      .map(function(chip) { return chip.getAttribute('data-status') || chip.getAttribute('data-filter'); });
+    if (selected.length) { url.searchParams.set('status', selected.join(',')); }
+    if (suiteSortState.key !== 'name' || suiteSortState.direction !== 'asc') {
+      url.searchParams.set('sort', suiteSortState.key + '-' + suiteSortState.direction);
+    }
+    durationSorters.forEach(function(sorter) {
+      if (sorter.state) { url.searchParams.append('test-sort', sorter.name + ':' + (sorter.state === 1 ? 'desc' : 'asc')); }
+    });
+    if (url.href !== window.location.href) { history.replaceState(history.state, '', url.href); }
+  }
+
+  function restoreViewState() {
+    restoringState = true;
+    var params = new URL(window.location.href).searchParams;
+    if (searchInput) { searchInput.value = params.get('q') || ''; }
+    var selected = (params.get('status') || '').split(',');
+    chips.forEach(function(chip) {
+      var key = chip.getAttribute('data-status') || chip.getAttribute('data-filter');
+      chip.setAttribute('aria-pressed', String(!chip.hidden && selected.indexOf(key) >= 0));
+    });
+    var sort = /^(name|failed|total|percent|duration|avg)-(asc|desc)$/.exec(params.get('sort') || '');
+    if (suiteSortState.apply) { suiteSortState.apply(sort ? sort[1] : 'name', sort ? sort[2] : 'asc'); }
+    var rowSorts = Object.create(null);
+    params.getAll('test-sort').forEach(function(value) {
+      var separator = value.lastIndexOf(':');
+      var direction = value.slice(separator + 1);
+      if (separator >= 0 && /^(asc|desc)$/.test(direction)) { rowSorts[value.slice(0, separator)] = direction; }
+    });
+    durationSorters.forEach(function(sorter) { sorter.apply(rowSorts[sorter.name] === 'desc' ? 1 : (rowSorts[sorter.name] === 'asc' ? 2 : 0)); });
+    applyFilter();
+    restoringState = false;
+  }
 
   // The chips are "show only" filters: none selected shows every test, otherwise a row shows
   // when it matches any selected chip. The search narrows that further by test or suite name.
@@ -80,11 +152,13 @@
     var anySelected = flakySelected || Object.keys(statuses).length > 0;
     var anyVisible = false;
 
+    if (query !== previousQuery) { searchCollapseOverrides = {}; previousQuery = query; }
+
     if (query !== '' && collapsedBeforeSearch === null) {
       collapsedBeforeSearch = suites.map(isCollapsed);
     }
 
-    suites.forEach(function(suite) {
+    suites.forEach(function(suite, index) {
       var suiteMatches = query !== '' && (suite.getAttribute('data-suite-name') || '').indexOf(query) !== -1;
       var rows = suite.querySelectorAll('.suite-tests-table tbody tr');
       var visibleInSuite = 0;
@@ -100,19 +174,21 @@
       }
       suite.style.display = visibleInSuite === 0 ? 'none' : '';
       if (visibleInSuite > 0) { anyVisible = true; }
-      if (query !== '' && visibleInSuite > 0) { setCollapsed(suite, false); }
+      if (query !== '' && visibleInSuite > 0) { setCollapsed(suite, searchCollapseOverrides[index] === true); }
     });
 
     if (query === '' && collapsedBeforeSearch !== null) {
       suites.forEach(function(suite, index) { setCollapsed(suite, collapsedBeforeSearch[index]); });
       collapsedBeforeSearch = null;
+      searchCollapseOverrides = {};
     }
 
     if (noMatch) { noMatch.style.display = anyVisible ? 'none' : ''; }
+    syncToggleAll();
+    persistViewState();
   }
 
   if (searchInput) {
-    var debounce;
     searchInput.addEventListener('input', function() {
       clearTimeout(debounce);
       debounce = setTimeout(applyFilter, 120);
@@ -134,10 +210,7 @@
       if (searchInput) { searchInput.value = ''; }
       collapsedBeforeSearch = null;
       chips.forEach(function(chip) { chip.setAttribute('aria-pressed', String(chip.dataset.status === 'failed')); });
-      Array.prototype.forEach.call(coll, function(head) {
-        head.classList.remove('collapsed'); head.setAttribute('aria-expanded', 'true');
-      });
-      if (toggleAllBtn) { toggleAllBtn.textContent = 'Collapse All'; }
+      suites.forEach(function(suite) { setCollapsed(suite, false); });
       applyFilter();
     });
   }
@@ -151,12 +224,19 @@
     var tbody = table.querySelector('tbody');
     if (!button || !tbody) { return; }
     var original = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
-    var state = 0;
+    var mobileButton = document.createElement('button');
+    mobileButton.type = 'button';
+    mobileButton.className = 'mobile-sort-duration';
+    table.parentNode.insertBefore(mobileButton, table);
+    var sorter = { name: suiteName(suite), state: 0, apply: applyDurationSort };
+    durationSorters.push(sorter);
 
-    button.addEventListener('click', function() {
-      state = (state + 1) % 3;
+    function applyDurationSort(state) {
+      sorter.state = state;
       header.setAttribute('data-sort', state === 1 ? 'desc' : (state === 2 ? 'asc' : ''));
       header.setAttribute('aria-sort', state === 1 ? 'descending' : (state === 2 ? 'ascending' : 'none'));
+      mobileButton.textContent = 'Duration' + (state === 1 ? ' \u2193' : (state === 2 ? ' \u2191' : ''));
+      mobileButton.setAttribute('aria-label', 'Sort tests by duration: ' + (state === 1 ? 'longest first' : (state === 2 ? 'shortest first' : 'original order')));
       var rows = original;
       if (state !== 0) {
         rows = original.slice().sort(function(a, b) {
@@ -166,7 +246,14 @@
         });
       }
       rows.forEach(function(row) { tbody.appendChild(row); });
-    });
+    }
+    function cycleDurationSort() {
+      applyDurationSort((sorter.state + 1) % 3);
+      persistViewState();
+    }
+    button.addEventListener('click', cycleDurationSort);
+    mobileButton.addEventListener('click', cycleDurationSort);
+    applyDurationSort(0);
   });
 
   // Sort the top-level list of suites by name/failed/total/percent/duration/avg.
@@ -185,12 +272,9 @@
       avg: function(suite) { return parseFloat(suite.getAttribute('data-avg-duration')) || 0; }
     };
 
-    var activeKey = 'name';
-    var activeDirection = 'asc';
-
     function applySort() {
-      var extractor = extractors[activeKey];
-      var direction = activeDirection;
+      var extractor = extractors[suiteSortState.key];
+      var direction = suiteSortState.direction;
       var sorted = suites.slice().sort(function(a, b) {
         var va = extractor(a);
         var vb = extractor(b);
@@ -212,21 +296,23 @@
       sorted.forEach(function(suite) { container.appendChild(suite); });
     }
 
+    suiteSortState.apply = function(key, direction) {
+      suiteSortState.key = key;
+      suiteSortState.direction = direction;
+      buttons.forEach(function(button) {
+        var isActive = button.getAttribute('data-sort-key') === key;
+        button.setAttribute('aria-pressed', String(isActive));
+        button.setAttribute('data-sort', isActive ? direction : '');
+      });
+      applySort();
+    };
+
     buttons.forEach(function(button) {
       button.addEventListener('click', function() {
         var key = button.getAttribute('data-sort-key');
-        if (key === activeKey) {
-          activeDirection = activeDirection === 'asc' ? 'desc' : 'asc';
-        } else {
-          activeKey = key;
-          activeDirection = key === 'name' ? 'asc' : 'desc';
-        }
-        buttons.forEach(function(btn) {
-          var isActive = btn === button;
-          btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
-          btn.setAttribute('data-sort', isActive ? activeDirection : '');
-        });
-        applySort();
+        var direction = key === suiteSortState.key ? (suiteSortState.direction === 'asc' ? 'desc' : 'asc') : (key === 'name' ? 'asc' : 'desc');
+        suiteSortState.apply(key, direction);
+        persistViewState();
       });
     });
   })();
@@ -282,6 +368,20 @@
     chip.appendChild(badge);
     chip.classList.toggle('is-empty', count === 0);
   });
+
+  window.XCTestReportIndex = {
+    flushFilters: function() { clearTimeout(debounce); applyFilter(); },
+    revealTest: function(link) {
+      var suite = link.closest('.suite');
+      var row = link.closest('tr');
+      if (!suite || !row || suite.style.display === 'none' || row.style.display === 'none') { return false; }
+      setCollapsed(suite, false, true);
+      syncToggleAll();
+      return true;
+    }
+  };
+  window.addEventListener('popstate', function() { clearTimeout(debounce); restoreViewState(); });
+  restoreViewState();
 
   // The whole row opens its test, not just the name.
   Array.prototype.forEach.call(document.querySelectorAll('.suite-tests-table tbody'), function(tbody) {

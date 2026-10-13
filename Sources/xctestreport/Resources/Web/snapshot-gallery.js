@@ -361,6 +361,7 @@
 
     function revealHash() {
         var id = (window.location.hash || "").replace("#", "");
+        try { id = decodeURIComponent(id); } catch (error) { return; }
         if (!id) { return; }
         var target = document.getElementById(id);
         if (!target) { return; }

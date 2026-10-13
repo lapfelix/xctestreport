@@ -40,7 +40,7 @@ test('the Flaky chip appears for flaky rows and narrows to them', async ({ page 
     ...suite,
     tests: suite.tests.map((t) => (t.name === 'testBeta' ? { ...t, flaky: true } : t)),
   }));
-  await page.goto(renderReport({ suites: withFlaky }));
+  await page.goto(await renderReport({ suites: withFlaky }));
   const flaky = page.locator('.flaky-chip');
   await expect(flaky).toBeVisible();
   await expect(flaky).toHaveAttribute('aria-pressed', 'false');
@@ -57,7 +57,7 @@ test('selecting several chips shows the union', async ({ page }) => {
     ...suite,
     tests: suite.tests.map((t) => (t.name === 'testBeta' ? { ...t, flaky: true } : t)),
   }));
-  await page.goto(renderReport({ suites: withFlaky }));
+  await page.goto(await renderReport({ suites: withFlaky }));
   await page.locator('.status-chip[data-status="failed"]').click();
   await expect(page.locator('.suite-tests-table tbody tr:visible')).toHaveCount(1);
   await page.locator('.flaky-chip').click();
@@ -70,7 +70,7 @@ test('selecting several chips shows the union', async ({ page }) => {
 });
 
 test('durations use the compact format', async ({ page }) => {
-  await page.goto(renderReport({ suites: [{ name: 'TimingTests', tests: [
+  await page.goto(await renderReport({ suites: [{ name: 'TimingTests', tests: [
     { name: 'testLong', status: 'passed', duration: 219 },
     { name: 'testMedium', status: 'passed', duration: 12.3 },
     { name: 'testShort', status: 'passed', duration: 0.006 },
@@ -148,7 +148,7 @@ test('slowest-tests lists the top tests by duration', async ({ page }) => {
 });
 
 test('review failures clears search and opens only failing suites', async ({page}) => {
-  await page.goto(renderReport({suites}));
+  await page.goto(await renderReport({suites}));
   await page.locator('#toggle-all').click();
   await page.locator('#test-search').fill('nothing');
   await page.getByRole('button',{name:'Review failures',exact:true}).click();
@@ -158,8 +158,10 @@ test('review failures clears search and opens only failing suites', async ({page
 });
 
 test('suite headings can be collapsed and expanded with the keyboard', async ({page}) => {
-  await page.goto(renderReport({suites}));
-  const head=page.locator('.collapsible').first();
+  await page.goto(await renderReport({suites}));
+  const head=page.locator('.suite-toggle').first();
+  await expect(page.getByRole('heading', { name: /AllGreenTests/ })).toBeVisible();
+  await expect(head).toHaveAttribute('aria-controls', /suite-content-/);
   await head.focus(); await page.keyboard.press('Enter');
   await expect(head).toHaveAttribute('aria-expanded','false');
   await page.keyboard.press('Space');
@@ -171,6 +173,61 @@ test('chips show how many tests they match', async ({ page }) => {
   await expect(page.locator('.status-chip[data-status="passed"] .status-chip-count')).toHaveText('3');
   await expect(page.locator('.status-chip[data-status="failed"] .status-chip-count')).toHaveText('1');
   await expect(page.locator('.status-chip[data-status="skipped"] .status-chip-count')).toHaveText('1');
+});
+
+test('collapse controls follow visible suites and retain deliberate changes during search', async ({ page }) => {
+  await page.goto(await reportURL());
+  const toggle = page.locator('#toggle-all');
+  await page.locator('.suite-toggle').nth(0).click();
+  await page.locator('.suite-toggle').nth(1).click();
+  await expect(toggle).toHaveText('Expand All');
+  await page.locator('#test-search').fill('Alpha');
+  await expect(page.locator('.suite:visible')).toHaveCount(1);
+  await expect(page.locator('.suite', { hasText: 'AllGreenTests' }).locator('.suite-toggle')).toHaveAttribute('aria-expanded', 'true');
+  await expect(toggle).toHaveText('Collapse All');
+  await toggle.click();
+  await expect(toggle).toHaveText('Expand All');
+  await toggle.click();
+  await page.locator('#test-search').fill('');
+  await expect(page.locator('.suite', { hasText: 'AllGreenTests' }).locator('.suite-toggle')).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('.suite', { hasText: 'LoginTests' }).locator('.suite-toggle')).toHaveAttribute('aria-expanded', 'false');
+  await expect(toggle).toHaveText('Collapse All');
+  await page.locator('#test-search').fill('nothing matches');
+  await expect(toggle).toBeDisabled();
+});
+
+test('phone duration control cycles the same sort as the desktop header', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(await reportURL());
+  const suite = page.locator('.suite', { hasText: 'LoginTests' });
+  const control = suite.getByRole('button', { name: /Sort tests by duration/ });
+  const names = suite.locator('tbody tr td:first-child');
+  await expect(control).toBeVisible();
+  await control.click();
+  await expect(names).toHaveText(['testInvalidLogin', 'testValidLogin', 'testSkippedLogin']);
+  await control.click();
+  await expect(names).toHaveText(['testSkippedLogin', 'testValidLogin', 'testInvalidLogin']);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await suite.locator('th.sortable-duration button').click();
+  await expect(names).toHaveText(['testValidLogin', 'testInvalidLogin', 'testSkippedLogin']);
+});
+
+test('a copied URL restores search, chips, suite sorting and per-suite duration sorting', async ({ page }) => {
+  await page.goto(await reportURL());
+  await page.locator('.suite', { hasText: 'LoginTests' }).locator('th.sortable-duration button').click();
+  await page.locator('.suite-sort-btn[data-sort-key="duration"]').click();
+  await page.locator('#test-search').fill('login');
+  await page.locator('.status-chip[data-status="failed"]').click();
+  await expect(page).toHaveURL(/status=failed/);
+  const shared = page.url();
+  await page.goto(shared);
+  await expect(page.locator('#test-search')).toHaveValue('login');
+  await expect(page.locator('.status-chip[data-status="failed"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.suite-sort-btn[data-sort-key="duration"]')).toHaveAttribute('data-sort', 'desc');
+  await expect(page.locator('.suite', { hasText: 'LoginTests' }).locator('th.sortable-duration')).toHaveAttribute('aria-sort', 'descending');
+  await expect(page.locator('.suite-tests-table tbody tr:visible')).toHaveCount(1);
+  await page.locator('.status-chip[data-status="failed"]').click();
+  await expect(page.locator('.suite', { hasText: 'LoginTests' }).locator('tbody tr td:first-child')).toHaveText(['testInvalidLogin', 'testValidLogin', 'testSkippedLogin']);
 });
 
 test('slash focuses search, Escape clears it, and J/K move through visible tests', async ({ page }) => {
@@ -185,9 +242,9 @@ test('slash focuses search, Escape clears it, and J/K move through visible tests
 
   await page.locator('.status-chip[data-status="passed"]').click();
   await page.locator('body').press('j');
-  await expect(page.getByRole('link', { name: 'testValidLogin' })).toBeFocused();
-  await page.locator('body').press('j');
   await expect(page.getByRole('link', { name: 'testAlpha' })).toBeFocused();
+  await page.locator('body').press('j');
+  await expect(page.getByRole('link', { name: 'testBeta' })).toBeFocused();
   await page.locator('body').press('k');
-  await expect(page.getByRole('link', { name: 'testValidLogin' })).toBeFocused();
+  await expect(page.getByRole('link', { name: 'testAlpha' })).toBeFocused();
 });

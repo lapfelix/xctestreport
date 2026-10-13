@@ -101,27 +101,52 @@ From the repository root, after generating the bundles:
 swift run xctestreport output/xcresult-fixtures/Baseline.xcresult \
   output/xcresult-fixtures/reports/01-baseline
 swift run xctestreport output/xcresult-fixtures/Mixed.xcresult \
-  output/xcresult-fixtures/reports/02-mixed
+  output/xcresult-fixtures/reports/02-mixed \
+  --baseline output/xcresult-fixtures/reports/01-baseline
 python3 -m http.server 8000 --directory output/xcresult-fixtures/reports
 ```
 
 Open `http://localhost:8000/02-mixed/`. These sibling report directories exercise
 history; the mixed report can read the baseline's per-test details. Also inspect
 `snapshots.json`, `failures.md`, `agent-tests.md`, and the per-test ZIP files.
-Use `--keep-loose-attachments` when testing HTML-only regeneration.
+Use `--baseline output/xcresult-fixtures/reports/01-baseline` when generating Mixed
+to select history explicitly, including when Xcode gives different titles to the test plans.
+HTML-only regeneration recovers packed attachments without `--keep-loose-attachments`.
 
-Two useful regression targets are visible in the current report generator:
-it treats `Expected Failure` as an ordinary failure (the mixed Markdown lists
-eight failures despite Xcode's seven), and the fast export path stores the
-custom binary/XML plist types as `.dat`. The fixture validator checks the true
-Xcode outcomes and exported payloads independently of report behavior, so these
-bundles can be used to test fixes without changing the fixture to match a bug.
+The report checks require seven true failures, keep the expected-failure test out of
+failure navigation/Markdown, and preserve binary/XML plist types and content. The
+fixture validator checks Apple's outcomes independently of report behavior.
+
+## Run the native report regression checks
+
+```sh
+Scripts/test-real-fixtures.sh /absolute/path/to/empty/xcresult-fixtures
+XCTESTREPORT_REAL_FIXTURES=/absolute/path/to/empty/xcresult-fixtures \
+  npm --prefix ui-tests test -- tests/xcresult-fixtures.spec.js
+```
+
+Run these from the repository root after installing the browser dependencies described
+in its README. The script selects an available iPhone simulator with iOS 17 or newer;
+`FIXTURE_DESTINATION` can select another destination. It generates and verifies both
+xcresults, then uses the shipping release CLI to write `reports/baseline` and
+`reports/mixed`, with an explicit baseline for history. `XCTESTREPORT_EXECUTABLE` can
+point to an already-built executable with its resource bundle.
+
+`validate_reports.py` compares report inventories, outcomes, cached arguments/retries,
+attachment bytes and direct step ownership, snapshot groups, media distribution, and
+history against the independent fixture contract. The script then moves the sources
+away, regenerates default packed reports, repeats validation, and verifies that a corrupt
+required cache fails without changing published artifacts. Source bundles are restored
+on exit. Browser checks use the regenerated output and discover its actual page/bundle
+links. CI requires these fixtures, runs all three browser engines, and uploads native
+logs, oracle JSON, reports and xcresults separately when a check fails.
 
 To recheck existing bundles independently:
 
 ```sh
 python3 Fixtures/XCResultFixture/verify.py output/xcresult-fixtures/Baseline.xcresult Baseline
 python3 Fixtures/XCResultFixture/verify.py output/xcresult-fixtures/Mixed.xcresult Mixed
+PYTHONDONTWRITEBYTECODE=1 python3 Fixtures/XCResultFixture/validate_reports.py output/xcresult-fixtures
 ```
 
 Generated xcresults, reports, logs, and DerivedData live under the ignored

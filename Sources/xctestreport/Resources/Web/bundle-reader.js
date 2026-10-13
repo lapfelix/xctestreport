@@ -12,6 +12,25 @@
   var TAIL_BYTES = 65536;
   var LOCAL_HEADER_SLACK = 256;
   var EOCD_SIGNATURE = 0x06054b50;
+  var DEFAULT_CACHE_BYTES = 32 * 1024 * 1024;
+  var DEFAULT_CACHE_ENTRIES = 32;
+
+  function assert(condition, message) {
+    if (!condition) throw new Error(message);
+  }
+
+  var CRC_TABLE = new Uint32Array(256);
+  for (var crcIndex = 0; crcIndex < 256; crcIndex++) {
+    var crcValue = crcIndex;
+    for (var crcBit = 0; crcBit < 8; crcBit++) crcValue = (crcValue >>> 1) ^ ((crcValue & 1) ? 0xedb88320 : 0);
+    CRC_TABLE[crcIndex] = crcValue;
+  }
+
+  function crc32(bytes) {
+    var crc = 0xffffffff;
+    for (var i = 0; i < bytes.length; i++) crc = (crc >>> 8) ^ CRC_TABLE[(crc ^ bytes[i]) & 0xff];
+    return (crc ^ 0xffffffff) >>> 0;
+  }
 
   function readU16(bytes, offset) {
     return bytes[offset] | (bytes[offset + 1] << 8);
@@ -43,12 +62,12 @@
   function findEOCD(bytes) {
     // The EOCD is 22 bytes plus a comment we never write, so it sits at the very end.
     for (var i = bytes.length - 22; i >= 0; i--) {
-      if (readU32(bytes, i) === EOCD_SIGNATURE) return i;
+      if (readU32(bytes, i) === EOCD_SIGNATURE && i + 22 + readU16(bytes, i + 20) === bytes.length) return i;
     }
     return -1;
   }
 
-  function parseCentralDirectory(cd) {
+  function parseCentralDirectory(cd, expectedCount, directoryOffset) {
     var entries = Object.create(null);
     var order = [];
     var p = 0;
@@ -60,10 +79,16 @@
       var extraLength = readU16(cd, p + 30);
       var commentLength = readU16(cd, p + 32);
       var localHeaderOffset = readU32(cd, p + 42);
+      assert(p + 46 + nameLength + extraLength + commentLength <= cd.length, 'Truncated ZIP directory entry.');
+      assert((readU16(cd, p + 8) & 1) === 0, 'Encrypted report bundles are unsupported.');
+      assert(method === 0 || method === 8, 'Unsupported compression in report bundle.');
+      assert(localHeaderOffset + 30 + compressedSize <= directoryOffset, 'Bundle entry exceeds archive bounds.');
       var name = decodeName(cd, p + 46, nameLength);
+      assert(!Object.prototype.hasOwnProperty.call(entries, name), 'Duplicate bundle entry: ' + name);
       entries[name] = {
         name: name,
         method: method,
+        crc: readU32(cd, p + 16),
         compressedSize: compressedSize,
         uncompressedSize: uncompressedSize,
         localHeaderOffset: localHeaderOffset
@@ -71,39 +96,80 @@
       order.push(name);
       p += 46 + nameLength + extraLength + commentLength;
     }
+    assert(p === cd.length && order.length === expectedCount, 'Incomplete ZIP central directory.');
     return { entries: entries, order: order };
   }
 
-  function Bundle(url) {
+  function Bundle(url, options) {
     this.url = url;
     this.directory = null;
     this.whole = null;
-    this.blobURLs = Object.create(null);
+    this.byteCache = new Map();
+    this.blobCache = new Map();
+    this.byteCacheSize = 0;
+    this.blobCacheSize = 0;
+    this.pins = new Map();
+    var limits = options && options.cacheLimits || {};
+    this.maxCacheBytes = Number.isFinite(limits.bytes) && limits.bytes > 0 ? limits.bytes : DEFAULT_CACHE_BYTES;
+    this.maxCacheEntries = Number.isInteger(limits.entries) && limits.entries > 0 ? limits.entries : DEFAULT_CACHE_ENTRIES;
     this.pending = Object.create(null);
+    this.pendingURLs = Object.create(null);
     this.directoryPromise = null;
+    this.generation = 0;
+    this.requests = new Set();
   }
 
   Bundle.prototype._fetchRange = function(rangeHeader) {
-    return fetch(this.url, { headers: { Range: rangeHeader } }).then(function(response) {
-      if (!response.ok) throw new Error('HTTP ' + response.status + ' for ' + this.url);
+    var self = this;
+    var generation = this.generation;
+    var controller = new AbortController();
+    this.requests.add(controller);
+    return fetch(this.url, { headers: rangeHeader ? { Range: rangeHeader } : {}, signal: controller.signal }).then(function(response) {
+      assert(response.status === 200 || response.status === 206, 'HTTP ' + response.status + ' for ' + self.url);
       var total = -1;
+      var start = null;
+      var end = null;
       var contentRange = response.headers.get('Content-Range');
-      if (contentRange) {
-        var slash = contentRange.lastIndexOf('/');
-        if (slash >= 0) {
-          var parsed = parseInt(contentRange.slice(slash + 1), 10);
-          if (!isNaN(parsed)) total = parsed;
+      if (response.status === 206 && contentRange) {
+        var match = /^bytes (\d+)-(\d+)\/(\d+|\*)$/i.exec(contentRange);
+        assert(match, 'Invalid Content-Range for report bundle.');
+        start = Number(match[1]);
+        end = Number(match[2]);
+        total = match[3] === '*' ? -1 : Number(match[3]);
+        assert(Number.isSafeInteger(start) && Number.isSafeInteger(end) && start <= end &&
+          (total === -1 || Number.isSafeInteger(total) && end < total), 'Invalid report bundle range bounds.');
+        var requested = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader || '');
+        assert(requested, 'Unexpected partial report bundle response.');
+        if (requested[1]) {
+          assert(start === Number(requested[1]) && end <= Number(requested[2]), 'Report bundle range starts at the wrong offset.');
+        } else if (total >= 0) {
+          assert(start === Math.max(0, total - Number(requested[2])) && end === total - 1, 'Incorrect report bundle suffix range.');
         }
       }
       return response.arrayBuffer().then(function(buffer) {
-        return { partial: response.status === 206, total: total, bytes: new Uint8Array(buffer) };
+        assert(generation === self.generation, 'Report bundle was released.');
+        if (start !== null) assert(buffer.byteLength === end - start + 1, 'Truncated report bundle range response.');
+        return { partial: response.status === 206, total: total, start: start, bytes: new Uint8Array(buffer) };
       });
-    }.bind(this));
+    }).finally(function() { self.requests.delete(controller); });
+  };
+
+  Bundle.prototype._fetchBlock = function(start, end) {
+    var self = this;
+    if (this.whole) return Promise.resolve(this.whole.subarray(start, end + 1));
+    return this._fetchRange('bytes=' + start + '-' + end).then(function(result) {
+      if (!result.partial) {
+        self.whole = result.bytes;
+        return self.whole.subarray(start, end + 1);
+      }
+      return result.bytes;
+    });
   };
 
   Bundle.prototype.load = function() {
     if (this.directoryPromise) return this.directoryPromise;
     var self = this;
+    var generation = this.generation;
 
     this.directoryPromise = this._fetchRange('bytes=-' + TAIL_BYTES)
       .then(function(result) {
@@ -118,19 +184,17 @@
       })
       .catch(function(error) {
         // A server that rejects Range outright still serves a plain GET.
-        return fetch(self.url)
-          .then(function(response) {
-            if (!response.ok) throw error;
-            return response.arrayBuffer();
-          })
-          .then(function(buffer) {
-            self.whole = new Uint8Array(buffer);
+        if (generation !== self.generation) throw error;
+        return self._fetchRange(null)
+          .then(function(result) {
+            assert(!result.partial, 'Expected a complete report bundle.');
+            self.whole = result.bytes;
             return self._directoryFromWhole();
           });
       })
       .catch(function(error) {
         // Let the next caller retry instead of replaying a transient failure forever.
-        self.directoryPromise = null;
+        if (generation === self.generation) self.directoryPromise = null;
         throw error;
       });
 
@@ -142,8 +206,19 @@
     if (eocd < 0) throw new Error('Not a report bundle: ' + this.url);
     var size = readU32(this.whole, eocd + 12);
     var offset = readU32(this.whole, eocd + 16);
-    this.directory = parseCentralDirectory(this.whole.subarray(offset, offset + size));
+    var count = this._directoryCount(this.whole, eocd);
+    assert(offset + size === eocd, 'Invalid report bundle directory bounds.');
+    this.directory = parseCentralDirectory(this.whole.subarray(offset, offset + size), count, offset);
     return this.directory;
+  };
+
+  Bundle.prototype._directoryCount = function(bytes, eocd) {
+    assert(readU16(bytes, eocd + 4) === 0 && readU16(bytes, eocd + 6) === 0, 'Multipart report bundles are unsupported.');
+    var count = readU16(bytes, eocd + 10);
+    assert(count !== 0xffff && readU32(bytes, eocd + 12) !== 0xffffffff && readU32(bytes, eocd + 16) !== 0xffffffff,
+      'ZIP64 report bundles are unsupported.');
+    assert(readU16(bytes, eocd + 8) === count, 'Invalid report bundle entry count.');
+    return count;
   };
 
   Bundle.prototype._directoryFromTail = function(tail) {
@@ -152,6 +227,7 @@
     if (eocd < 0) throw new Error('Not a report bundle: ' + this.url);
     var size = readU32(tail, eocd + 12);
     var offset = readU32(tail, eocd + 16);
+    var count = this._directoryCount(tail, eocd);
 
     // The tail usually already covers the central directory; only refetch when it does not.
     var tailStart = null;
@@ -159,12 +235,12 @@
       tailStart = eocd - size;
     }
     if (tailStart !== null && tailStart >= 0 && readU32(tail, tailStart) === 0x02014b50) {
-      self.directory = parseCentralDirectory(tail.subarray(tailStart, tailStart + size));
+      self.directory = parseCentralDirectory(tail.subarray(tailStart, tailStart + size), count, offset);
       return self.directory;
     }
 
-    return this._fetchRange('bytes=' + offset + '-' + (offset + size - 1)).then(function(result) {
-      self.directory = parseCentralDirectory(result.bytes);
+    return this._fetchBlock(offset, offset + size - 1).then(function(bytes) {
+      self.directory = parseCentralDirectory(bytes, count, offset);
       return self.directory;
     });
   };
@@ -186,15 +262,20 @@
 
     function extract(block, blockStart) {
       var local = entry.localHeaderOffset - blockStart;
+      assert(local >= 0 && local + 30 <= block.length && readU32(block, local) === 0x04034b50, 'Invalid ZIP local header for ' + entry.name);
       var nameLength = readU16(block, local + 26);
       var extraLength = readU16(block, local + 28);
       var dataStart = local + 30 + nameLength + extraLength;
+      assert(dataStart + entry.compressedSize <= block.length, 'Truncated bundle entry: ' + entry.name);
+      assert(readU16(block, local + 8) === entry.method && decodeName(block, local + 30, nameLength) === entry.name,
+        'ZIP local header does not match directory for ' + entry.name);
       var raw = block.subarray(dataStart, dataStart + entry.compressedSize);
-      if (entry.method === 0) return Promise.resolve(raw);
-      if (entry.method !== 8) {
-        return Promise.reject(new Error('Unsupported compression in bundle entry ' + entry.name));
-      }
-      return inflateRaw(raw);
+      return (entry.method === 0 ? Promise.resolve(raw) : inflateRaw(raw)).then(function(bytes) {
+        assert(bytes.length === entry.uncompressedSize, 'Incorrect bundle entry size: ' + entry.name);
+        assert(crc32(bytes) === entry.crc, 'Corrupt bundle entry: ' + entry.name);
+        // Do not keep a whole ZIP or an oversized range buffer alive through a tiny stored entry.
+        return bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ? bytes : bytes.slice();
+      });
     }
 
     if (this.whole) {
@@ -203,17 +284,17 @@
 
     var start = entry.localHeaderOffset;
     var length = 30 + LOCAL_HEADER_SLACK + entry.compressedSize;
-    return this._fetchRange('bytes=' + start + '-' + (start + length - 1)).then(function(result) {
-      var block = result.bytes;
+    return this._fetchBlock(start, start + length - 1).then(function(block) {
+      assert(block.length >= 30 && readU32(block, 0) === 0x04034b50, 'Invalid ZIP local header for ' + entry.name);
       var nameLength = readU16(block, 26);
       var extraLength = readU16(block, 28);
       if (30 + nameLength + extraLength + entry.compressedSize > block.length) {
         // Unusually large extra field; refetch with the real header size known.
         var exact = 30 + nameLength + extraLength + entry.compressedSize;
         return self
-          ._fetchRange('bytes=' + start + '-' + (start + exact - 1))
+          ._fetchBlock(start, start + exact - 1)
           .then(function(retry) {
-            return extract(retry.bytes, start);
+            return extract(retry, start);
           });
       }
       return extract(block, start);
@@ -222,15 +303,28 @@
 
   Bundle.prototype.bytes = function(name) {
     var self = this;
+    var cached = this.byteCache.get(name);
+    if (cached) {
+      this.byteCache.delete(name);
+      this.byteCache.set(name, cached);
+      return Promise.resolve(cached);
+    }
     if (this.pending[name]) return this.pending[name];
+    var generation = this.generation;
 
     var promise = this.load().then(function(directory) {
       var entry = directory.entries[name];
       if (!entry) throw new Error('Missing bundle entry: ' + name);
       return self._entryBytes(entry);
-    }).catch(function(error) {
+    }).then(function(bytes) {
+      if (generation === self.generation && bytes.length <= self.maxCacheBytes) {
+        self.byteCache.set(name, bytes);
+        self.byteCacheSize += bytes.length;
+        self._trimCaches();
+      }
+      return bytes;
+    }).finally(function() {
       if (self.pending[name] === promise) delete self.pending[name];
-      throw error;
     });
 
     this.pending[name] = promise;
@@ -245,22 +339,76 @@
 
   Bundle.prototype.objectURL = function(name, mimeType) {
     var self = this;
-    if (this.blobURLs[name]) return Promise.resolve(this.blobURLs[name]);
-    return this.bytes(name).then(function(bytes) {
-      if (self.blobURLs[name]) return self.blobURLs[name];
+    var cached = this.blobCache.get(name);
+    if (cached) {
+      this.blobCache.delete(name);
+      this.blobCache.set(name, cached);
+      return Promise.resolve(cached.url);
+    }
+    if (this.pendingURLs[name]) return this.pendingURLs[name];
+    var generation = this.generation;
+    var promise = this.bytes(name).then(function(bytes) {
+      assert(generation === self.generation, 'Report bundle was released.');
       var blob = new Blob([bytes], mimeType ? { type: mimeType } : undefined);
       var objectURL = URL.createObjectURL(blob);
-      self.blobURLs[name] = objectURL;
+      self.blobCache.set(name, { url: objectURL, size: bytes.length });
+      self.blobCacheSize += bytes.length;
+      // The URL returned to this caller stays usable. Consumers pin active media; an oversized
+      // unpinned URL is discarded on the next cache operation or when the bundle is released.
+      self._trimCaches(name);
       return objectURL;
+    }).finally(function() {
+      if (self.pendingURLs[name] === promise) delete self.pendingURLs[name];
+    });
+    this.pendingURLs[name] = promise;
+    return promise;
+  };
+
+  Bundle.prototype._trimCaches = function(newURLName) {
+    var self = this;
+    this.byteCache.forEach(function(bytes, name) {
+      if (self.byteCacheSize <= self.maxCacheBytes && self.byteCache.size <= self.maxCacheEntries) return;
+      if (self.pins.has(name)) return;
+      self.byteCache.delete(name);
+      self.byteCacheSize -= bytes.length;
+    });
+    this.blobCache.forEach(function(blob, name) {
+      if (self.blobCacheSize <= self.maxCacheBytes && self.blobCache.size <= self.maxCacheEntries) return;
+      if (self.pins.has(name) || name === newURLName) return;
+      URL.revokeObjectURL(blob.url);
+      self.blobCache.delete(name);
+      self.blobCacheSize -= blob.size;
     });
   };
 
+  Bundle.prototype.pin = function(name) {
+    this.pins.set(name, (this.pins.get(name) || 0) + 1);
+  };
+
+  Bundle.prototype.unpin = function(name) {
+    var count = this.pins.get(name) || 0;
+    if (count <= 1) this.pins.delete(name);
+    else this.pins.set(name, count - 1);
+    this._trimCaches();
+  };
+
+  Bundle.prototype.cacheStats = function() {
+    return { bytes: this.byteCacheSize, byteEntries: this.byteCache.size,
+      blobBytes: this.blobCacheSize, blobEntries: this.blobCache.size, pinnedEntries: this.pins.size };
+  };
+
   Bundle.prototype.release = function() {
-    for (var name in this.blobURLs) {
-      URL.revokeObjectURL(this.blobURLs[name]);
-    }
-    this.blobURLs = Object.create(null);
+    this.generation++;
+    this.requests.forEach(function(controller) { controller.abort(); });
+    this.requests.clear();
+    this.blobCache.forEach(function(blob) { URL.revokeObjectURL(blob.url); });
+    this.blobCache.clear();
+    this.byteCache.clear();
+    this.byteCacheSize = this.blobCacheSize = 0;
+    this.pins.clear();
     this.pending = Object.create(null);
+    this.pendingURLs = Object.create(null);
+    this.whole = this.directory = this.directoryPromise = null;
   };
 
   var bundles = Object.create(null);
@@ -288,8 +436,8 @@
   }
 
   globalThis.ReportBundle = {
-    open: function(url) {
-      if (!bundles[url]) bundles[url] = new Bundle(url);
+    open: function(url, options) {
+      if (!bundles[url]) bundles[url] = new Bundle(url, options);
       return bundles[url];
     },
     releaseAll: function() {

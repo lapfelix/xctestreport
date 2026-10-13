@@ -68,7 +68,7 @@ extension XCTestReport {
         let testPlanConfigurations: [TestPlanConfiguration]
     }
 
-    struct TestNode: Decodable {
+    struct TestNode: Codable {
         let name: String
         let nodeType: String
         let nodeIdentifier: String?
@@ -216,16 +216,16 @@ extension XCTestReport {
         let payloadRefId: String?
     }
 
-    struct TestActivities: Decodable {
+    struct TestActivities: Codable {
         let testIdentifier: String
         let testRuns: [TestActivityRun]
     }
 
-    struct TestActivityRun: Decodable {
+    struct TestActivityRun: Codable {
         let activities: [TestActivity]
     }
 
-    struct TestActivity: Decodable {
+    struct TestActivity: Codable {
         let title: String
         let startTime: Double?
         let isAssociatedWithFailure: Bool?
@@ -234,7 +234,7 @@ extension XCTestReport {
         let failureBranchStyle: Bool?
     }
 
-    struct TestActivityAttachment: Decodable {
+    struct TestActivityAttachment: Codable {
         let name: String
         let timestamp: Double?
         let payloadId: String?
@@ -254,6 +254,7 @@ extension XCTestReport {
         let src: String
         let time: Double
         let failureAssociated: Bool
+        var runIndex: Int? = nil
     }
 
     struct TimelineAttachment {
@@ -355,7 +356,8 @@ extension XCTestReport {
     }
 
     static func isPassedTestResult(_ result: String?) -> Bool {
-        return result == "Passed"
+        // XCTest's known issues are accepted outcomes, not unexpected failures.
+        return result == "Passed" || result == "Expected Failure"
     }
 
     static func isSkippedTestResult(_ result: String?) -> Bool {

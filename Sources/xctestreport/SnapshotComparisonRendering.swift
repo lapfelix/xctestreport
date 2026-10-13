@@ -142,7 +142,7 @@ extension XCTestReport {
     // what an external consumer should join onto its base URL. The file is written whenever the
     // feature is enabled, even with zero comparisons.
 
-    func writeSnapshotReport(entries: [SnapshotReportTestEntry]) {
+    func writeSnapshotReport(entries: [SnapshotReportTestEntry]) throws {
         let sortedEntries = entries.sorted {
             ($0.suiteName, $0.testName) < ($1.suiteName, $1.testName)
         }
@@ -162,12 +162,8 @@ extension XCTestReport {
         let path = (outputDir as NSString).appendingPathComponent(snapshotReportFileName)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        do {
-            let data = try encoder.encode(report)
-            try data.write(to: URL(fileURLWithPath: path))
-            print("Snapshot comparison report written to \(path)")
-        } catch {
-            print("Error writing snapshot comparison report: \(error)")
-        }
+        let data = try encoder.encode(report)
+        try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+        print("Snapshot comparison report written to \(path)")
     }
 }

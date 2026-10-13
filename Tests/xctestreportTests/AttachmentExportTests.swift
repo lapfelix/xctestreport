@@ -7,6 +7,14 @@ import libzstd
 
 final class AttachmentExportTests: XCTestCase {
 
+    func testExplicitBinaryAndXMLPlistUTIsKeepPreviewableExtensions() {
+        let report = XCTestReport()
+        XCTAssertEqual(report.fileExtensionForUTI("com.apple.binary-property-list"), "plist")
+        XCTAssertEqual(report.fileExtensionForUTI("com.apple.xml-property-list"), "plist")
+        XCTAssertEqual(report.fileExtensionForUTI("com.apple.property-list"), "plist")
+        XCTAssertEqual(report.fileExtensionForUTI("public.data"), "dat")
+    }
+
     /// Only top-level activities carry `testCaseRun_fk`; an attachment on a nested step, or on a
     /// test issue with no activity, still has to land under its test.
     func testDirectExportAttributesNestedAndIssueAttachmentsToTheirTest() throws {

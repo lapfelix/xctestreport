@@ -17,7 +17,9 @@
 
   // MARK: Storage
 
-  function emptyStore() { return { version: 1, suites: {}, tests: {} }; }
+  function emptyStore() { return { version: 1, suites: Object.create(null), tests: Object.create(null) }; }
+
+  function own(object, key) { return Object.prototype.hasOwnProperty.call(object, key); }
 
   function load() {
     try {
@@ -38,12 +40,15 @@
   }
 
   function notesFor(store, scope, key) {
-    return (store[scope === 'suite' ? 'suites' : 'tests'][key] || []).slice();
+    var bucket = store[scope === 'suite' ? 'suites' : 'tests'];
+    return own(bucket, key) && Array.isArray(bucket[key]) ? bucket[key].slice() : [];
   }
 
   function setNotes(store, scope, key, notes) {
     var bucket = store[scope === 'suite' ? 'suites' : 'tests'];
-    if (notes.length) { bucket[key] = notes; } else { delete bucket[key]; }
+    if (notes.length) {
+      Object.defineProperty(bucket, key, { value: notes, enumerable: true, configurable: true, writable: true });
+    } else { delete bucket[key]; }
   }
 
   function readPreference(key, fallback) {
@@ -101,6 +106,16 @@
   var panel = null;
   var panelState = null; // { scope, key, title, withTime, button }
   var timeRefresh = 0;
+  var drafts = new Map();
+
+  function draftKey(state) { return JSON.stringify([state.scope, state.key]); }
+
+  function rememberDraft() {
+    if (!panel || !panelState) return;
+    var key = draftKey(panelState);
+    var text = panel.querySelector('.notes-input').value;
+    if (text) drafts.set(key, text); else drafts.delete(key);
+  }
 
   function timeline() { return window.XCTestReportTimeline || null; }
 
@@ -176,7 +191,10 @@
 
   function openPanel(state) {
     ensurePanel();
+    rememberDraft();
+    if (panelState && panelState.button) panelState.button.setAttribute('aria-expanded', 'false');
     panelState = state;
+    panel.querySelector('.notes-input').value = drafts.get(draftKey(state)) || '';
     panel.querySelector('.notes-panel-title').textContent = 'Notes · ' + state.title;
     var toggle = panel.querySelector('.notes-time-toggle');
     toggle.hidden = !state.withTime;
@@ -209,6 +227,7 @@
 
   function closePanel(restoreFocus) {
     if (!panel || panel.hidden) return;
+    rememberDraft();
     panel.hidden = true;
     document.documentElement.classList.remove('notes-panel-open');
     window.clearInterval(timeRefresh);
@@ -226,11 +245,12 @@
     if (sameTarget) { closePanel(); } else { openPanel(state); }
   }
 
-  function mutate(change) {
+  function mutate(change, target) {
+    var state = target || panelState;
     var store = load();
-    var notes = notesFor(store, panelState.scope, panelState.key);
+    var notes = notesFor(store, state.scope, state.key);
     change(notes);
-    setNotes(store, panelState.scope, panelState.key, notes);
+    setNotes(store, state.scope, state.key, notes);
     save(store);
   }
 
@@ -261,6 +281,7 @@
     }
     showError('');
     input.value = '';
+    drafts.delete(draftKey(panelState));
     input.focus();
     refreshAll();
   }
@@ -280,6 +301,8 @@
   }
 
   function editNote(item, note) {
+    // Closing or switching the panel can blur this editor after panelState has changed.
+    var target = { scope: panelState.scope, key: panelState.key };
     var textElement = item.querySelector('.notes-item-text');
     var editor = document.createElement('textarea');
     editor.className = 'notes-edit-input';
@@ -300,7 +323,7 @@
           mutate(function(notes) {
             var match = notes.find(function(candidate) { return candidate.id === note.id; });
             if (match) { match.text = text; match.updated = Date.now(); }
-          });
+          }, target);
         } catch (error) {
           finished = false;
           showError('Couldn’t save the edit: browser storage is unavailable or full.');
@@ -411,29 +434,32 @@
       var button = makeNoteButton('Notes on suite ' + key);
       button.classList.add('note-btn-suite');
       button.setAttribute('aria-expanded', 'false');
-      // The heading toggles its suite on click and Enter/Space; the button must not.
+      // Keep note activation separate from the suite disclosure (including older headings
+      // whose handlers receive bubbled click and Enter/Space events).
       button.addEventListener('keydown', function(event) { event.stopPropagation(); });
       button.addEventListener('click', function(event) {
         event.stopPropagation();
         togglePanel({ scope: 'suite', key: key, title: key, withTime: false, button: button });
       });
-      // Inside the name so it sits beside it; the heading spreads its children apart.
-      (heading.querySelector('.suite-name') || heading).appendChild(button);
+      // Native disclosure buttons must not contain another button. Older reports used the
+      // heading itself as the disclosure, so their name span remains a suitable insertion point.
+      (heading.querySelector('.suite-toggle') ? heading : heading.querySelector('.suite-name') || heading).appendChild(button);
     });
 
     var actions = document.querySelector('.summary-actions');
     if (!actions) return;
     exportControl = document.createElement('span');
     exportControl.className = 'notes-export';
-    exportControl.hidden = true;
     exportControl.innerHTML =
       '<button type="button" class="notes-copy">Copy all notes</button>' +
-      '<button type="button" class="notes-export-more" aria-haspopup="menu" aria-expanded="false" aria-label="More ways to export notes">' +
+      '<button type="button" class="notes-export-more" aria-haspopup="menu" aria-expanded="false" aria-label="Notes options">' +
+      '<span class="notes-menu-label" hidden>Notes</span>' +
       '<svg viewBox="0 0 12 12" aria-hidden="true" focusable="false"><path d="M3 4.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>' +
       '<span class="notes-export-menu" role="menu" hidden>' +
       '<button type="button" role="menuitem" data-export="copy-json">Copy as JSON</button>' +
       '<button type="button" role="menuitem" data-export="download-md">Download Markdown</button>' +
       '<button type="button" role="menuitem" data-export="download-json">Download JSON</button>' +
+      '<button type="button" role="menuitem" data-export="import-json">Import JSON…</button>' +
       '</span>';
     actions.appendChild(exportControl);
 
@@ -452,7 +478,7 @@
     moreButton.addEventListener('click', function(event) {
       event.stopPropagation();
       setMenuOpen(menu.hidden);
-      if (!menu.hidden) menu.querySelector('button').focus();
+      if (!menu.hidden) menu.querySelector('button:not([hidden])').focus();
     });
     menu.addEventListener('click', function(event) {
       var item = event.target.closest('[data-export]');
@@ -463,8 +489,10 @@
         copyText(JSON.stringify(buildJSON(), null, 2), copyButton, 'Copy all notes');
       } else if (kind === 'download-md') {
         download(buildMarkdown(), 'notes-' + reportId + '.md', 'text/markdown');
-      } else {
+      } else if (kind === 'download-json') {
         download(JSON.stringify(buildJSON(), null, 2), 'notes-' + reportId + '.json', 'application/json');
+      } else if (kind === 'import-json') {
+        showImportDialog(moreButton);
       }
     });
     menu.addEventListener('keydown', function(event) {
@@ -492,10 +520,10 @@
   function refreshIndex(store) {
     Array.prototype.forEach.call(document.querySelectorAll('.note-btn-suite'), function(button) {
       var suite = button.closest('.suite');
-      updateNoteButton(button, (store.suites[suiteKey(suite)] || []).length);
+      updateNoteButton(button, notesFor(store, 'suite', suiteKey(suite)).length);
     });
     testRows().forEach(function(row) {
-      var count = (store.tests[row.getAttribute('data-test-id')] || []).length;
+      var count = notesFor(store, 'test', row.getAttribute('data-test-id')).length;
       var cell = row.querySelector('td');
       var glyph = cell && cell.querySelector('.note-glyph');
       if (!count) {
@@ -515,7 +543,14 @@
       }
     });
     if (exportControl) {
-      exportControl.hidden = !Object.keys(store.suites).length && !Object.keys(store.tests).length;
+      var hasNotes = Object.keys(store.suites).length > 0 || Object.keys(store.tests).length > 0;
+      exportControl.classList.toggle('is-empty', !hasNotes);
+      exportControl.querySelector('.notes-copy').hidden = !hasNotes;
+      exportControl.querySelector('.notes-menu-label').hidden = hasNotes;
+      exportControl.querySelector('.notes-export-more').setAttribute('aria-label', hasNotes ? 'More ways to export or import notes' : 'Notes options');
+      Array.prototype.forEach.call(exportControl.querySelectorAll('[data-export]'), function(button) {
+        button.hidden = !hasNotes && button.getAttribute('data-export') !== 'import-json';
+      });
     }
   }
 
@@ -551,13 +586,13 @@
   function collect() {
     var store = load();
     var suites = [];
-    var seenSuites = {};
+    var seenSuites = Object.create(null);
     var tests = [];
-    var seenTests = {};
+    var seenTests = Object.create(null);
 
     function addSuite(name) {
       if (seenSuites[name]) return seenSuites[name];
-      var entry = { name: name, notes: sortedNotes(store.suites[name] || []), tests: [] };
+      var entry = { name: name, notes: sortedNotes(notesFor(store, 'suite', name)), tests: [] };
       seenSuites[name] = entry;
       suites.push(entry);
       return entry;
@@ -566,13 +601,13 @@
     Array.prototype.forEach.call(document.querySelectorAll('.suite[data-suite]'), function(suite) {
       var name = suiteKey(suite);
       var rows = Array.prototype.slice.call(suite.querySelectorAll('tr[data-test-id]'));
-      var hasNotes = (store.suites[name] || []).length ||
-        rows.some(function(row) { return (store.tests[row.getAttribute('data-test-id')] || []).length; });
+      var hasNotes = notesFor(store, 'suite', name).length ||
+        rows.some(function(row) { return notesFor(store, 'test', row.getAttribute('data-test-id')).length; });
       if (!hasNotes) return;
       var entry = addSuite(name);
       rows.forEach(function(row) {
         var id = row.getAttribute('data-test-id');
-        var notes = store.tests[id] || [];
+        var notes = notesFor(store, 'test', id);
         if (!notes.length || seenTests[id]) return;
         seenTests[id] = true;
         var test = testInfo(id, row);
@@ -583,9 +618,10 @@
     });
     Object.keys(store.suites).forEach(addSuite);
     Object.keys(store.tests).forEach(function(id) {
-      if (seenTests[id] || !store.tests[id].length) return;
+      var notes = notesFor(store, 'test', id);
+      if (seenTests[id] || !notes.length) return;
       var test = testInfo(id, null);
-      test.notes = sortedNotes(store.tests[id]);
+      test.notes = sortedNotes(notes);
       addSuite(test.suite).tests.push(test);
       tests.push(test);
     });
@@ -631,13 +667,15 @@
   }
 
   function jsonNote(note) {
-    var result = { text: note.text, created: new Date(note.created).toISOString() };
+    var result = { id: note.id, text: note.text, created: new Date(note.created).toISOString() };
     if (note.updated && note.updated !== note.created) result.updated = new Date(note.updated).toISOString();
     if (note.time) {
       result.time = {
         seconds: note.time.seconds,
         label: note.time.label,
+        absoluteTime: note.time.absoluteTime == null ? null : note.time.absoluteTime,
         run: note.time.run,
+        eventId: note.time.eventId || null,
         step: note.time.step || null,
         section: note.time.section || null
       };
@@ -648,7 +686,7 @@
 
   function buildJSON() {
     return {
-      version: 1,
+      version: 2,
       report: {
         id: reportId,
         title: reportTitle(),
@@ -674,6 +712,162 @@
         };
       })
     };
+  }
+
+  // Validate the whole backup before changing storage. URLs and other report metadata are
+  // descriptive only: imported notes stay scoped to this report's own ID and test keys.
+  function validateBackup(backup) {
+    function record(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }
+    function fail(message) { throw new Error(message); }
+    function requiredString(value, field) {
+      if (typeof value !== 'string' || !value.trim()) fail('The backup has an invalid ' + field + '.');
+      return value;
+    }
+    function date(value, field) {
+      if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) fail('A note has an invalid ' + field + '.');
+      return Date.parse(value);
+    }
+    function optionalString(value, field) {
+      if (value != null && typeof value !== 'string') fail('A timed note has an invalid ' + field + '.');
+      return value == null ? null : value;
+    }
+    // Version 1 exports lacked note IDs. Derive a repeatable ID from their original contents
+    // so restoring an older backup twice does not create duplicate notes.
+    function legacyId(scope, key, value) {
+      var text = JSON.stringify([scope, key, value.created, value.text, value.time || null]);
+      var first = 2166136261;
+      var second = 5381;
+      for (var i = 0; i < text.length; i++) {
+        first = Math.imul(first ^ text.charCodeAt(i), 16777619);
+        second = Math.imul(second, 33) ^ text.charCodeAt(i);
+      }
+      return 'legacy-' + (first >>> 0).toString(16) + '-' + (second >>> 0).toString(16);
+    }
+    if (!record(backup) || (backup.version !== 1 && backup.version !== 2)) {
+      fail('Choose a supported notes JSON backup (version 1 or 2).');
+    }
+    if (!record(backup.report) || backup.report.id !== reportId) {
+      fail('This backup belongs to a different report. Open that report to restore its notes.');
+    }
+    if (!Array.isArray(backup.suites)) fail('The backup must contain a list of suites.');
+    var targets = new Map();
+    function addNotes(scope, key, values) {
+      if (!Array.isArray(values)) fail('The backup has an invalid notes list for ' + key + '.');
+      var targetKey = JSON.stringify([scope, key]);
+      if (!targets.has(targetKey)) targets.set(targetKey, { scope: scope, key: key, notes: new Map() });
+      var target = targets.get(targetKey);
+      values.forEach(function(value) {
+        if (!record(value)) fail('The backup contains an invalid note.');
+        var note = {
+          id: value.id == null && backup.version === 1 ? legacyId(scope, key, value) : requiredString(value.id, 'note ID'),
+          text: requiredString(value.text, 'note text'),
+          created: date(value.created, 'creation date')
+        };
+        note.updated = value.updated == null ? note.created : date(value.updated, 'edit date');
+        if (value.time != null) {
+          var time = value.time;
+          if (!record(time) || !Number.isFinite(time.seconds) || time.seconds < 0 ||
+              !Number.isInteger(time.run) || time.run < 0) {
+            fail('A timed note has an invalid recording time or run.');
+          }
+          if (time.absoluteTime != null && !Number.isFinite(time.absoluteTime)) fail('A timed note has an invalid absolute time.');
+          note.time = {
+            seconds: time.seconds,
+            label: requiredString(time.label, 'time label'),
+            absoluteTime: time.absoluteTime == null ? null : time.absoluteTime,
+            run: time.run,
+            runLabel: optionalString(time.runLabel, 'run label') || '',
+            eventId: optionalString(time.eventId, 'event ID'),
+            step: optionalString(time.step, 'step'),
+            section: optionalString(time.section, 'section')
+          };
+        }
+        var previous = target.notes.get(note.id);
+        if (!previous || note.updated > previous.updated) target.notes.set(note.id, note);
+      });
+    }
+    backup.suites.forEach(function(suite) {
+      if (!record(suite)) fail('The backup contains an invalid suite.');
+      var name = requiredString(suite.name, 'suite name');
+      addNotes('suite', name, suite.notes);
+      if (!Array.isArray(suite.tests)) fail('The backup has an invalid test list for ' + name + '.');
+      suite.tests.forEach(function(test) {
+        if (!record(test)) fail('The backup contains an invalid test.');
+        addNotes('test', requiredString(test.id, 'test identifier'), test.notes);
+      });
+    });
+    return targets;
+  }
+
+  function importBackup(backup) {
+    var targets = validateBackup(backup);
+    var store = load();
+    var counts = { added: 0, updated: 0, kept: 0 };
+    targets.forEach(function(target) {
+      var notes = notesFor(store, target.scope, target.key);
+      var indexes = new Map();
+      notes.forEach(function(note, index) { indexes.set(note.id, index); });
+      target.notes.forEach(function(note, id) {
+        if (!indexes.has(id)) {
+          indexes.set(id, notes.length);
+          notes.push(note);
+          counts.added++;
+        } else {
+          var index = indexes.get(id);
+          var existing = notes[index];
+          if (note.updated > (existing.updated || existing.created)) {
+            notes[index] = note;
+            counts.updated++;
+          } else {
+            counts.kept++;
+          }
+        }
+      });
+      setNotes(store, target.scope, target.key, notes);
+    });
+    try { save(store); } catch (error) {
+      throw new Error('Couldn’t import notes: browser storage is unavailable or full. Your existing notes have been kept.');
+    }
+    refreshAll();
+    return counts;
+  }
+
+  function showImportDialog(button) {
+    var dialog = document.createElement('dialog');
+    dialog.className = 'notes-copy-dialog notes-import-dialog';
+    dialog.setAttribute('aria-labelledby', 'notes-import-title');
+    dialog.innerHTML = '<h2 id="notes-import-title">Import notes</h2>' +
+      '<p>Choose a JSON backup for this report. Existing notes are kept; newer edits of the same note replace older versions.</p>' +
+      '<input type="file" accept=".json,application/json" aria-label="Notes JSON file">' +
+      '<p class="notes-error" role="alert"></p><p class="notes-import-status" role="status"></p>' +
+      '<form method="dialog"><button>Done</button></form>';
+    var input = dialog.querySelector('input');
+    var errorMessage = dialog.querySelector('[role="alert"]');
+    var status = dialog.querySelector('[role="status"]');
+    input.addEventListener('change', async function() {
+      errorMessage.textContent = '';
+      status.textContent = '';
+      if (!input.files.length) return;
+      input.disabled = true;
+      try {
+        var content = await input.files[0].text();
+        var backup;
+        try { backup = JSON.parse(content); } catch (error) {
+          throw new Error('This file is not valid JSON. Choose a notes JSON backup.');
+        }
+        var counts = importBackup(backup);
+        status.textContent = 'Imported ' + noteLabel(counts.added) + '. Updated ' + noteLabel(counts.updated) + '. Kept ' + noteLabel(counts.kept) + ' already saved.';
+      } catch (error) {
+        errorMessage.textContent = error.message || 'Couldn’t read this notes backup. Try choosing the file again.';
+      } finally {
+        input.disabled = false;
+        input.value = '';
+      }
+    });
+    dialog.addEventListener('close', function() { dialog.remove(); button.focus(); });
+    document.body.appendChild(dialog);
+    dialog.showModal();
+    input.focus();
   }
 
   function flash(button, text, resetText) {
@@ -721,7 +915,7 @@
 
   function refreshAll() {
     var store = load();
-    if (testButton) updateNoteButton(testButton, (store.tests[testKey] || []).length);
+    if (testButton) updateNoteButton(testButton, notesFor(store, 'test', testKey).length);
     if (isIndex) refreshIndex(store);
     renderList();
   }

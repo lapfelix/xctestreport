@@ -39,8 +39,9 @@ function bundleFixture({ large = false } = {}) {
 }
 
 // `supportsRange: false` stands in for a host that ignores Range and returns the whole object.
-async function serveBundle({ supportsRange = true, large = false, exposeContentRange = true } = {}) {
-  const archive = bundleFixture({ large });
+async function serveBundle({ supportsRange = true, large = false, exposeContentRange = true,
+  archive: suppliedArchive, ignoreRangeAfter = Infinity, invalidRange = false, truncateRange = false } = {}) {
+  const archive = suppliedArchive || bundleFixture({ large });
   const requests = [];
   let bytesServed = 0;
 
@@ -58,13 +59,13 @@ async function serveBundle({ supportsRange = true, large = false, exposeContentR
     }
     if (url === '/detail.zip') {
       requests.push(req.headers.range || null);
-      const range = supportsRange && /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+      const range = supportsRange && requests.length <= ignoreRangeAfter && /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
       if (range) {
         let start;
         let end;
         if (range[1] === '') { start = Math.max(0, archive.length - Number(range[2])); end = archive.length - 1; }
         else { start = Number(range[1]); end = range[2] === '' ? archive.length - 1 : Math.min(Number(range[2]), archive.length - 1); }
-        const slice = archive.subarray(start, end + 1);
+        const slice = archive.subarray(start, end + 1 - (truncateRange ? 1 : 0));
         bytesServed += slice.length;
         const headers = {
           'Content-Length': slice.length,
@@ -72,7 +73,7 @@ async function serveBundle({ supportsRange = true, large = false, exposeContentR
           'Content-Type': 'application/zip'
         };
         // A cross-origin host that does not expose Content-Range hides the archive's real size.
-        if (exposeContentRange) headers['Content-Range'] = `bytes ${start}-${end}/${archive.length}`;
+        if (exposeContentRange) headers['Content-Range'] = invalidRange ? 'bytes invalid' : `bytes ${start}-${end}/${archive.length}`;
         res.writeHead(206, headers);
         res.end(slice);
         return;
@@ -246,5 +247,91 @@ test.describe('report bundle reader', () => {
     } finally {
       await server.close();
     }
+  });
+
+  test('handles a host returning the whole ZIP for an entry after serving a partial tail', async ({ page }) => {
+    const server = await serveBundle({ large: true, ignoreRangeAfter: 1 });
+    try {
+      await page.goto(server.url);
+      const text = await page.evaluate(() => ReportBundle.open('detail.zip').text('attachments/big.txt'));
+      expect(text).toBe(BIG_TEXT);
+      expect(server.stats().requests).toHaveLength(2);
+    } finally { await server.close(); }
+  });
+
+  test('handles a whole-ZIP response when the central directory exceeds the tail window', async ({ page }) => {
+    const entries = Array.from({ length: 1200 }, (_, index) => ({
+      name: 'attachments/' + String(index).padStart(4, '0') + '-'.repeat(40) + '.txt', data: `entry ${index}`, store: true
+    }));
+    const server = await serveBundle({ archive: makeBundle(entries), ignoreRangeAfter: 1 });
+    try {
+      await page.goto(server.url);
+      const result = await page.evaluate(async name => {
+        const bundle = ReportBundle.open('detail.zip');
+        return { count: (await bundle.names()).length, text: await bundle.text(name) };
+      }, entries[1199].name);
+      expect(result).toEqual({ count: 1200, text: 'entry 1199' });
+      expect(server.stats().requests).toHaveLength(2);
+    } finally { await server.close(); }
+  });
+
+  for (const mode of ['invalidRange', 'truncateRange']) {
+    test(`falls back to a plain GET for ${mode} responses`, async ({ page }) => {
+      const server = await serveBundle({ large: true, [mode]: true });
+      try {
+        await page.goto(server.url);
+        const text = await page.evaluate(() => ReportBundle.open('detail.zip').text('attachments/big.txt'));
+        expect(text).toBe(BIG_TEXT);
+        expect(server.stats().requests).toEqual(['bytes=-65536', null]);
+      } finally { await server.close(); }
+    });
+  }
+
+  test('rejects corrupt stored entry bytes', async ({ page }) => {
+    const archive = makeBundle([{ name: 'bad.txt', data: 'correct payload', store: true }]);
+    archive[30 + 'bad.txt'.length] ^= 1;
+    const server = await serveBundle({ archive });
+    try {
+      await page.goto(server.url);
+      const message = await page.evaluate(async () => {
+        try { await ReportBundle.open('detail.zip').text('bad.txt'); } catch (error) { return error.message; }
+      });
+      expect(message).toContain('Corrupt bundle entry');
+    } finally { await server.close(); }
+  });
+
+  test('bounds entry and Blob caches, preserves pinned media, and revokes on eviction and release', async ({ page }) => {
+    const archive = makeBundle(Array.from({ length: 8 }, (_, index) => ({ name: `${index}.txt`, data: 'a'.repeat(1024), store: true })));
+    const server = await serveBundle({ archive });
+    try {
+      await page.goto(server.url);
+      const result = await page.evaluate(async () => {
+        const revoked = [];
+        const original = URL.revokeObjectURL.bind(URL);
+        URL.revokeObjectURL = url => { revoked.push(url); original(url); };
+        const bundle = ReportBundle.open('detail.zip', { cacheLimits: { bytes: 2048, entries: 2 } });
+        bundle.pin('0.txt');
+        const active = await bundle.objectURL('0.txt', 'text/plain');
+        for (let index = 1; index < 8; index++) await bundle.objectURL(`${index}.txt`, 'text/plain');
+        const stats = bundle.cacheStats();
+        const activeText = await (await fetch(active)).text();
+        const stillActive = !revoked.includes(active);
+        bundle.unpin('0.txt');
+        bundle.release();
+        let released = false;
+        try { await fetch(active); } catch (_) { released = true; }
+        return { stats, activeText, stillActive, revoked: revoked.length, released, empty: bundle.cacheStats(), wholeReleased: bundle.whole === null };
+      });
+      expect(result.stats.bytes).toBeLessThanOrEqual(2048);
+      expect(result.stats.blobBytes).toBeLessThanOrEqual(2048);
+      expect(result.stats.byteEntries).toBeLessThanOrEqual(2);
+      expect(result.stats.blobEntries).toBeLessThanOrEqual(2);
+      expect(result.activeText).toBe('a'.repeat(1024));
+      expect(result.stillActive).toBe(true);
+      expect(result.revoked).toBe(8);
+      expect(result.released).toBe(true);
+      expect(result.wholeReleased).toBe(true);
+      expect(result.empty).toEqual({ bytes: 0, byteEntries: 0, blobBytes: 0, blobEntries: 0, pinnedEntries: 0 });
+    } finally { await server.close(); }
   });
 });

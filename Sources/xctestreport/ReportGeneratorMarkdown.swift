@@ -7,8 +7,7 @@ import Foundation
 //   <output>/agent-tests.md   - every test in one file: failure, source, steps, attachments
 //   <output>/failures.md      - the same detail, failed tests only
 //
-// Output is intentionally ASCII-only so it renders the same regardless of how a
-// viewer guesses the charset (e.g. servers that send .md as latin-1 text/plain).
+// Output is UTF-8 so assertion text, identifiers, and attachment names remain exact.
 // Test-supplied text (failure messages, step titles) is passed through verbatim.
 //
 // Per-test Markdown is rendered with links relative to a test page (../attachments/...),
@@ -37,20 +36,7 @@ extension XCTestReport {
     }
 
     private func agentMarkdownSlug(identifier: String?, name: String) -> String {
-        let base = identifier ?? name
-        var safe = ""
-        for scalar in base.unicodeScalars {
-            if (scalar.value >= 48 && scalar.value <= 57)       // 0-9
-                || (scalar.value >= 65 && scalar.value <= 90)   // A-Z
-                || (scalar.value >= 97 && scalar.value <= 122)  // a-z
-                || scalar == "." || scalar == "_" || scalar == "-" {
-                safe.unicodeScalars.append(scalar)
-            } else {
-                safe.append("_")
-            }
-        }
-        if safe.isEmpty { safe = "test" }
-        return safe
+        Self.artifactSlug(identity: identifier ?? name, prefix: "test-")
     }
 
     // MARK: - Per-test Markdown
@@ -188,7 +174,7 @@ extension XCTestReport {
             let previousRuns = test.nodeIdentifier.map { getPreviousRuns(for: $0) } ?? []
             if !previousRuns.isEmpty {
                 let history = previousRuns.prefix(10)
-                    .map { $0.result == "Passed" ? "P" : "F" }
+                    .map { Self.isPassedTestResult($0.result) ? "P" : "F" }
                     .joined(separator: " ")
                 lines.append("## Previous runs")
                 lines.append("")
@@ -264,7 +250,7 @@ extension XCTestReport {
             lines.append("")
         }
 
-        return (asciiFold(lines.joined(separator: "\n")), failureSummary.map(asciiFold))
+        return (lines.joined(separator: "\n"), failureSummary)
     }
 
     /// Legacy UI snapshots and synthesized events are gzipped binary archives for the HTML
@@ -309,8 +295,7 @@ extension XCTestReport {
     }
 
     private func htmlTestPageFileName(for test: TestNode) -> String {
-        "test_\(test.nodeIdentifier ?? test.name).html"
-            .replacingOccurrences(of: "/", with: "_")
+        Self.testPageName(for: test)
     }
 
     // MARK: - Steps (activity tree)
@@ -474,7 +459,7 @@ extension XCTestReport {
         buildErrorCount: Int?,
         buildWarningCount: Int?,
         previousResultsDate: Date?
-    ) {
+    ) throws {
         var lines = [String]()
         lines.append("# \(summaryTitle) - Test Report")
         lines.append("")
@@ -554,23 +539,19 @@ extension XCTestReport {
             lines.append("")
         }
 
-        let markdown = asciiFold(lines.joined(separator: "\n"))
+        let markdown = lines.joined(separator: "\n")
         let path = (outputDir as NSString).appendingPathComponent(agentReportFileName)
-        do {
-            try markdown.write(toFile: path, atomically: true, encoding: .utf8)
-            print("Agent report written to \(path)")
-        } catch {
-            print("Error writing agent report: \(error)")
-        }
+        try markdown.write(toFile: path, atomically: true, encoding: .utf8)
+        print("Agent report written to \(path)")
 
-        writeAgentTestsFile(summaryTitle: summaryTitle, entries: entries)
+        try writeAgentTestsFile(summaryTitle: summaryTitle, entries: entries)
     }
 
     // MARK: - Combined per-test detail
 
     // One file for every test. A per-test file each would be hundreds of files an agent has to
     // list and open, so the detail is inlined and the header explains how to grep to one section.
-    func writeAgentTestsFile(summaryTitle: String, entries: [AgentTestEntry]) {
+    func writeAgentTestsFile(summaryTitle: String, entries: [AgentTestEntry]) throws {
         let sorted = entries
             .sorted { $0.suite == $1.suite ? $0.name < $1.name : $0.suite < $1.suite }
 
@@ -637,14 +618,10 @@ extension XCTestReport {
                 "- \(line) [\(statusToken(entry.result))] \(entry.suite)/\(entry.name)"
         }
 
-        let markdown = asciiFold((headerLines + bodyLines).joined(separator: "\n")) + "\n"
+        let markdown = (headerLines + bodyLines).joined(separator: "\n") + "\n"
         let path = (outputDir as NSString).appendingPathComponent(agentTestsFileName)
-        do {
-            try markdown.write(toFile: path, atomically: true, encoding: .utf8)
-            print("Agent per-test detail written to \(path)")
-        } catch {
-            print("Error writing agent per-test detail: \(error)")
-        }
+        try markdown.write(toFile: path, atomically: true, encoding: .utf8)
+        print("Agent per-test detail written to \(path)")
     }
 
     // MARK: - Failures-only report
@@ -659,7 +636,7 @@ extension XCTestReport {
         buildErrorCount: Int?,
         buildWarningCount: Int?,
         previousResultsDate: Date?
-    ) {
+    ) throws {
         var lines = [String]()
         lines.append("# \(summaryTitle) - Failed Tests")
         lines.append("")
@@ -695,14 +672,10 @@ extension XCTestReport {
             }
         }
 
-        let markdown = asciiFold(lines.joined(separator: "\n")) + "\n"
+        let markdown = lines.joined(separator: "\n") + "\n"
         let path = (outputDir as NSString).appendingPathComponent(failuresReportFileName)
-        do {
-            try markdown.write(toFile: path, atomically: true, encoding: .utf8)
-            print("Failures report written to \(path)")
-        } catch {
-            print("Error writing failures report: \(error)")
-        }
+        try markdown.write(toFile: path, atomically: true, encoding: .utf8)
+        print("Failures report written to \(path)")
     }
 
     // Per-test Markdown links are relative to a test page (one level deep). The combined files
@@ -754,47 +727,6 @@ extension XCTestReport {
         var fence = "```"
         while trimmed.contains(fence) { fence += "`" }
         return "\(fence)\n\(trimmed)\n\(fence)"
-    }
-
-    // Force ASCII so the file never mojibakes when a viewer guesses a non-UTF-8 charset.
-    // Common typographic punctuation is mapped to its ASCII equivalent; anything else
-    // outside ASCII becomes '?'.
-    private func asciiFold(_ text: String) -> String {
-        var result = String()
-        result.unicodeScalars.reserveCapacity(text.unicodeScalars.count)
-        for scalar in text.unicodeScalars {
-            if scalar.isASCII {
-                result.unicodeScalars.append(scalar)
-                continue
-            }
-            switch scalar {
-            case "\u{2018}", "\u{2019}", "\u{201A}", "\u{201B}", "\u{2032}":
-                result.append("'")
-            case "\u{201C}", "\u{201D}", "\u{201E}", "\u{201F}", "\u{2033}":
-                result.append("\"")
-            case "\u{2010}", "\u{2011}", "\u{2013}", "\u{2014}", "\u{2212}":
-                result.append("-")
-            case "\u{2026}":
-                result.append("...")
-            case "\u{00A0}", "\u{2007}", "\u{2009}", "\u{200A}", "\u{202F}":
-                result.append(" ")
-            case "\u{2022}", "\u{00B7}", "\u{2027}":
-                result.append("-")
-            case "\u{00D7}":
-                result.append("x")
-            case "\u{2192}", "\u{279C}", "\u{27A1}":
-                result.append("->")
-            case "\u{2190}":
-                result.append("<-")
-            case "\u{2194}":
-                result.append("<->")
-            case "\u{21D2}":
-                result.append("=>")
-            default:
-                result.append("?")
-            }
-        }
-        return result
     }
 
     private func linkDestination(_ path: String) -> String {

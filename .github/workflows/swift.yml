@@ -1,7 +1,4 @@
-# This workflow will build a Swift project
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-swift
-
-name: Swift
+name: Build and test
 
 on:
   push:
@@ -13,17 +10,51 @@ jobs:
   build:
 
     runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      XCTESTREPORT_GENERATED_REPORT: ${{ runner.temp }}/xctestreport-generated-report
+      XCTESTREPORT_REAL_FIXTURES: ${{ runner.temp }}/xctestreport-real-fixtures
 
     steps:
     - uses: actions/checkout@v7
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: 'npm'
+        cache-dependency-path: ui-tests/package-lock.json
     - name: Build
       run: swift build -v
+    - name: Run Swift tests
+      run: swift test
+    - name: Verify clean installation and generate browser fixture
+      run: Scripts/test-installed-report.sh "$XCTESTREPORT_GENERATED_REPORT"
+    - name: Generate and verify actual xcresult reports
+      run: Scripts/test-real-fixtures.sh "$XCTESTREPORT_REAL_FIXTURES"
     - name: Install UI Test Dependencies
-      if: hashFiles('ui-tests/package-lock.json') != ''
       run: npm --prefix ui-tests ci
-    - name: Install Playwright Browser
-      if: hashFiles('ui-tests/package-lock.json') != ''
-      run: npx --prefix ui-tests playwright install chromium
+    - name: Install Playwright Browsers
+      run: npm --prefix ui-tests exec -- playwright install chromium webkit firefox
     - name: Run UI Integration Tests
-      if: hashFiles('ui-tests/package-lock.json') != ''
       run: npm --prefix ui-tests test
+    - name: Upload browser failure details
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: browser-test-results
+        path: |
+          ui-tests/test-results/
+          ui-tests/playwright-report/
+        if-no-files-found: ignore
+    - name: Upload native fixture failure details
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: native-fixture-results
+        path: |
+          ${{ runner.temp }}/xctestreport-real-fixtures/*.log
+          ${{ runner.temp }}/xctestreport-real-fixtures/*.json
+          ${{ runner.temp }}/xctestreport-real-fixtures/reports/
+          ${{ runner.temp }}/xctestreport-real-fixtures/*.xcresult/
+          ${{ runner.temp }}/xctestreport-real-fixtures/archived-xcresults/
+        if-no-files-found: ignore
+        retention-days: 7

@@ -37,7 +37,7 @@ extension XCTestReport {
     }
 
     static func testPageName(for test: TestNode) -> String {
-        "test_\(test.nodeIdentifier ?? test.name).html".replacingOccurrences(of: "/", with: "_")
+        artifactSlug(identity: test.nodeIdentifier ?? test.name, prefix: "test_") + ".html"
     }
 
     private static func suiteName(for test: TestNode) -> String {

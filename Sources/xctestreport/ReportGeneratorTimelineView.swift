@@ -12,6 +12,7 @@ private struct CompactScreenshotSource: Encodable {
         try container.encode(value.time)
         try container.encode(value.failureAssociated)
         try container.encode(bundleEntry)
+        try container.encode(value.runIndex)
     }
 }
 
@@ -102,105 +103,6 @@ private struct CompactTimelineRunState: Encodable {
 }
 
 extension XCTestReport {
-    private func gzipCompressData(_ data: Data) -> Data? {
-        let fileManager = FileManager.default
-        let tempDirectoryURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-            .appendingPathComponent("xctestreport-gzip-\(UUID().uuidString)", isDirectory: true)
-        let inputURL = tempDirectoryURL.appendingPathComponent("payload.json")
-        let outputURL = tempDirectoryURL.appendingPathComponent("payload.json.gz")
-
-        do {
-            try fileManager.createDirectory(
-                at: tempDirectoryURL,
-                withIntermediateDirectories: true
-            )
-            try data.write(to: inputURL, options: .atomic)
-            guard fileManager.createFile(atPath: outputURL.path, contents: nil) else {
-                return nil
-            }
-        } catch {
-            return nil
-        }
-
-        defer {
-            try? fileManager.removeItem(at: tempDirectoryURL)
-        }
-
-        guard let outputHandle = FileHandle(forWritingAtPath: outputURL.path) else {
-            return nil
-        }
-        defer {
-            try? outputHandle.close()
-        }
-
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        task.arguments = ["gzip", "-9", "-c", inputURL.path]
-        task.standardOutput = outputHandle
-        let errorHandle = FileHandle(forWritingAtPath: "/dev/null")
-        defer {
-            try? errorHandle?.close()
-        }
-        if let errorHandle {
-            task.standardError = errorHandle
-        }
-
-        do {
-            try task.run()
-        } catch {
-            return nil
-        }
-
-        task.waitUntilExit()
-        guard task.terminationStatus == 0 else {
-            return nil
-        }
-
-        guard let compressedData = try? Data(contentsOf: outputURL), !compressedData.isEmpty else {
-            return nil
-        }
-        return compressedData
-    }
-
-    private func writeCompressedTimelinePayloads(
-        runStatesJSON: String,
-        screenshotJSON: String,
-        payloadBaseName: String
-    ) -> (runStatesSrc: String, screenshotSrc: String)? {
-        guard let runStatesData = runStatesJSON.data(using: .utf8),
-            let screenshotData = screenshotJSON.data(using: .utf8),
-            let compressedRunStates = gzipCompressData(runStatesData),
-            let compressedScreenshots = gzipCompressData(screenshotData)
-        else {
-            return nil
-        }
-
-        let payloadDir = (outputDir as NSString).appendingPathComponent("timeline_payloads")
-        do {
-            try FileManager.default.createDirectory(
-                atPath: payloadDir, withIntermediateDirectories: true)
-        } catch {
-            return nil
-        }
-
-        let runStatesFileName = payloadBaseName + ".runstates.bin"
-        let screenshotFileName = payloadBaseName + ".screenshots.bin"
-        let runStatesPath = (payloadDir as NSString).appendingPathComponent(runStatesFileName)
-        let screenshotPath = (payloadDir as NSString).appendingPathComponent(screenshotFileName)
-
-        do {
-            try compressedRunStates.write(to: URL(fileURLWithPath: runStatesPath), options: .atomic)
-            try compressedScreenshots.write(
-                to: URL(fileURLWithPath: screenshotPath), options: .atomic)
-        } catch {
-            return nil
-        }
-
-        let runStatesSrc = timelinePayloadRelativePathForTestPage(fileName: runStatesFileName)
-        let screenshotSrc = timelinePayloadRelativePathForTestPage(fileName: screenshotFileName)
-        return (runStatesSrc, screenshotSrc)
-    }
-
     private func encodeCompactRunStatesJSON(_ runStates: [TimelineRunState]) -> String {
         let encoder = JSONEncoder()
         let payload = runStates.map { CompactTimelineRunState(value: $0) }
@@ -451,8 +353,10 @@ extension XCTestReport {
         let runStatesJSON: String = {
             return encodeCompactRunStatesJSON(runStates)
         }()
-        let runStatesInlineJSON = runStatesJSON
-        let screenshotInlineJSON = screenshotJSON
+        // Bundled reports load a single authoritative payload; legacy standalone rendering keeps
+        // its complete inline payload and needs no second copy on disk or network.
+        let runStatesInlineJSON = bundle == nil ? runStatesJSON : "[]"
+        let screenshotInlineJSON = bundle == nil ? screenshotJSON : "[]"
         var runStatesSrc = ""
         var screenshotSrc = ""
 
@@ -462,14 +366,6 @@ extension XCTestReport {
             bundle.addEntry(name: Self.bundleScreenshotsEntry, text: screenshotJSON)
             runStatesSrc = Self.bundleRunStatesEntry
             screenshotSrc = Self.bundleScreenshotsEntry
-        } else if let payloadBaseName, !payloadBaseName.isEmpty,
-            let payloadPaths = writeCompressedTimelinePayloads(
-                runStatesJSON: runStatesJSON,
-                screenshotJSON: screenshotJSON,
-                payloadBaseName: payloadBaseName)
-        {
-            runStatesSrc = payloadPaths.runStatesSrc
-            screenshotSrc = payloadPaths.screenshotSrc
         }
 
         let runSelectorHTML: String = {

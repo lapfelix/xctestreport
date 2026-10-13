@@ -16,7 +16,7 @@ final class TestDetailsIndexTests: XCTestCase {
         report.recordTestDetailsJSON(
             testDetailsJSON(identifier: "MyTests/testBeta()", runName: "Run 1", result: "Failed"),
             for: "MyTests/testBeta()")
-        report.writeTestDetailsIndex()
+        try report.writeTestDetailsIndex()
 
         let indexPath = (reportDir as NSString).appendingPathComponent("test_details.json")
         XCTAssertTrue(FileManager.default.fileExists(atPath: indexPath))
@@ -48,8 +48,8 @@ final class TestDetailsIndexTests: XCTestCase {
         var report = makeReport()
         report.outputDir = reportDir
 
-        report.writeTestDetailsIndex()
-        report.writeTestDetailsIndex()
+        try report.writeTestDetailsIndex()
+        try report.writeTestDetailsIndex()
 
         let indexPath = (reportDir as NSString).appendingPathComponent("test_details.json")
         let contents = try String(contentsOfFile: indexPath, encoding: .utf8)
@@ -84,7 +84,7 @@ final class TestDetailsIndexTests: XCTestCase {
             testDetailsJSON(
                 identifier: "MyTests/testAlpha()", runName: "Indexed run", result: "Passed"),
             for: "MyTests/testAlpha()")
-        previousReport.writeTestDetailsIndex()
+        try previousReport.writeTestDetailsIndex()
 
         var report = makeReport()
         report.outputDir = (parentDir as NSString).appendingPathComponent("2024-01-02")

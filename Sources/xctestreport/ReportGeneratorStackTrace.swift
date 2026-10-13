@@ -28,8 +28,10 @@ extension XCTestReport {
     }
 
     func urlEncodePath(_ path: String) -> String {
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "%?#[]")
         return path.split(separator: "/").map { component in
-            component.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
+            component.addingPercentEncoding(withAllowedCharacters: allowed)
                 ?? String(component)
         }.joined(separator: "/")
     }

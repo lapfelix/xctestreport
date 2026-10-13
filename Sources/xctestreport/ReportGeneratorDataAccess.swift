@@ -4,17 +4,16 @@ import SQLite3
 
 private let testDetailsCacheLock = NSLock()
 private var testDetailsCache = [String: XCTestReport.TestDetails]()
+private var cachedTestDetailsJSON = [String: String]()
 private let testActivitiesCacheLock = NSLock()
 private var testActivitiesCache = [String: XCTestReport.TestActivities]()
-private let previousRunsCacheLock = NSLock()
-private var previousRunsCache = [String: [XCTestReport.TestRunDetail]]()
-private let previousRunsDirsCacheLock = NSLock()
-private var previousRunsDirsCache = [String: [String]]()
 private let collectedTestDetailsLock = NSLock()
 // outputDir -> test identifier -> raw xcresulttool JSON, flushed once into test_details.json.
 private var collectedTestDetails = [String: [String: String]]()
 private let previousTestDetailsIndexCacheLock = NSLock()
 private var previousTestDetailsIndexCache = [String: [String: XCTestReport.TestDetails]]()
+private let persistedActivitiesLock = NSLock()
+private var persistedActivities = [String: [String: XCTestReport.TestActivities]]()
 private let cocoaToUnixEpochOffset: Double = 978_307_200
 
 extension XCTestReport {
@@ -35,6 +34,8 @@ extension XCTestReport {
         task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         task.arguments = args
 
+        var outputHandle: FileHandle?
+        defer { try? outputHandle?.close() }
         if let outputFile = outputFile {
             let outputURL = URL(fileURLWithPath: outputFile)
             if FileManager.default.fileExists(atPath: outputFile) {
@@ -42,8 +43,9 @@ extension XCTestReport {
             }
             FileManager.default.createFile(atPath: outputFile, contents: nil, attributes: nil)
             if let fileHandle = try? FileHandle(forWritingTo: outputURL) {
+                outputHandle = fileHandle
                 task.standardOutput = fileHandle
-                task.standardError = fileHandle
+                task.standardError = nil
             } else {
                 print("Failed to open file for writing: \(outputFile)")
                 return (nil, 1)
@@ -72,10 +74,18 @@ extension XCTestReport {
     }
 
     func getTestDetails(for testIdentifier: String) -> TestDetails? {
+        if htmlOnly {
+            let indexPath = (outputDir as NSString).appendingPathComponent("test_details.json")
+            if FileManager.default.fileExists(atPath: indexPath) {
+                return testDetailsIndex(inReportDir: outputDir)[testIdentifier]
+            }
+        }
         let cacheKey = "\(xcresultPath)|\(testIdentifier)"
         testDetailsCacheLock.lock()
         if let cached = testDetailsCache[cacheKey] {
+            let raw = cachedTestDetailsJSON[cacheKey]
             testDetailsCacheLock.unlock()
+            if let raw { recordTestDetailsJSON(raw, for: testIdentifier) }
             return cached
         }
         testDetailsCacheLock.unlock()
@@ -98,6 +108,7 @@ extension XCTestReport {
             let result = try decoder.decode(TestDetails.self, from: data)
             testDetailsCacheLock.lock()
             testDetailsCache[cacheKey] = result
+            cachedTestDetailsJSON[cacheKey] = testDetailsJSON
             testDetailsCacheLock.unlock()
             return result
         } catch {
@@ -115,7 +126,7 @@ extension XCTestReport {
 
     /// Flushes every collected test-details payload into a single `test_details.json` at the
     /// report root. Safe to call with nothing collected, and safe to call more than once.
-    func writeTestDetailsIndex() {
+    func writeTestDetailsIndex() throws {
         collectedTestDetailsLock.lock()
         let collected = collectedTestDetails[outputDir] ?? [:]
         collectedTestDetailsLock.unlock()
@@ -132,21 +143,64 @@ extension XCTestReport {
         }
 
         let indexPath = (outputDir as NSString).appendingPathComponent("test_details.json")
-        do {
-            try FileManager.default.createDirectory(
-                atPath: outputDir, withIntermediateDirectories: true)
-            let data = try JSONSerialization.data(withJSONObject: index, options: [.sortedKeys])
-            try data.write(to: URL(fileURLWithPath: indexPath), options: .atomic)
-        } catch {
-            print("Failed to write test details index at \(indexPath): \(error)")
+        if htmlOnly, FileManager.default.fileExists(atPath: indexPath) {
+            let previous = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: indexPath)))
+            guard let saved = previous as? [String: Any] else {
+                throw RuntimeError(message: "Invalid cached test details index.")
+            }
+            index = saved.merging(index) { _, new in new }
+        }
+        try FileManager.default.createDirectory(atPath: outputDir, withIntermediateDirectories: true)
+        let data = try JSONSerialization.data(withJSONObject: index, options: [.sortedKeys])
+        try data.write(to: URL(fileURLWithPath: indexPath), options: .atomic)
+    }
+
+    func prepareRegenerationCaches() throws {
+        let root = URL(fileURLWithPath: outputDir)
+        let details = root.appendingPathComponent("test_details.json")
+        let activities = root.appendingPathComponent("test_activities.json")
+        if FileManager.default.fileExists(atPath: details.path) {
+            // Decode the full index up front, rather than silently dropping corrupt entries.
+            _ = try JSONDecoder().decode([String: TestDetails].self, from: Data(contentsOf: details))
+        } else if !FileManager.default.fileExists(atPath: xcresultPath) {
+            throw RuntimeError(message: "HTML-only regeneration needs test_details.json or the original .xcresult.")
+        }
+        if FileManager.default.fileExists(atPath: activities.path) {
+            let saved = try JSONDecoder().decode([String: TestActivities].self, from: Data(contentsOf: activities))
+            persistedActivitiesLock.lock()
+            persistedActivities[outputDir] = saved
+            persistedActivitiesLock.unlock()
+        } else if !FileManager.default.fileExists(atPath: xcresultPath) {
+            throw RuntimeError(message: "This older report has no cached test_activities.json. Rebuild once from the original .xcresult to enable self-contained HTML regeneration.")
         }
     }
 
+    func recordTestActivities(_ activities: TestActivities, for testIdentifier: String) {
+        persistedActivitiesLock.lock()
+        persistedActivities[outputDir, default: [:]][testIdentifier] = activities
+        persistedActivitiesLock.unlock()
+    }
+
+    func writeTestActivitiesIndex() throws {
+        persistedActivitiesLock.lock()
+        let saved = persistedActivities[outputDir] ?? [:]
+        persistedActivitiesLock.unlock()
+        try JSONEncoder().encode(saved).write(
+            to: URL(fileURLWithPath: outputDir).appendingPathComponent("test_activities.json"), options: .atomic)
+    }
+
     func getTestActivities(for testIdentifier: String) -> TestActivities? {
+        if htmlOnly, FileManager.default.fileExists(atPath: (outputDir as NSString).appendingPathComponent("test_activities.json")) {
+            persistedActivitiesLock.lock()
+            let saved = persistedActivities[outputDir]?[testIdentifier]
+            persistedActivitiesLock.unlock()
+            return saved
+        }
         let cacheKey = "\(xcresultPath)|\(testIdentifier)"
         testActivitiesCacheLock.lock()
         if let cached = testActivitiesCache[cacheKey] {
             testActivitiesCacheLock.unlock()
+            recordTestActivities(cached, for: testIdentifier)
             return cached
         }
         testActivitiesCacheLock.unlock()
@@ -158,6 +212,7 @@ extension XCTestReport {
             testActivitiesCacheLock.lock()
             testActivitiesCache[cacheKey] = activities
             testActivitiesCacheLock.unlock()
+            recordTestActivities(activities, for: testIdentifier)
             return activities
         }
 
@@ -172,6 +227,7 @@ extension XCTestReport {
             testActivitiesCacheLock.lock()
             testActivitiesCache[cacheKey] = activities
             testActivitiesCacheLock.unlock()
+            recordTestActivities(activities, for: testIdentifier)
             return activities
         }
 
@@ -206,148 +262,47 @@ extension XCTestReport {
     }
 
     func findPreviousResults() -> TestHistory? {
-        let fileManager = FileManager.default
-        let parentDir = (outputDir as NSString).deletingLastPathComponent
-        let currentDirName = (outputDir as NSString).lastPathComponent
-
-        if let contents = try? fileManager.contentsOfDirectory(atPath: parentDir) {
-            let previousDirs =
-                contents
-                .filter { entry in
-                    guard entry != currentDirName && entry != ".DS_Store" else { return false }
-                    let fullPath = (parentDir as NSString).appendingPathComponent(entry)
-                    var isDirectory: ObjCBool = false
-                    guard fileManager.fileExists(atPath: fullPath, isDirectory: &isDirectory) else {
-                        return false
+        for reportDir in previousReportDirectories() {
+            let root = URL(fileURLWithPath: reportDir)
+            let tests: [TestNode]
+            if let data = try? Data(contentsOf: root.appendingPathComponent("tests_inventory.json")),
+                let saved = try? JSONDecoder().decode(SavedTestInventory.self, from: data) {
+                tests = saved.tests
+            } else if let data = try? Data(contentsOf: root.appendingPathComponent("tests_full.json")),
+                let full = try? JSONDecoder().decode(FullTestResults.self, from: data) {
+                tests = full.testNodes
+            } else { continue }
+            var results = [String: TestResult]()
+            func processNodes(_ nodes: [TestNode]) {
+                for node in nodes {
+                    if node.nodeType == "Test Case", let identifier = node.nodeIdentifier, let result = node.result {
+                        results[identifier] = TestResult(name: node.name, status: result, duration: node.duration)
                     }
-                    return isDirectory.boolValue
-                }
-                .sorted()
-                .reversed()
-
-            for dir in previousDirs {
-                let fullTestsPath = (parentDir as NSString).appendingPathComponent(
-                    "\(dir)/tests_full.json")
-
-                if FileManager.default.fileExists(atPath: fullTestsPath) {
-                    if let fullData = try? Data(contentsOf: URL(fileURLWithPath: fullTestsPath))
-                    {
-                        do {
-                            let previousResults = try JSONDecoder().decode(
-                                FullTestResults.self, from: fullData)
-
-                            // Convert to simplified format
-                            var testResults = [String: TestResult]()
-                            func processNodes(_ nodes: [TestNode]) {
-                                for node in nodes {
-                                    if let ident = node.nodeIdentifier, let result = node.result {
-                                        let testResult = TestResult(
-                                            name: node.name, status: result,
-                                            duration: node.duration)
-                                        testResults[ident] = testResult
-                                    }
-                                    if let children = node.children {
-                                        processNodes(children)
-                                    }
-                                }
-                            }
-                            processNodes(previousResults.testNodes)
-
-                            let startTime = findFirstValidStartTime(previousResults.testNodes)
-
-                            return TestHistory(
-                                date: Date(timeIntervalSince1970: startTime),
-                                results: testResults
-                            )
-                        } catch {
-                            continue
-                        }
-                    }
+                    if let children = node.children { processNodes(children) }
                 }
             }
+            processNodes(tests)
+            let start = runMetadata(in: reportDir)?.startTime ?? findFirstValidStartTime(tests)
+            return TestHistory(date: Date(timeIntervalSince1970: start), results: results)
         }
         return nil
     }
 
     func getPreviousRuns(for testIdentifier: String) -> [TestRunDetail] {
-        let fileManager = FileManager.default
-        let parentDir = (outputDir as NSString).deletingLastPathComponent
-        let currentDirName = (outputDir as NSString).lastPathComponent
-        let previousRunsCacheKey = "\(parentDir)|\(currentDirName)|\(testIdentifier)"
-
-        previousRunsCacheLock.lock()
-        if let cached = previousRunsCache[previousRunsCacheKey] {
-            previousRunsCacheLock.unlock()
-            return cached
-        }
-        previousRunsCacheLock.unlock()
-
-        let dirsCacheKey = "\(parentDir)|\(currentDirName)"
-        let previousDirs: [String]
-        previousRunsDirsCacheLock.lock()
-        if let cached = previousRunsDirsCache[dirsCacheKey] {
-            previousDirs = cached
-            previousRunsDirsCacheLock.unlock()
-        } else {
-            previousRunsDirsCacheLock.unlock()
-            let discoveredDirs: [String]
-            if let contents = try? fileManager.contentsOfDirectory(atPath: parentDir) {
-                discoveredDirs =
-                    contents
-                    .filter { entry in
-                        guard entry != currentDirName && entry != ".DS_Store" else { return false }
-                        let fullPath = (parentDir as NSString).appendingPathComponent(entry)
-                        var isDirectory: ObjCBool = false
-                        guard fileManager.fileExists(atPath: fullPath, isDirectory: &isDirectory)
-                        else {
-                            return false
-                        }
-                        return isDirectory.boolValue
-                    }
-                    .sorted()
-                    .reversed()
-            } else {
-                discoveredDirs = []
-            }
-            previousRunsDirsCacheLock.lock()
-            previousRunsDirsCache[dirsCacheKey] = discoveredDirs
-            previousRunsDirsCacheLock.unlock()
-            previousDirs = discoveredDirs
-        }
-
-        var previousRuns = [TestRunDetail]()
-        for dir in previousDirs.prefix(10) {
-            let reportDir = (parentDir as NSString).appendingPathComponent(dir)
-
-            if let testDetails = testDetailsIndex(inReportDir: reportDir)[testIdentifier] {
-                if let testRuns = testDetails.testRuns {
-                    previousRuns.append(contentsOf: testRuns)
-                }
+        var runs = [TestRunDetail]()
+        for reportDir in previousReportDirectories().prefix(10) {
+            if let details = testDetailsIndex(inReportDir: reportDir)[testIdentifier] {
+                runs.append(contentsOf: details.testRuns ?? [])
                 continue
             }
-
-            // Reports generated before the single-file index kept one file per test.
             let legacyPath = (reportDir as NSString).appendingPathComponent(
-                "test_details/\(testIdentifier.replacingOccurrences(of: "/", with: "_")).json"
-            )
-            if fileManager.fileExists(atPath: legacyPath) {
-                do {
-                    let data = try Data(contentsOf: URL(fileURLWithPath: legacyPath))
-                    let testDetails = try JSONDecoder().decode(TestDetails.self, from: data)
-
-                    if let testRuns = testDetails.testRuns {
-                        previousRuns.append(contentsOf: testRuns)
-                    }
-                } catch {
-                    print("Failed to load previous run details at \(legacyPath): \(error)")
-                }
+                "test_details/\(testIdentifier.replacingOccurrences(of: "/", with: "_")).json")
+            if let data = try? Data(contentsOf: URL(fileURLWithPath: legacyPath)),
+                let details = try? JSONDecoder().decode(TestDetails.self, from: data) {
+                runs.append(contentsOf: details.testRuns ?? [])
             }
         }
-
-        previousRunsCacheLock.lock()
-        previousRunsCache[previousRunsCacheKey] = previousRuns
-        previousRunsCacheLock.unlock()
-        return previousRuns
+        return runs
     }
 
     /// Parsed `test_details.json` for a previously generated report, cached so a directory is
@@ -488,7 +443,7 @@ extension XCTestReport {
             let sourcePath = (dataDir as NSString).appendingPathComponent(sourceFileName)
             
             guard FileManager.default.fileExists(atPath: sourcePath) else {
-                continue
+                throw RuntimeError(message: "Attachment payload is missing: \(sourceFileName)")
             }
             
             // Get attachment name for human-readable filename
@@ -527,8 +482,7 @@ extension XCTestReport {
                     try FileManager.default.copyItem(atPath: sourcePath, toPath: destPath)
                 }
             } catch {
-                print("Failed to copy \(sourcePath): \(error)")
-                continue
+                throw RuntimeError(message: "Failed to export attachment \(sourceFileName): \(error)")
             }
             
             // Create manifest item
@@ -703,32 +657,32 @@ extension XCTestReport {
         case "com.apple.crashreport": return "ips"
         case "public.xml": return "xml"
         case "public.json": return "json"
-        case "com.apple.property-list": return "plist"
+        case "com.apple.property-list", "com.apple.binary-property-list", "com.apple.xml-property-list": return "plist"
         case "com.apple.dt.xctest.element-snapshot": return "plist"
         case "public.html": return "html"
         default: return "dat"
         }
     }
 
-    func exportAttachments() -> [String: [AttachmentManifestItem]] {
+    func exportAttachments() throws -> [String: [AttachmentManifestItem]] {
         // Try fast direct extraction first, fall back to xcresulttool if needed
         if let result = exportAttachmentsDirect() {
             return result
         }
         print("Direct extraction failed, falling back to xcresulttool...")
-        return exportAttachmentsViaXCResultTool()
+        return try exportAttachmentsViaXCResultTool()
     }
 
-    func loadAttachmentsFromManifest(at attachmentsDir: String) -> [String: [AttachmentManifestItem]] {
+    func loadAttachmentsFromManifest(at attachmentsDir: String) throws -> [String: [AttachmentManifestItem]] {
         let manifestPath = (attachmentsDir as NSString).appendingPathComponent("manifest.json")
         guard FileManager.default.fileExists(atPath: manifestPath) else {
-            print("Attachment manifest not found at \(manifestPath)")
-            return [:]
+            throw RuntimeError(message: "Attachment manifest not found at \(manifestPath).")
         }
 
         do {
             let data = try Data(contentsOf: URL(fileURLWithPath: manifestPath))
             let manifestEntries = try JSONDecoder().decode([AttachmentManifestEntry].self, from: data)
+            try validateManifestAttachmentNames(manifestEntries)
             let attachmentsByTest = buildAttachmentsByTest(from: manifestEntries)
             let totalAttachmentCount = attachmentsByTest.values.reduce(0) { $0 + $1.count }
             let totalVideoCount = attachmentsByTest.values.reduce(0) { partialResult, attachments in
@@ -739,8 +693,17 @@ extension XCTestReport {
             )
             return attachmentsByTest
         } catch {
-            print("Failed to parse attachment manifest: \(error)")
-            return [:]
+            throw RuntimeError(message: "Failed to parse attachment manifest: \(error)")
+        }
+    }
+
+    func validateManifestAttachmentNames(_ entries: [AttachmentManifestEntry]) throws {
+        for item in entries.flatMap({ $0.attachments }) {
+            let name = item.exportedFileName
+            guard !name.isEmpty, name != ".", name != "..", !name.contains("/"),
+                !name.contains("\\"), !name.contains("\0") else {
+                throw RuntimeError(message: "Invalid attachment filename in manifest.")
+            }
         }
     }
 
@@ -757,11 +720,13 @@ extension XCTestReport {
         return attachmentsByTest
     }
 
-    func exportAttachmentsViaXCResultTool() -> [String: [AttachmentManifestItem]] {
+    func exportAttachmentsViaXCResultTool() throws -> [String: [AttachmentManifestItem]] {
         let exportStartTime = Date()
         let attachmentsDir = (outputDir as NSString).appendingPathComponent("attachments")
-        try? FileManager.default.removeItem(atPath: attachmentsDir)
-        try? FileManager.default.createDirectory(
+        if FileManager.default.fileExists(atPath: attachmentsDir) {
+            try FileManager.default.removeItem(atPath: attachmentsDir)
+        }
+        try FileManager.default.createDirectory(
             atPath: attachmentsDir, withIntermediateDirectories: true)
 
         let exportCmd = [
@@ -797,15 +762,13 @@ extension XCTestReport {
             try exportProcess.run()
         } catch {
             progressTimer.cancel()
-            print("Attachment export failed to start: \(error)")
-            return [:]
+            throw RuntimeError(message: "Attachment export failed to start: \(error)")
         }
         exportProcess.waitUntilExit()
         progressTimer.cancel()
         let exportExit = exportProcess.terminationStatus
         guard exportExit == 0 else {
-            print("Attachment export failed. Continuing without media attachments.")
-            return [:]
+            throw RuntimeError(message: "Attachment export failed with exit code \(exportExit).")
         }
 
         let exportElapsed = Date().timeIntervalSince(exportStartTime)
@@ -824,13 +787,13 @@ extension XCTestReport {
 
         let manifestPath = (attachmentsDir as NSString).appendingPathComponent("manifest.json")
         guard FileManager.default.fileExists(atPath: manifestPath) else {
-            print("Attachment manifest not found at \(manifestPath)")
-            return [:]
+            throw RuntimeError(message: "Attachment export produced no manifest at \(manifestPath).")
         }
 
         do {
             let data = try Data(contentsOf: URL(fileURLWithPath: manifestPath))
             var manifestEntries = try JSONDecoder().decode([AttachmentManifestEntry].self, from: data)
+            try validateManifestAttachmentNames(manifestEntries)
             for entryIndex in manifestEntries.indices {
                 for itemIndex in manifestEntries[entryIndex].attachments.indices {
                     let item = manifestEntries[entryIndex].attachments[itemIndex]
@@ -878,8 +841,7 @@ extension XCTestReport {
 
             return attachmentsByTest
         } catch {
-            print("Failed to parse attachment manifest: \(error)")
-            return [:]
+            throw RuntimeError(message: "Failed to parse exported attachment manifest: \(error)")
         }
     }
 
@@ -1426,8 +1388,8 @@ extension XCTestReport {
         }
 
         do {
-            try fileManager.removeItem(atPath: inputPath)
-            try fileManager.moveItem(atPath: tempOutputPath, toPath: inputPath)
+            _ = try fileManager.replaceItemAt(URL(fileURLWithPath: inputPath),
+                withItemAt: URL(fileURLWithPath: tempOutputPath))
             print(
                 "Video compression complete (\(String(format: "%.1f", successfulElapsed))s, \(successfulMode)): \(exportedFileName)"
             )

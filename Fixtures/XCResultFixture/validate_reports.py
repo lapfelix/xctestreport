@@ -121,8 +121,10 @@ def own_attachments(page, title):
     for node in page["document"].root.elements():
         if "timeline-node" not in node.classes:
             continue
-        children = [child for child in node.children if isinstance(child, Element)]
-        row = next((child for child in children if "timeline-event" in child.classes), None)
+        container = next((child for child in node.children if isinstance(child, Element) and child.tag == "details"), node)
+        children = [child for child in container.children if isinstance(child, Element)]
+        row = next((element for child in children if child.tag in {"div", "summary"}
+                    for element in child.elements() if "timeline-event" in element.classes), None)
         if row is None or not any("timeline-title" in child.classes and title in child.text for child in row.elements()):
             continue
         for child in children:
@@ -161,6 +163,11 @@ def verify_report(fixture, plan):
     require(set(details) == set(activities) == EXPECTED_CASES, "Missing cached details/activities")
     parameter_key = "ModernTests/fares(category:)"
     require([run["result"] for run in details[parameter_key]["testRuns"]] == ["Passed"] * 3, "Missing parameterized runs")
+    if mixed:
+        require(all([child.get("result") for child in run.get("children", []) if child["nodeType"] == "Repetition"] == ["Passed", "Passed"]
+                    for run in details[parameter_key]["testRuns"]), "Missing grouped parameter repetitions")
+        require("Retry 1 (Repetition): Passed" in pages[parameter_key]["document"].root.text,
+                "Grouped parameter repetitions were dropped from the rendered details")
     retry_key = "OutcomeTests/testFailsOnceThenPasses()"
     require([run["result"] for run in details[retry_key]["testRuns"]] == (["Failed", "Passed"] if mixed else ["Passed"]), "Wrong retry runs")
     require(details["ActivityTests/testPerformanceMeasurement()"]["hasPerformanceMetrics"], "Lost performance metric flag")

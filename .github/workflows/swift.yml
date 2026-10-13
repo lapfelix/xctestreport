@@ -14,9 +14,21 @@ jobs:
     steps:
     - uses: actions/checkout@v7
     - name: Set fixture output paths
+      id: fixture-cache-key
       run: |
         printf 'XCTESTREPORT_GENERATED_REPORT=%s/xctestreport-generated-report\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
         printf 'XCTESTREPORT_REAL_FIXTURES=%s/xctestreport-real-fixtures\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+        printf 'XCTESTREPORT_RAW_FIXTURE_CACHE=%s/xctestreport-raw-fixture-cache\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+        printf 'xcode=%s\n' "$(xcodebuild -version | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+    - name: Restore verified raw xcresult fixtures
+      id: raw-fixture-cache
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          ${{ env.XCTESTREPORT_RAW_FIXTURE_CACHE }}/Baseline.xcresult
+          ${{ env.XCTESTREPORT_RAW_FIXTURE_CACHE }}/Mixed.xcresult
+          ${{ env.XCTESTREPORT_RAW_FIXTURE_CACHE }}/verified.json
+        key: raw-xcresults-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.fixture-cache-key.outputs.xcode }}-${{ hashFiles('Fixtures/XCResultFixture/App/**', 'Fixtures/XCResultFixture/UnitTests/**', 'Fixtures/XCResultFixture/UITests/**', 'Fixtures/XCResultFixture/XCResultFixture.xcodeproj/**', 'Fixtures/XCResultFixture/project.yml', 'Fixtures/XCResultFixture/TestPlans/**', 'Fixtures/XCResultFixture/generate.sh') }}
     - uses: actions/setup-node@v4
       with:
         node-version: '22'
@@ -36,6 +48,22 @@ jobs:
       run: npm --prefix ui-tests exec -- playwright install chromium webkit firefox
     - name: Run UI Integration Tests
       run: npm --prefix ui-tests test
+    - name: Check raw fixture cache is verified
+      if: always() && steps.raw-fixture-cache.outputs.cache-hit != 'true'
+      id: raw-fixture-cache-ready
+      run: |
+        if [[ -d "$XCTESTREPORT_RAW_FIXTURE_CACHE/Baseline.xcresult" && -d "$XCTESTREPORT_RAW_FIXTURE_CACHE/Mixed.xcresult" && -f "$XCTESTREPORT_RAW_FIXTURE_CACHE/verified.json" ]] && python3 -c 'import json,sys; value=json.load(open(sys.argv[1])); sys.exit(0 if value.get("schemaVersion")==1 and value.get("verifiedPlans")==["Baseline","Mixed"] else 1)' "$XCTESTREPORT_RAW_FIXTURE_CACHE/verified.json"; then
+          printf 'verified=true\n' >> "$GITHUB_OUTPUT"
+        fi
+    - name: Save verified raw xcresult fixtures
+      if: always() && steps.raw-fixture-cache-ready.outputs.verified == 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          ${{ env.XCTESTREPORT_RAW_FIXTURE_CACHE }}/Baseline.xcresult
+          ${{ env.XCTESTREPORT_RAW_FIXTURE_CACHE }}/Mixed.xcresult
+          ${{ env.XCTESTREPORT_RAW_FIXTURE_CACHE }}/verified.json
+        key: ${{ steps.raw-fixture-cache.outputs.cache-primary-key }}
     - name: Upload browser failure details
       if: failure()
       uses: actions/upload-artifact@v4

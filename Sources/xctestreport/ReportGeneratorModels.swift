@@ -115,6 +115,7 @@ extension XCTestReport {
         let nodeType: String
         let result: String?
         let sourceLocation: TestRunSourceLocation?
+        var durationInSeconds: Double? = nil
     }
 
     struct TestRunSourceLocation: Decodable {
@@ -390,4 +391,31 @@ extension XCTestReport {
         )
     }
 
+}
+
+extension XCTestReport.TestRunDetail {
+    private enum CodingKeys: String, CodingKey {
+        case children, duration, durationInSeconds, name, nodeIdentifier, nodeType, result
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        children = try values.decodeIfPresent([XCTestReport.TestRunChild].self, forKey: .children)
+        name = try values.decode(String.self, forKey: .name)
+        nodeIdentifier = try values.decodeIfPresent(String.self, forKey: .nodeIdentifier)
+        nodeType = try values.decode(String.self, forKey: .nodeType)
+        result = try values.decodeIfPresent(String.self, forKey: .result)
+
+        if let supplied = try values.decodeIfPresent(String.self, forKey: .duration) {
+            duration = supplied
+        } else if let seconds = try values.decodeIfPresent(Double.self, forKey: .durationInSeconds) {
+            duration = formatCompactDuration(seconds)
+        } else {
+            // Swift Testing groups repetitions under their argument and omits the group's
+            // duration. Preserve the group and its children, deriving timing from repetitions.
+            let repetitions = (children ?? []).filter { $0.nodeType == "Repetition" }
+                .compactMap { $0.durationInSeconds }
+            duration = repetitions.isEmpty ? "--" : formatCompactDuration(repetitions.reduce(0, +))
+        }
+    }
 }

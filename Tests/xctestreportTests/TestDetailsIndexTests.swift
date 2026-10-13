@@ -5,6 +5,28 @@ import XCTest
 
 final class TestDetailsIndexTests: XCTestCase {
 
+    func testParameterizedRepetitionsWithoutParentDurationRemainDecodable() throws {
+        let data = Data(#"""
+        {
+          "name": "\"adult\"", "nodeType": "Arguments", "result": "Passed",
+          "children": [
+            {"name": "Arguments", "nodeType": "Arguments", "children": [
+              {"name": "category : \"adult\"", "nodeType": "Test Value"}
+            ]},
+            {"name": "First Run", "nodeType": "Repetition", "result": "Passed", "durationInSeconds": 0.0052},
+            {"name": "Retry 1", "nodeType": "Repetition", "result": "Passed", "durationInSeconds": 0.0001}
+          ]
+        }
+        """#.utf8)
+        let run = try JSONDecoder().decode(XCTestReport.TestRunDetail.self, from: data)
+        XCTAssertEqual(run.name, "\"adult\"")
+        XCTAssertEqual(run.result, "Passed")
+        XCTAssertEqual(run.duration, "5ms")
+        XCTAssertEqual(run.children?.map { $0.name }, ["Arguments", "First Run", "Retry 1"])
+        XCTAssertEqual(run.children?.last?.durationInSeconds, 0.0001)
+        XCTAssertEqual(run.children?.first?.children?.first?.name, "category : \"adult\"")
+    }
+
     func testIndexRoundTripsCollectedTestDetails() throws {
         let reportDir = try makeReportDir()
         var report = makeReport()

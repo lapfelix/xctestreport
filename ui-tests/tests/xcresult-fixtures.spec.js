@@ -60,6 +60,7 @@ test.describe('actual xcresult fixture reports', () => {
   test('bundled opaque/empty/duplicate payloads and genuine JSON/plist previews survive regeneration', async ({ page }) => {
     const key = 'ActivityTests/testNestedActivitiesAndAttachments()';
     await openTest(page, key);
+    await page.getByRole('button', { name: 'Expand all', exact: true }).click();
     const manifest = json('reports/mixed/attachments/manifest.json').find(entry => canonical(entry.testIdentifier) === key);
     const attachmentName = item => item.suggestedHumanReadableName.replace(/_\d+_[0-9a-f-]{36}(?=\.[^.]+$|$)/gi, '');
     const entries = manifest.attachments.filter(item => ['opaque.bin', 'empty.txt', 'duplicate-name.txt'].includes(attachmentName(item)));
@@ -78,7 +79,7 @@ test.describe('actual xcresult fixture reports', () => {
     }
     for (const [title, expected] of [['Decode → validate → render', 'nested payload one'], ['Finish journey', 'nested payload two']]) {
       const step = page.locator('.timeline-title').filter({ hasText: title }).first().locator('xpath=ancestor::li[contains(@class,"timeline-node")][1]');
-      await step.locator(':scope > .timeline-attachments .timeline-attachment-link').filter({ hasText: 'duplicate-name.txt' }).click();
+      await step.locator(':scope > .timeline-attachments .timeline-attachment-link, :scope > details > .timeline-attachments .timeline-attachment-link').filter({ hasText: 'duplicate-name.txt' }).click();
       await expect(page.locator('[data-attachment-text]')).toHaveText(expected);
       await page.locator('.attachment-preview-close').click();
     }

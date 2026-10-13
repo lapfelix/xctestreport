@@ -85,7 +85,8 @@ final class ReportRegenerationTests: XCTestCase {
             let prior = makeReport(output: directory)
             try prior.writeSavedInventory(tests: [testNode(identifier: "AdditionalPlan/test()", result: "Failed")], sourceBundles: ["merged.xcresult", "other.xcresult"])
         }
-        XCTAssertEqual(report.previousReportDirectories(), [nearest.path, older.path])
+        XCTAssertEqual(report.previousReportDirectories().map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path },
+            [nearest, older].map { $0.resolvingSymlinksInPath().path })
         let history = try XCTUnwrap(report.findPreviousResults())
         XCTAssertEqual(history.date.timeIntervalSince1970, 200)
         XCTAssertEqual(history.results["AdditionalPlan/test()"]?.status, "Failed")

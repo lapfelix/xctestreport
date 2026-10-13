@@ -126,7 +126,7 @@ test('renders UTF-8 JSON attachment text correctly inside the preview iframe', a
       const response = await fetch(document.querySelector('[data-attachment-frame]').src);
       return response.headers.get('Content-Type');
     });
-    expect(contentType).toBe('application/json; charset=utf-8');
+    expect(contentType).toMatch(/^application\/json;\s*charset=utf-8$/i);
   } finally { await server.close(); }
 });
 

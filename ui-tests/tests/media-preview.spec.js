@@ -114,6 +114,22 @@ test('uses complete inline timeline data without fetching duplicate ZIP JSON', a
   } finally { await server.close(); }
 });
 
+test('renders UTF-8 JSON attachment text correctly inside the preview iframe', async ({ page }) => {
+  const payload = JSON.stringify({ city: 'Montréal', routes: ['Green', 'Orange'], online: false });
+  const server = await serveMedia({ entries: [{ name: 'attachments/city.json', data: payload }],
+    links: [{ entry: 'attachments/city.json', kind: 'json', label: 'JSON attachment' }] });
+  try {
+    await page.goto(server.url);
+    await page.locator('.timeline-attachment-link').filter({ hasText: 'JSON attachment' }).click();
+    await expect(page.frameLocator('[data-attachment-frame]').locator('body')).toContainText('Montréal');
+    const contentType = await page.evaluate(async () => {
+      const response = await fetch(document.querySelector('[data-attachment-frame]').src);
+      return response.headers.get('Content-Type');
+    });
+    expect(contentType).toBe('application/json; charset=utf-8');
+  } finally { await server.close(); }
+});
+
 test('shows an actionable timeline error when required ZIP data cannot load', async ({ page }) => {
   const server = await serveMedia({ missingBundle: true });
   try {

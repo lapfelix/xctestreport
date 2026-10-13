@@ -20,7 +20,7 @@
   var BUNDLE_MIME_TYPES = {
     png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
     heic: 'image/heic', webp: 'image/webp', bmp: 'image/bmp', tiff: 'image/tiff',
-    svg: 'image/svg+xml', pdf: 'application/pdf', json: 'application/json',
+    svg: 'image/svg+xml', pdf: 'application/pdf', json: 'application/json; charset=utf-8',
     html: 'text/html; charset=utf-8', htm: 'text/html; charset=utf-8',
     txt: 'text/plain; charset=utf-8', log: 'text/plain; charset=utf-8',
     crash: 'text/plain; charset=utf-8', ips: 'text/plain; charset=utf-8', plist: 'text/plain; charset=utf-8',

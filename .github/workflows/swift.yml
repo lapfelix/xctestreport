@@ -11,12 +11,12 @@ jobs:
 
     runs-on: macos-latest
     timeout-minutes: 45
-    env:
-      XCTESTREPORT_GENERATED_REPORT: ${{ runner.temp }}/xctestreport-generated-report
-      XCTESTREPORT_REAL_FIXTURES: ${{ runner.temp }}/xctestreport-real-fixtures
-
     steps:
     - uses: actions/checkout@v7
+    - name: Set fixture output paths
+      run: |
+        printf 'XCTESTREPORT_GENERATED_REPORT=%s/xctestreport-generated-report\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+        printf 'XCTESTREPORT_REAL_FIXTURES=%s/xctestreport-real-fixtures\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
     - uses: actions/setup-node@v4
       with:
         node-version: '22'

@@ -342,7 +342,8 @@ for (const width of [320, 390, 667]) {
     await expect(page.locator('.snapdiff-zoomlabel')).toHaveText('200%');
     await page.getByRole('combobox',{name:'Zoom level'}).selectOption('0');
     for (const control of await page.locator('.snapdiff-mode, .sg-close, .sg-inspector-head [data-step]').all()) {
-      expect((await control.boundingBox()).height).toBeGreaterThanOrEqual(44);
+      // Firefox can report a 44px CSS height a few millionths of a pixel below 44.
+      expect((await control.boundingBox()).height).toBeGreaterThanOrEqual(44 - 0.0001);
     }
     expect(await page.getByRole('dialog').evaluate(d=>d.scrollWidth<=d.clientWidth)).toBe(true);
     await page.getByRole('button',{name:'Next snapshot',exact:true}).click();

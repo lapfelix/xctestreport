@@ -74,7 +74,10 @@ test.describe('actual xcresult fixture reports', () => {
     expect(values('duplicate-name.txt').map(value => value.toString()).sort()).toEqual(['nested payload one', 'nested payload two']);
     for (const [name, text] of [['response.json', 'Montréal'], ['route-state.plist', 'Green'], ['route-state-xml.plist', 'Green']]) {
       await page.locator('.timeline-attachment-link').filter({ hasText: name }).first().click();
-      await expect(page.locator('[data-attachment-text]')).toContainText(text);
+      const preview = name === 'response.json'
+        ? page.frameLocator('[data-attachment-frame]').locator('body')
+        : page.locator('[data-attachment-text]');
+      await expect(preview).toContainText(text);
       await page.locator('.attachment-preview-close').click();
     }
     for (const [title, expected] of [['Decode → validate → render', 'nested payload one'], ['Finish journey', 'nested payload two']]) {
@@ -114,7 +117,7 @@ test.describe('actual xcresult fixture reports', () => {
       expect(screenshots.length > 0).toBe(key.includes('testPinRoute'));
     }
     await openTest(page, 'OutcomeTests/testPassingAssertion()');
-    await expect(page.locator('video, [data-still-frame], .snapshot-diffs')).toHaveCount(0);
+    await expect(page.locator('video.timeline-video, [data-still-frame], .snapshot-diffs')).toHaveCount(0);
   });
 
   test('real snapshots expose aliases, matched/changed images, resizing and supplied diffs', async ({ page }) => {
@@ -139,7 +142,8 @@ test.describe('actual xcresult fixture reports', () => {
 
   test('real Swift Testing diagnostics retain Unicode and escaped markup', async ({ page }) => {
     await openTest(page, 'ModernTests/modernAssertion()');
-    await expect(page.locator('.test-error-box')).toContainText('Montréal → Downtown <rail> & bus');
-    expect(await page.locator('.test-error-box rail').count()).toBe(0);
+    await page.locator('.test-meta-details > summary').click();
+    await expect(page.locator('.test-meta-content')).toContainText('Montréal → Downtown <rail> & bus');
+    await expect(page.locator('.test-meta-content rail')).toHaveCount(0);
   });
 });

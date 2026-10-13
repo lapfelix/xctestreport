@@ -1,0 +1,47 @@
+name: XCResultFixture
+options:
+  bundleIdPrefix: dev.xctestreport.fixture
+  deploymentTarget:
+    iOS: "17.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    GENERATE_INFOPLIST_FILE: YES
+    CODE_SIGNING_ALLOWED: NO
+    TARGETED_DEVICE_FAMILY: "1,2"
+targets:
+  FixtureApp:
+    type: application
+    platform: iOS
+    sources: [App]
+    settings:
+      base:
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Result Fixture
+  FixtureUnitTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [UnitTests]
+    dependencies:
+      - target: FixtureApp
+  FixtureUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - target: FixtureApp
+schemes:
+  XCResultFixture:
+    build:
+      targets:
+        FixtureApp: all
+        FixtureUnitTests: [test]
+        FixtureUITests: [test]
+    test:
+      gatherCoverageData: true
+      targets: [FixtureUnitTests, FixtureUITests]
+      testPlans:
+        - path: TestPlans/Baseline.xctestplan
+          defaultPlan: true
+        - path: TestPlans/Mixed.xctestplan

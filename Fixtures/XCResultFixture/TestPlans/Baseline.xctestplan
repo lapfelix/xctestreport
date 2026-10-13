@@ -1,0 +1,44 @@
+{
+  "configurations": [
+    {
+      "id": "AB94D504-32A9-4D56-B7F3-CA6C89799011",
+      "name": "Baseline",
+      "options": {}
+    }
+  ],
+  "defaultOptions": {
+    "codeCoverage": true,
+    "environmentVariableEntries": [
+      {
+        "key": "FIXTURE_SCENARIO",
+        "value": "baseline"
+      }
+    ],
+    "preferredScreenCaptureFormat": "screenshots",
+    "uiTestingScreenshotsLifetime": "keepAlways",
+    "userAttachmentLifetime": "keepAlways",
+    "testExecutionOrdering": "lexical",
+    "testTimeoutsEnabled": true,
+    "defaultTestExecutionTimeAllowance": 30,
+    "maximumTestExecutionTimeAllowance": 60
+  },
+  "testTargets": [
+    {
+      "parallelizable": false,
+      "target": {
+        "containerPath": "container:XCResultFixture.xcodeproj",
+        "identifier": "B90BC3521B9B3501077DF0F5",
+        "name": "FixtureUnitTests"
+      }
+    },
+    {
+      "parallelizable": false,
+      "target": {
+        "containerPath": "container:XCResultFixture.xcodeproj",
+        "identifier": "A85CFD80D2FC56E8C0CD03B0",
+        "name": "FixtureUITests"
+      }
+    }
+  ],
+  "version": 1
+}

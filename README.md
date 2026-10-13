@@ -290,6 +290,16 @@ and from the back-link in each test page's snapshot section (anchored at that co
 - Reading per-test bundles in the browser requires `DecompressionStream` (Chrome 80+, Safari 16.4+,
   Firefox 113+).
 
+### Real xcresult fixtures
+
+[`Fixtures/XCResultFixture`](Fixtures/XCResultFixture/README.md) contains a standalone Xcode
+project and a generator for a passing baseline and a mixed run with deliberate failures,
+skips, retries, snapshot comparisons, nested activities with custom attachments,
+and UI tests with screenshots, videos, or both. Run
+`Fixtures/XCResultFixture/generate.sh` to produce and verify both bundles under
+`output/xcresult-fixtures/`. The fixture README maps the cases to report features and
+shows how to generate sibling reports for history checks.
+
 ### Browser regression checks
 
 Run `npm --prefix ui-tests test`. The Playwright suite uses the shipping templates and assets,

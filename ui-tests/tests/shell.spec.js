@@ -78,16 +78,48 @@ test('a test opens over the index without leaving it, and Back returns', async (
   await page.getByRole('link', { name: 'testAlpha' }).click();
 
   await expect(layerOpen(page)).toHaveCount(1);
-  await expect(page).toHaveURL(/index\.html#test=tests\/test_Alpha\(\)\.html$/);
+  await expect(page).toHaveURL(/index\.html\?q=test#test=tests\/test_Alpha\(\)\.html$/);
   await expect(page).toHaveTitle('Test Detail: Alpha');
   await expect(activeFrame(page).locator('.test-title-compact')).toHaveText('Alpha');
 
   await activeFrame(page).locator('.test-back-link').click();
   await expect(layerOpen(page)).toHaveCount(0);
-  await expect(page).toHaveURL(/index\.html$/);
+  await expect(page).toHaveURL(/index\.html\?q=test$/);
   await expect(page).toHaveTitle('Test Report');
   // The index kept its state underneath.
   await expect(page.locator('#test-search')).toHaveValue('test');
+});
+
+test('the open test excludes index controls and keeps Tab navigation within the viewer', async ({ page }) => {
+  await page.goto(baseURL + 'index.html');
+  await page.getByRole('link', { name: 'testAlpha' }).click();
+  const detail = activeFrame(page);
+  const back = detail.locator('.test-back-link');
+  const next = detail.locator('.test-list-nav a[rel="next"]');
+  await expect(page.locator('header.report-heading')).toHaveJSProperty('inert', true);
+  await expect(back).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(next).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(back).toBeFocused();
+  await back.click();
+  await expect(page.locator('header.report-heading')).toHaveJSProperty('inert', false);
+  await expect(page.getByRole('link', { name: 'testAlpha' })).toBeFocused();
+});
+
+test('filtered review links preserve their sequence after reload and closing the viewer', async ({ page }) => {
+  await page.goto(baseURL + 'index.html');
+  await page.locator('#test-search').fill('test');
+  await page.locator('.status-chip[data-status="failed"]').click();
+  await page.getByRole('link', { name: 'testAlpha' }).click();
+  await page.reload();
+  await expect(activeFrame(page).locator('.test-list-nav-filter')).toHaveText('Failed, \u201ctest\u201d');
+  await activeFrame(page).locator('.test-back-link').press('j');
+  await expect(activeFrame(page).locator('.test-title-compact')).toHaveText('Gamma');
+  await activeFrame(page).locator('.test-back-link').click();
+  await expect(page.locator('#test-search')).toHaveValue('test');
+  await expect(page.locator('.status-chip[data-status="failed"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page).toHaveURL(/\?q=test&status=failed$/);
 });
 
 test('hovering a test link preloads its page', async ({ page }) => {

@@ -46,8 +46,7 @@ final class AgentMarkdownTests: XCTestCase {
         XCTAssertTrue(markdown.contains("- [0.000s] Start Test"))
         XCTAssertTrue(markdown.contains("  - [FAIL] [5.000s] Assertion Failure: boom"))
         XCTAssertTrue(markdown.allSatisfy { $0.isASCII }, "Markdown must be ASCII-only")
-        // Parens in the HTML detail filename must be angle-bracketed so the link parses.
-        XCTAssertTrue(markdown.contains("[HTML detail](<../tests/test_Suite_testFoo().html>)"))
+        XCTAssertTrue(markdown.contains("[HTML detail](../tests/\(XCTestReport.testPageName(for: test)))"))
     }
 
     func testIndexListsFailedTestsWithReasons() throws {
@@ -65,7 +64,7 @@ final class AgentMarkdownTests: XCTestCase {
                 markdownRelativePath: "agent-tests.md#Suite_testBar__",
                 markdown: "# testBar()"),
         ]
-        report.writeAgentReport(
+        try report.writeAgentReport(
             summaryTitle: "My Suite",
             counts: XCTestReport.TestCounts(passedTests: 1, failedTests: 1, skippedTests: 0),
             result: "Failed",
@@ -101,7 +100,7 @@ final class AgentMarkdownTests: XCTestCase {
                 markdownRelativePath: "agent-tests.md#Suite_testBar__",
                 markdown: "# testBar()\n\nall good"),
         ]
-        report.writeFailuresReport(
+        try report.writeFailuresReport(
             summaryTitle: "My Suite",
             counts: XCTestReport.TestCounts(passedTests: 1, failedTests: 1, skippedTests: 0),
             result: "Failed",
@@ -131,7 +130,7 @@ final class AgentMarkdownTests: XCTestCase {
                 markdownRelativePath: "agent-tests.md#Suite_testBar__",
                 markdown: "# testBar()"),
         ]
-        report.writeFailuresReport(
+        try report.writeFailuresReport(
             summaryTitle: "My Suite",
             counts: XCTestReport.TestCounts(passedTests: 1, failedTests: 0, skippedTests: 0),
             result: "Passed",
@@ -145,7 +144,7 @@ final class AgentMarkdownTests: XCTestCase {
         XCTAssertTrue(markdown.contains("No failed tests. 1 tests passed."))
     }
 
-    func testNonAsciiContentIsFoldedToAscii() {
+    func testNonAsciiContentIsPreserved() {
         let report = makeReport()
         let message = "XCTAssertEqual failed \u{2014} expected \u{201C}caf\u{00E9}\u{201D} but got \u{2018}x\u{2019}\u{2026}"
         let test = XCTestReport.TestNode(
@@ -171,24 +170,22 @@ final class AgentMarkdownTests: XCTestCase {
             bundleFileName: "test_Suite_testUnicode().zip"
         )
 
-        XCTAssertTrue(markdown.allSatisfy { $0.isASCII }, "Markdown must be ASCII-only")
-        XCTAssertTrue(summary?.allSatisfy { $0.isASCII } ?? false)
-        XCTAssertTrue(markdown.contains("expected \"caf?\" but got 'x'..."),
-            "Typographic punctuation folds to ASCII; other non-ASCII becomes '?'")
+        XCTAssertTrue(markdown.contains(message))
+        XCTAssertEqual(summary, message)
     }
 
     func testAnchorLinkTargetsCombinedFile() {
         let report = makeReport()
         XCTAssertEqual(
             report.agentMarkdownAnchorLink(identifier: "Suite/testFoo()", name: "testFoo()"),
-            "agent-tests.md#Suite_testFoo__")
+            "agent-tests.md#\(XCTestReport.artifactSlug(identity: "Suite/testFoo()", prefix: "test-"))")
         XCTAssertEqual(
             report.agentMarkdownAnchorLink(identifier: nil, name: "testFoo()"),
-            "agent-tests.md#testFoo__")
+            "agent-tests.md#\(XCTestReport.artifactSlug(identity: "testFoo()", prefix: "test-"))")
         // Slashes and parentheses must not survive into the anchor.
         XCTAssertEqual(
             report.agentMarkdownAnchorLink(identifier: "A/B c-d.e()", name: "x"),
-            "agent-tests.md#A_B_c-d.e__")
+            "agent-tests.md#\(XCTestReport.artifactSlug(identity: "A/B c-d.e()", prefix: "test-"))")
     }
 
     func testAgentTestsFileTableOfContentsPointsAtSectionMarkers() throws {
@@ -207,7 +204,7 @@ final class AgentMarkdownTests: XCTestCase {
                 markdown: "# \(name)\n\n\(body)\n\n- [shot](../attachments/foo.png)")
         }
 
-        report.writeAgentTestsFile(summaryTitle: "My Suite", entries: entries)
+        try report.writeAgentTestsFile(summaryTitle: "My Suite", entries: entries)
 
         let markdown = try String(
             contentsOf: directory.appendingPathComponent("agent-tests.md"), encoding: .utf8)
@@ -229,7 +226,7 @@ final class AgentMarkdownTests: XCTestCase {
             let identifier = fields[2]
             XCTAssertEqual(
                 lines[lineNumber! - 1],
-                "<!-- test:\(identifier) --><a id=\"\(identifier.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "(", with: "_").replacingOccurrences(of: ")", with: "_"))\"></a>",
+                "<!-- test:\(identifier) --><a id=\"\(XCTestReport.artifactSlug(identity: identifier, prefix: "test-"))\"></a>",
                 "Line \(lineNumber!) must be the marker for \(identifier)")
             XCTAssertEqual(lines[lineNumber! + 1], "## \(status) \(identifier)")
         }
@@ -437,7 +434,7 @@ final class AgentMarkdownTests: XCTestCase {
     }
 
     private func makeReport(outputDir: String = NSTemporaryDirectory()) -> XCTestReport {
-        var report = XCTestReport()
+        var report = makeTestReport()
         report.xcresultPath = ""
         report.outputDir = outputDir
         return report

@@ -6,7 +6,7 @@ import XCTest
 final class ReportBundleTests: XCTestCase {
 
     private func makeReport(outputDir: String = NSTemporaryDirectory()) -> XCTestReport {
-        var report = XCTestReport()
+        var report = makeTestReport()
         report.xcresultPath = ""
         report.outputDir = outputDir
         report.noSnapshotDiff = false
@@ -122,6 +122,19 @@ final class ReportBundleTests: XCTestCase {
 
     // MARK: - Packing
 
+    func testMissingRequiredAttachmentDoesNotReplaceExistingBundle() throws {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("bundle-missing-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("test.zip")
+        let previous = Data("previous complete archive".utf8)
+        try previous.write(to: path)
+        let bundle = XCTestReport.Builder()
+        bundle.addAttachment(entryName: "attachments/missing.plist")
+        XCTAssertThrowsError(try bundle.write(to: path.path, attachmentsDirectory: directory.path))
+        XCTAssertEqual(try Data(contentsOf: path), previous)
+    }
+
     func testWritesReferencedAttachmentsAndReportsWhatItPacked() throws {
         let directory = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("bundle-\(UUID().uuidString)")
@@ -135,13 +148,12 @@ final class ReportBundleTests: XCTestCase {
         let bundle = XCTestReport.Builder()
         bundle.addEntry(name: XCTestReport.bundleMarkdownEntry, text: "# detail")
         bundle.addAttachment(entryName: "attachments/12.plist")
-        bundle.addAttachment(entryName: "attachments/missing.plist")
 
         let archivePath = directory.appendingPathComponent("test.zip").path
         let packed = try bundle.write(
             to: archivePath, attachmentsDirectory: attachments.path)
 
-        XCTAssertEqual(packed, ["12.plist"], "a missing file must not be reported as packed")
+        XCTAssertEqual(packed, ["12.plist"])
 
         let listed = try shellOutput(["/usr/bin/unzip", "-Z1", archivePath])
         XCTAssertTrue(listed.contains("attachments/12.plist"))

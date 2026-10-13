@@ -6,7 +6,7 @@ const suites = [
 ];
 
 test('header note renders under the title when provided', async ({ page }) => {
-  await page.goto(renderReport({ headerNote: 'Branch: feature/new-thing', suites }));
+  await page.goto(await renderReport({ headerNote: 'Branch: feature/new-thing', suites }));
 
   const note = page.locator('.header-note');
   await expect(note).toHaveText('Branch: feature/new-thing');
@@ -21,12 +21,12 @@ test('header note renders under the title when provided', async ({ page }) => {
 });
 
 test('header note is absent when not provided', async ({ page }) => {
-  await page.goto(renderReport({ suites }));
+  await page.goto(await renderReport({ suites }));
   await expect(page.locator('.header-note')).toHaveCount(0);
 });
 
 test('header note is HTML-escaped', async ({ page }) => {
-  await page.goto(renderReport({ headerNote: 'Branch: <script>x</script> & "more"', suites }));
+  await page.goto(await renderReport({ headerNote: 'Branch: <script>x</script> & "more"', suites }));
   await expect(page.locator('.header-note')).toHaveText('Branch: <script>x</script> & "more"');
   // The injected markup must not have created a real <script> element.
   await expect(page.locator('.header-note script')).toHaveCount(0);
@@ -36,7 +36,7 @@ for (const javaScriptEnabled of [true, false]) {
   test(`snapshot navigation appears beside test results (JavaScript ${javaScriptEnabled})`, async ({ browser }) => {
     const context = await browser.newContext({ javaScriptEnabled });
     const page = await context.newPage();
-    await page.goto(renderReport({ suites, snapshotGalleryLinkHTML: '<p class="snapshot-gallery-link"><a href="snapshots.html">Snapshot gallery (6 changed of 6)</a></p>' }));
+    await page.goto(await renderReport({ suites, snapshotGalleryLinkHTML: '<p class="snapshot-gallery-link"><a href="snapshots.html">Snapshot gallery (6 changed of 6)</a></p>' }));
     const nav = page.locator('.report-nav');
     await expect(nav.getByRole('link')).toHaveText(['Test results', 'Snapshots', 'Markdown']);
     await expect(nav.getByRole('link', { name: 'Snapshots', exact: true })).toHaveAttribute('href', 'snapshots.html');
@@ -46,6 +46,6 @@ for (const javaScriptEnabled of [true, false]) {
 }
 
 test('reports without comparisons do not show a broken snapshots tab', async ({ page }) => {
-  await page.goto(renderReport({ suites }));
+  await page.goto(await renderReport({ suites }));
   await expect(page.locator('.report-nav').getByRole('link')).toHaveText(['Test results', 'Markdown']);
 });

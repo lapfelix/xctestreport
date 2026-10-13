@@ -624,16 +624,13 @@ extension XCTestReport {
     }
 
     func readAttachmentData(at filePath: String) -> Data? {
-        let fileURL = URL(fileURLWithPath: filePath)
-        if fileURL.pathExtension.caseInsensitiveCompare("gz") == .orderedSame {
-            guard let compressed = FileManager.default.contents(atPath: filePath) else {
-                return nil
-            }
-            return decompressGzipData(compressed)
-        }
-
         guard let data = FileManager.default.contents(atPath: filePath) else {
             return nil
+        }
+
+        // Recovered ZIP entries are already decoded even when their original filename ends .gz.
+        if data.count >= 2, data[data.startIndex] == 0x1f, data[data.startIndex + 1] == 0x8b {
+            return decompressGzipData(data)
         }
 
         if isZstdCompressedData(data) {
@@ -1257,33 +1254,57 @@ extension XCTestReport {
         let screenshotAttachments = allAttachments.filter { isScreenshotAttachment($0) }
         guard !screenshotAttachments.isEmpty else { return [] }
 
-        let rootActivities = activities?.testRuns.flatMap { $0.activities } ?? []
-        var attachmentTimestamps = [String: [Double]]()
-        collectActivityAttachmentTimestamps(from: rootActivities, into: &attachmentTimestamps)
+        let activityRuns = activities?.testRuns ?? []
+        let rootActivities = activityRuns.flatMap { $0.activities }
         let fallbackStartTime = collectEarliestActivityTimestamp(from: rootActivities)
+        var references = [ActivityAttachmentReference]()
+        for (runIndex, run) in activityRuns.enumerated() {
+            collectActivityAttachmentReferences(from: run.activities, runIndex: runIndex, into: &references)
+        }
+        let byPayload = Dictionary(grouping: references.compactMap { reference -> ActivityAttachmentReference? in
+            guard let id = reference.payloadId, !id.isEmpty else { return nil }
+            return reference
+        }) { $0.payloadId! }
+        let byName = Dictionary(grouping: references) { $0.name }
+
+        func closest(_ candidates: [ActivityAttachmentReference], to timestamp: Double?) -> ActivityAttachmentReference? {
+            guard let timestamp else { return candidates.first }
+            let timed = candidates.filter { $0.timestamp?.isFinite == true }
+            guard !timed.isEmpty else { return candidates.first }
+            return timed.min {
+                abs($0.timestamp! - timestamp) < abs($1.timestamp! - timestamp)
+            }
+        }
 
         var seenSources = Set<String>()
         let mapped = screenshotAttachments.compactMap { attachment -> ScreenshotSource? in
             let label = attachment.suggestedHumanReadableName ?? attachment.exportedFileName
-            let timestamp =
-                attachmentTimestamps[label]?.min() ?? parseSnapshotTimestamp(from: label)
-                ?? fallbackStartTime
+            let payloadMatches = attachment.payloadRefId.flatMap { byPayload[$0] } ?? []
+            // Identity wins; an explicit manifest timestamp is safer than guessing by repeated names.
+            let identityMatch = closest(payloadMatches, to: attachment.timestamp)
+            let nameMatch = closest(byName[label] ?? [], to: attachment.timestamp)
+            let timestamp = identityMatch?.timestamp ?? attachment.timestamp ?? nameMatch?.timestamp
+                ?? parseSnapshotTimestamp(from: label) ?? fallbackStartTime
             guard let timestamp else { return nil }
-
             let src = attachmentRelativePathForTestPage(fileName: attachment.exportedFileName)
-            guard !seenSources.contains(src) else { return nil }
-            seenSources.insert(src)
-
+            guard seenSources.insert(src).inserted else { return nil }
+            let inferredRun = activityRuns.enumerated().filter { _, run in
+                let start = collectEarliestActivityTimestamp(from: run.activities)
+                return start.map { $0 <= timestamp } ?? false
+            }.max { lhs, rhs in
+                (collectEarliestActivityTimestamp(from: lhs.element.activities) ?? 0)
+                    < (collectEarliestActivityTimestamp(from: rhs.element.activities) ?? 0)
+            }?.offset
             return ScreenshotSource(
-                label: label,
-                src: src,
-                time: timestamp,
-                failureAssociated: attachment.isAssociatedWithFailure ?? false
-            )
+                label: label, src: src, time: timestamp,
+                failureAssociated: attachment.isAssociatedWithFailure ?? false,
+                runIndex: (identityMatch?.timestamp != nil || attachment.timestamp == nil ? identityMatch?.runIndex : nil)
+                    ?? (attachment.timestamp != nil ? inferredRun : nil)
+                    ?? nameMatch?.runIndex ?? inferredRun)
         }
 
         return mapped.sorted { lhs, rhs in
-            if lhs.time == rhs.time { return lhs.label < rhs.label }
+            if lhs.time == rhs.time { return lhs.src < rhs.src }
             return lhs.time < rhs.time
         }
     }

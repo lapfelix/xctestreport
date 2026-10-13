@@ -16,33 +16,34 @@ final class FailureNavigationTests: XCTestCase {
         let navigation = XCTestReport.failureNavigation(for: tests)
 
         XCTAssertEqual(navigation.count, 3)
-        let first = navigation["test_AlphaTests_testTwo().html"]
+        let first = navigation[XCTestReport.testPageName(for: node("AlphaTests/testTwo()", result: "Failed"))]
         XCTAssertNil(first?.previous)
-        XCTAssertEqual(first?.next?.pageName, "test_AlphaTests_testOne().html")
+        XCTAssertEqual(first?.next?.pageName, XCTestReport.testPageName(for: node("AlphaTests/testOne()", result: "Failed")))
         XCTAssertEqual(first?.position, 1)
         XCTAssertEqual(first?.total, 3)
 
-        let middle = navigation["test_AlphaTests_testOne().html"]
-        XCTAssertEqual(middle?.previous?.pageName, "test_AlphaTests_testTwo().html")
-        XCTAssertEqual(middle?.next?.pageName, "test_ZetaTests_testOne().html")
+        let middle = navigation[XCTestReport.testPageName(for: node("AlphaTests/testOne()", result: "Failed"))]
+        XCTAssertEqual(middle?.previous?.pageName, XCTestReport.testPageName(for: node("AlphaTests/testTwo()", result: "Failed")))
+        XCTAssertEqual(middle?.next?.pageName, XCTestReport.testPageName(for: node("ZetaTests/testOne()", result: "Failed")))
 
-        let last = navigation["test_ZetaTests_testOne().html"]
+        let last = navigation[XCTestReport.testPageName(for: node("ZetaTests/testOne()", result: "Failed"))]
         XCTAssertEqual(last?.previous?.testName, "testOne()")
         XCTAssertNil(last?.next)
-        XCTAssertNil(navigation["test_AlphaTests_testPasses().html"])
+        XCTAssertNil(navigation[XCTestReport.testPageName(for: node("AlphaTests/testPasses()", result: "Failed"))])
     }
 
     func testRenderedLinksAreEscapedAndOmittedForASingleFailure() {
-        let report = XCTestReport()
+        let report = makeTestReport()
         let single = XCTestReport.failureNavigation(for: [node("A/testA()", result: "Failed")])
-        XCTAssertEqual(report.renderFailureNavigation(single["test_A_testA().html"]), "")
+        XCTAssertEqual(report.renderFailureNavigation(single[XCTestReport.testPageName(for: node("A/testA()", result: "Failed"))]), "")
 
         let navigation = XCTestReport.failureNavigation(for: [
             node("A/testA()", result: "Failed"), node("A/test<B>()", result: "Failed"),
         ])
-        let html = report.renderFailureNavigation(navigation["test_A_testA().html"])
+        let html = report.renderFailureNavigation(navigation[XCTestReport.testPageName(for: node("A/testA()", result: "Failed"))])
         XCTAssertTrue(html.contains("Failure 1 of 2"), html)
-        XCTAssertTrue(html.contains("href=\"test_A_test&lt;B&gt;().html\""), html)
+        XCTAssertTrue(html.contains("href=\"\(XCTestReport.testPageName(for: node("A/test<B>()", result: "Failed")))\""), html)
+        XCTAssertTrue(html.contains("Next failure: test&lt;B&gt;()"), html)
         XCTAssertTrue(html.contains("rel=\"next\""), html)
         XCTAssertFalse(html.contains("rel=\"prev\""), html)
     }

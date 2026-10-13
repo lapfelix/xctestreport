@@ -28,6 +28,20 @@ final class ReportSummaryTests: XCTestCase {
         XCTAssertTrue(XCTestReport.isFailureTestResult(nil))
     }
 
+    func testExpectedFailuresRemainAcceptedAcrossCountsAndNavigation() {
+        let expected = makeTestNode(name: "testKnownIssue", result: "Expected Failure")
+        let actual = makeTestNode(name: "testUnexpectedIssue", result: "Failed")
+        let counts = XCTestReport.testCounts(for: [expected, actual])
+        XCTAssertTrue(XCTestReport.isPassedTestResult(expected.result))
+        XCTAssertFalse(XCTestReport.isFailureTestResult(expected.result))
+        XCTAssertEqual(counts.passedTests, 1)
+        XCTAssertEqual(counts.failedTests, 1)
+        let navigation = XCTestReport.failureNavigation(for: [expected, actual])
+        XCTAssertEqual(navigation.count, 1)
+        XCTAssertNil(navigation[XCTestReport.testPageName(for: expected)])
+        XCTAssertNotNil(navigation[XCTestReport.testPageName(for: actual)])
+    }
+
     func testIndexTemplateClarifiesTotalExcludesSkippedTests() throws {
         let template = try loadProjectFile("Sources/xctestreport/Resources/Web/templates/index.html")
 

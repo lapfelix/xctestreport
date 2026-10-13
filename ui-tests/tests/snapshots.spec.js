@@ -11,6 +11,102 @@ async function inspect(page, name = 'NearbyRouteDisplayName-text') {
   await expect.poll(()=>page.locator('.snapdiff-layer-expected').first().evaluate(img=>img.complete && img.naturalWidth>0)).toBe(true);
 }
 
+async function showSyntheticComparison(page, options) {
+  await page.goto(server.url);
+  await page.addScriptTag({url:new URL('web/snapshot-diff.js',server.url).href});
+  await page.evaluate(options => {
+    const width = options.width || 1;
+    const height = options.height || 1;
+    const image = (rgba, actual) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      const context = canvas.getContext('2d');
+      const pixels = context.createImageData(width,height);
+      for (let y=0;y<height;y++) for (let x=0;x<width;x++) {
+        const color = actual && options.pattern
+          ? ((options.pattern === 'checkerboard' ? (x+y)%2 : x%2) === 0 ? rgba : options.expected)
+          : rgba;
+        pixels.data.set(color,(y*width+x)*4);
+      }
+      context.putImageData(pixels,0,0);
+      return canvas.toDataURL();
+    };
+    const expectedSize = options.expectedSize || [width,height];
+    const actualSize = options.actualSize || [width,height];
+    const ref = (src,size) => ({src,rootSrc:src,width:size[0],height:size[1]});
+    const comparison = {
+      name:'Synthetic', expected:ref(image(options.expected,false),expectedSize),
+      actual:ref(image(options.actual,true),actualSize), diff:null,
+      sizeMismatch:expectedSize.toString() !== actualSize.toString(),
+      widthDelta:actualSize[0]-expectedSize[0],heightDelta:actualSize[1]-expectedSize[1],
+      changedPixels:0,totalPixels:width*height,changedFraction:0,maxChannelDelta:0,
+      boundingBoxes:[],failureAssociated:false,diffSynthesized:false,tolerance:options.tolerance,
+      overlapChangedPixels:0,overlapPixels:width*height,overlapChangedFraction:0,overlapMaxChannelDelta:0,
+    };
+    const section = document.createElement('section');
+    section.className = 'snapshot-diffs';
+    section.setAttribute('data-snapshot-analysis-open','true');
+    section.setAttribute('data-snapshot-comparisons',encodeURIComponent(JSON.stringify([comparison])));
+    document.body.replaceChildren(section);
+    window.SnapshotDiff.enhance(section);
+  },options);
+  await expect(page.locator('.snapdiff-stage')).toBeVisible();
+}
+
+test('configured tolerance above 128 survives enhancement and supports the full channel range', async ({page}) => {
+  await showSyntheticComparison(page,{expected:[0,0,0,255],actual:[180,0,0,255],tolerance:200});
+  const slider = page.getByRole('slider',{name:'Per-channel tolerance'});
+  await expect(slider).toHaveValue('200');
+  await expect(slider).toHaveAttribute('max','255');
+  await expect(page.locator('.snapdiff-stat-value').first()).toContainText('0 px');
+  await expect(page.locator('.snapdiff-stat-value').first()).toContainText('tolerance 200');
+  await slider.fill('128');
+  await expect(page.locator('.snapdiff-stat-value').first()).toContainText('1 px');
+  await slider.fill('255');
+  await expect(page.locator('.snapdiff-stat-value').first()).toContainText('0 px');
+});
+
+test('transparent pixels use the same premultiplied channel delta as native comparisons', async ({page}) => {
+  await showSyntheticComparison(page,{expected:[20,0,0,128],actual:[40,0,0,128],tolerance:12});
+  await expect(page.locator('.snapdiff-stat-value').first()).toContainText('0 px');
+  await expect(page.locator('.snapdiff-stat-value').nth(1)).toHaveText('10 / 255');
+  await page.getByRole('slider',{name:'Per-channel tolerance'}).fill('9');
+  await expect(page.locator('.snapdiff-stat-value').first()).toContainText('1 px');
+  await showSyntheticComparison(page,{expected:[20,0,0,0],actual:[40,0,0,0],tolerance:0});
+  await expect(page.locator('.snapdiff-stat-value').nth(1)).toHaveText('0 / 255');
+  await showSyntheticComparison(page,{expected:[0,0,0,128],actual:[0,0,0,255],tolerance:12});
+  await expect(page.locator('.snapdiff-stat-value').first()).toContainText('1 px');
+  await expect(page.locator('.snapdiff-stat-value').nth(1)).toHaveText('127 / 255');
+});
+
+test('oversized combined canvas keeps image viewing available without reading pixels', async ({page}) => {
+  await page.addInitScript(()=>{
+    window.pixelReads=0;
+    const read=CanvasRenderingContext2D.prototype.getImageData;
+    CanvasRenderingContext2D.prototype.getImageData=function(...args){window.pixelReads++;return read.apply(this,args);};
+  });
+  await showSyntheticComparison(page,{
+    expected:[0,0,0,255],actual:[0,0,0,255],tolerance:12,
+    expectedSize:[10001,1],actualSize:[1,10001],
+  });
+  await expect(page.getByRole('button',{name:'Heatmap (key 5)',exact:true})).toBeDisabled();
+  await expect(page.getByRole('slider',{name:'Per-channel tolerance'})).toBeDisabled();
+  expect(await page.evaluate(()=>window.pixelReads)).toBe(0);
+  await expect(page.locator('.snapdiff-layer-expected').first()).toBeVisible();
+});
+
+test('wide checkerboards and noisy masks retain useful bounded change navigation', async ({page}) => {
+  for (const options of [
+    {width:2048,height:64,pattern:'checkerboard'},
+    {width:2048,height:512,pattern:'stripes'},
+  ]) {
+    await showSyntheticComparison(page,{expected:[0,0,0,255],actual:[255,0,0,255],tolerance:12,...options});
+    await expect(page.locator('.snapdiff-stat-value').first()).toContainText((options.width*options.height/2).toLocaleString()+' px');
+    await page.getByRole('button',{name:'Next difference',exact:true}).click();
+    await expect(page.locator('.snapdiff-counter')).toHaveText('1 / 1');
+  }
+});
+
 test('contact sheet shows all failures without booting a viewer or reading pixels', async ({page}) => {
   const requests=[];
   page.on('request',r=>requests.push(r.url()));
@@ -246,7 +342,8 @@ for (const width of [320, 390, 667]) {
     await expect(page.locator('.snapdiff-zoomlabel')).toHaveText('200%');
     await page.getByRole('combobox',{name:'Zoom level'}).selectOption('0');
     for (const control of await page.locator('.snapdiff-mode, .sg-close, .sg-inspector-head [data-step]').all()) {
-      expect((await control.boundingBox()).height).toBeGreaterThanOrEqual(44);
+      // Firefox can report a 44px CSS height a few millionths of a pixel below 44.
+      expect((await control.boundingBox()).height).toBeGreaterThanOrEqual(44 - 0.0001);
     }
     expect(await page.getByRole('dialog').evaluate(d=>d.scrollWidth<=d.clientWidth)).toBe(true);
     await page.getByRole('button',{name:'Next snapshot',exact:true}).click();
@@ -273,18 +370,32 @@ test('dark secondary text and selected modes have readable contrast', async ({pa
   for (const ratio of contrast) expect(ratio).toBeGreaterThanOrEqual(4.5);
 });
 
-test('two-finger pinch zooms an image without zooming the page', async ({browser}) => {
-  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
+test('two-finger pinch zooms an image without zooming the page', async ({browser,browserName}) => {
+  const context=await browser.newContext({viewport:{width:390,height:844},...(browserName === 'firefox' ? {} : {isMobile:true}),hasTouch:true});
   const page=await context.newPage();
   await inspect(page);
   await page.locator('.snapdiff-stage').scrollIntoViewIfNeeded();
   const bounds=await page.locator('.snapdiff-stage').boundingBox();
   const y=bounds.y+bounds.height/2;
-  const session=await context.newCDPSession(page);
   const before=await page.locator('.snapdiff-zoomlabel').textContent();
-  await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:bounds.x+30,y,id:1},{x:bounds.x+100,y,id:2}]});
-  await session.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:bounds.x+10,y,id:1},{x:bounds.x+160,y,id:2}]});
-  await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  if (browserName === 'chromium') {
+    const session=await context.newCDPSession(page);
+    await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:bounds.x+30,y,id:1},{x:bounds.x+100,y,id:2}]});
+    await session.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:bounds.x+10,y,id:1},{x:bounds.x+160,y,id:2}]});
+    await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  } else {
+    // Playwright has no native multi-touch dispatch outside Chromium. Exercise the viewer's
+    // same two-pointer gesture path without depending on Chromium's DevTools protocol.
+    await page.locator('.snapdiff-stage').evaluate((stage, point) => {
+      const send = (type, pointerId, x) => stage.dispatchEvent(new PointerEvent(type, {
+        bubbles:true, cancelable:true, pointerType:'touch', pointerId,
+        button:0, buttons:type === 'pointerup' ? 0 : 1, clientX:point.x+x, clientY:point.y,
+      }));
+      send('pointerdown',1,30); send('pointerdown',2,100);
+      send('pointermove',1,10); send('pointermove',2,160);
+      send('pointerup',1,10); send('pointerup',2,160);
+    }, {x:bounds.x,y});
+  }
   await expect(page.locator('.snapdiff-zoomlabel')).not.toHaveText(before);
   expect(await page.evaluate(()=>visualViewport.scale)).toBe(1);
   await page.getByRole('combobox',{name:'Zoom level'}).selectOption('0');

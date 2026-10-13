@@ -58,7 +58,7 @@ final class ReportIndexTests: XCTestCase {
     }
 
     func testPreviousRunDeltaHTMLEscapesAndLinks() {
-        let report = XCTestReport()
+        let report = makeTestReport()
         let change = XCTestReport.PreviousRunChange(
             identifier: "Suite/test<A>", name: "test<A>", pagePath: "tests/a.html")
         let html = report.renderPreviousRunDeltaHTML(

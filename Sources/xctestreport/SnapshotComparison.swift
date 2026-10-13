@@ -16,6 +16,7 @@ private let snapshotMaxBoundingBoxes = 50
 private let snapshotMaxComponentsToMerge = 2000
 private let snapshotBoundingBoxMergeGap = 4
 private let snapshotMaxPixels = 80_000_000
+private let snapshotMaxRuns = 500_000
 
 extension XCTestReport {
 
@@ -142,7 +143,7 @@ extension XCTestReport {
     struct SnapshotBitmap {
         let width: Int
         let height: Int
-        /// RGBA8, row-major, `width * height * 4` bytes.
+        /// Premultiplied sRGB RGBA8, row-major, `width * height * 4` bytes.
         let pixels: [UInt8]
     }
 
@@ -241,12 +242,21 @@ extension XCTestReport {
         let directory = attachmentsDirectoryPath
         let expectedPath = (directory as NSString).appendingPathComponent(expectedItem.exportedFileName)
         let actualPath = (directory as NSString).appendingPathComponent(actualItem.exportedFileName)
-        guard let expectedBitmap = loadSnapshotBitmap(atPath: expectedPath),
-            let actualBitmap = loadSnapshotBitmap(atPath: actualPath)
+        guard let expectedSize = snapshotImageDimensions(atPath: expectedPath),
+            let actualSize = snapshotImageDimensions(atPath: actualPath)
         else { return nil }
-
-        let result = compareSnapshotBitmaps(
-            expected: expectedBitmap, actual: actualBitmap, tolerance: snapshotTolerance)
+        guard snapshotPixelCount(
+            width: max(expectedSize.width, actualSize.width),
+            height: max(expectedSize.height, actualSize.height)) != nil
+        else {
+            print("Skipping snapshot comparison \(name): combined image canvas exceeds \(snapshotMaxPixels) pixels.")
+            return nil
+        }
+        guard let expectedBitmap = loadSnapshotBitmap(atPath: expectedPath),
+            let actualBitmap = loadSnapshotBitmap(atPath: actualPath),
+            let result = compareSnapshotBitmaps(
+                expected: expectedBitmap, actual: actualBitmap, tolerance: snapshotTolerance)
+        else { return nil }
 
         var diffRef: SnapshotImageRef?
         var diffSynthesized = false
@@ -301,7 +311,7 @@ extension XCTestReport {
             overlapPixels: result.overlapPixels,
             overlapChangedFraction: (overlapFraction * 1_000_000).rounded() / 1_000_000,
             overlapMaxChannelDelta: result.overlapMaxChannelDelta,
-            tolerance: max(0, snapshotTolerance))
+            tolerance: min(255, max(0, snapshotTolerance)))
     }
 
     func snapshotDeviceInfo(testDetails: TestDetails?, fallbackDevice: Device?) -> SnapshotDeviceInfo {
@@ -333,15 +343,21 @@ extension XCTestReport {
     /// Compares top-left aligned over the union rect; pixels present in only one image count as changed.
     func compareSnapshotBitmaps(
         expected: SnapshotBitmap, actual: SnapshotBitmap, tolerance: Int
-    ) -> SnapshotDiffResult {
+    ) -> SnapshotDiffResult? {
         let width = max(expected.width, actual.width)
         let height = max(expected.height, actual.height)
-        var changed = [Bool](repeating: false, count: max(0, width * height))
+        guard let pixelCount = snapshotPixelCount(width: width, height: height),
+            let expectedCount = snapshotPixelCount(width: expected.width, height: expected.height),
+            let actualCount = snapshotPixelCount(width: actual.width, height: actual.height),
+            expected.pixels.count == expectedCount * 4,
+            actual.pixels.count == actualCount * 4
+        else { return nil }
+        var changed = [Bool](repeating: false, count: pixelCount)
         var changedPixels = 0
         var maxChannelDelta = 0
         var overlapChangedPixels = 0
         var overlapMaxChannelDelta = 0
-        let boundedTolerance = max(0, tolerance)
+        let boundedTolerance = min(255, max(0, tolerance))
 
         expected.pixels.withUnsafeBufferPointer { expectedBuffer in
             actual.pixels.withUnsafeBufferPointer { actualBuffer in
@@ -392,7 +408,9 @@ extension XCTestReport {
 
     /// Connected runs of changed pixels, coalesced into a small set of rectangles.
     func snapshotBoundingBoxes(changed: [Bool], width: Int, height: Int) -> [SnapshotBoundingBox] {
-        guard width > 0, height > 0, changed.count >= width * height else { return [] }
+        guard let pixelCount = snapshotPixelCount(width: width, height: height),
+            changed.count >= pixelCount
+        else { return [] }
 
         struct Run {
             let y: Int
@@ -402,6 +420,7 @@ extension XCTestReport {
 
         var runs = [Run]()
         var parents = [Int]()
+        var ranks = [UInt8]()
         var previousRowRange = 0..<0
 
         func find(_ index: Int) -> Int {
@@ -419,11 +438,18 @@ extension XCTestReport {
         func union(_ lhs: Int, _ rhs: Int) {
             let lhsRoot = find(lhs)
             let rhsRoot = find(rhs)
-            if lhsRoot != rhsRoot { parents[rhsRoot] = lhsRoot }
+            guard lhsRoot != rhsRoot else { return }
+            if ranks[lhsRoot] < ranks[rhsRoot] {
+                parents[lhsRoot] = rhsRoot
+            } else {
+                parents[rhsRoot] = lhsRoot
+                if ranks[lhsRoot] == ranks[rhsRoot] { ranks[lhsRoot] += 1 }
+            }
         }
 
         for y in 0..<height {
             let rowStartIndex = runs.count
+            var previousCursor = previousRowRange.lowerBound
             var x = 0
             while x < width {
                 guard changed[y * width + x] else {
@@ -432,12 +458,21 @@ extension XCTestReport {
                 }
                 var end = x
                 while end + 1 < width && changed[y * width + end + 1] { end += 1 }
+                if runs.count >= snapshotMaxRuns {
+                    return snapshotChangedBounds(changed: changed, width: width, height: height)
+                }
                 runs.append(Run(y: y, start: x, end: end))
                 parents.append(runs.count - 1)
+                ranks.append(0)
                 let current = runs.count - 1
-                for previous in previousRowRange
-                where runs[previous].start <= end + 1 && x <= runs[previous].end + 1 {
+                while previousCursor < previousRowRange.upperBound
+                    && runs[previousCursor].end + 1 < x {
+                    previousCursor += 1
+                }
+                var previous = previousCursor
+                while previous < previousRowRange.upperBound && runs[previous].start <= end + 1 {
                     union(previous, current)
+                    previous += 1
                 }
                 x = end + 2
             }
@@ -474,6 +509,26 @@ extension XCTestReport {
         return Array(merged.prefix(snapshotMaxBoundingBoxes))
     }
 
+    /// A noisy mask still gets one useful navigation region without retaining millions of runs.
+    private func snapshotChangedBounds(changed: [Bool], width: Int, height: Int)
+        -> [SnapshotBoundingBox]
+    {
+        var minX = width
+        var minY = height
+        var maxX = -1
+        var maxY = -1
+        for y in 0..<height {
+            for x in 0..<width where changed[y * width + x] {
+                minX = min(minX, x)
+                minY = min(minY, y)
+                maxX = max(maxX, x)
+                maxY = max(maxY, y)
+            }
+        }
+        guard maxX >= minX else { return [] }
+        return [SnapshotBoundingBox(x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1)]
+    }
+
     func coalesceSnapshotBoundingBoxes(_ boxes: [SnapshotBoundingBox], gap: Int)
         -> [SnapshotBoundingBox]
     {
@@ -507,17 +562,37 @@ extension XCTestReport {
 
     // MARK: - Images
 
+    /// Division first prevents overflow even for corrupt metadata or a very wide/tall union.
+    func snapshotPixelCount(width: Int, height: Int) -> Int? {
+        guard width > 0, height > 0, width <= snapshotMaxPixels / height else { return nil }
+        return width * height
+    }
+
+    func snapshotImageDimensions(atPath path: String) -> (width: Int, height: Int)? {
+        guard let source = CGImageSourceCreateWithURL(
+            URL(fileURLWithPath: path) as CFURL,
+            [kCGImageSourceShouldCache as String: false] as CFDictionary),
+            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any],
+            let width = properties[kCGImagePropertyPixelWidth as String] as? NSNumber,
+            let height = properties[kCGImagePropertyPixelHeight as String] as? NSNumber,
+            snapshotPixelCount(width: width.intValue, height: height.intValue) != nil
+        else { return nil }
+        return (width.intValue, height.intValue)
+    }
+
     func loadSnapshotBitmap(atPath path: String) -> SnapshotBitmap? {
-        guard FileManager.default.fileExists(atPath: path),
+        guard snapshotImageDimensions(atPath: path) != nil,
             let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
             let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
         else { return nil }
 
         let width = image.width
         let height = image.height
-        guard width > 0, height > 0, width * height <= snapshotMaxPixels else { return nil }
+        guard let pixelCount = snapshotPixelCount(width: width, height: height),
+            let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)
+        else { return nil }
 
-        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        var pixels = [UInt8](repeating: 0, count: pixelCount * 4)
         var didDraw = false
         pixels.withUnsafeMutableBytes { buffer in
             guard let base = buffer.baseAddress,
@@ -527,7 +602,7 @@ extension XCTestReport {
                     height: height,
                     bitsPerComponent: 8,
                     bytesPerRow: width * 4,
-                    space: CGColorSpaceCreateDeviceRGB(),
+                    space: colorSpace,
                     bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
             else { return }
             context.draw(
@@ -543,7 +618,10 @@ extension XCTestReport {
     func renderSnapshotDiffPixels(
         expected: SnapshotBitmap, actual: SnapshotBitmap, result: SnapshotDiffResult
     ) -> [UInt8] {
-        var output = [UInt8](repeating: 255, count: result.width * result.height * 4)
+        guard let pixelCount = snapshotPixelCount(width: result.width, height: result.height),
+            result.changed.count == pixelCount
+        else { return [] }
+        var output = [UInt8](repeating: 255, count: pixelCount * 4)
         for y in 0..<result.height {
             for x in 0..<result.width {
                 let outIndex = (y * result.width + x) * 4
@@ -599,20 +677,26 @@ extension XCTestReport {
             wrote = writeSnapshotPNG(
                 pixels: pixels, width: result.width, height: result.height, toPath: destinationPath)
         }
+        if !wrote {
+            print("Could not write generated snapshot diff to \(destinationPath); expected and actual images remain available.")
+        }
         return wrote ? fileName : nil
     }
 
     @discardableResult
     func writeSnapshotPNG(pixels: [UInt8], width: Int, height: Int, toPath path: String) -> Bool {
-        guard width > 0, height > 0, pixels.count == width * height * 4 else { return false }
-        guard let provider = CGDataProvider(data: Data(pixels) as CFData),
+        guard let pixelCount = snapshotPixelCount(width: width, height: height),
+            pixels.count == pixelCount * 4
+        else { return false }
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+            let provider = CGDataProvider(data: Data(pixels) as CFData),
             let image = CGImage(
                 width: width,
                 height: height,
                 bitsPerComponent: 8,
                 bitsPerPixel: 32,
                 bytesPerRow: width * 4,
-                space: CGColorSpaceCreateDeviceRGB(),
+                space: colorSpace,
                 bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
                 provider: provider,
                 decode: nil,

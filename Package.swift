@@ -1,10 +1,10 @@
-// swift-tools-version:5.5
+// swift-tools-version:6.0
 import PackageDescription
 
 let package = Package(
     name: "xctestreport",
     platforms: [
-        .macOS(.v10_15)
+        .macOS("10.15.4")
     ],
     dependencies: [
         .package(
@@ -33,5 +33,6 @@ let package = Package(
                 "xctestreport"
             ]
         )
-    ]
+    ],
+    swiftLanguageModes: [.v5]
 )

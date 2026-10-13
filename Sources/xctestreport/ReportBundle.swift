@@ -121,7 +121,9 @@ extension XCTestReport {
             var packed = Set<String>()
             for fileName in attachmentFileNames.sorted() {
                 let source = (attachmentsDirectory as NSString).appendingPathComponent(fileName)
-                guard let raw = FileManager.default.contents(atPath: source) else { continue }
+                guard let raw = FileManager.default.contents(atPath: source) else {
+                    throw RuntimeError(message: "Missing required bundled attachment: \(fileName)")
+                }
                 let decoded = decode(source) ?? raw
                 // A decoded payload no longer matches the extension, so pick the method by content.
                 let compress: Bool? = decoded.count == raw.count ? nil : true

@@ -7,6 +7,14 @@ import libzstd
 
 final class AttachmentExportTests: XCTestCase {
 
+    func testExplicitBinaryAndXMLPlistUTIsKeepPreviewableExtensions() {
+        let report = makeTestReport()
+        XCTAssertEqual(report.fileExtensionForUTI("com.apple.binary-property-list"), "plist")
+        XCTAssertEqual(report.fileExtensionForUTI("com.apple.xml-property-list"), "plist")
+        XCTAssertEqual(report.fileExtensionForUTI("com.apple.property-list"), "plist")
+        XCTAssertEqual(report.fileExtensionForUTI("public.data"), "dat")
+    }
+
     /// Only top-level activities carry `testCaseRun_fk`; an attachment on a nested step, or on a
     /// test issue with no activity, still has to land under its test.
     func testDirectExportAttributesNestedAndIssueAttachmentsToTheirTest() throws {
@@ -62,7 +70,7 @@ final class AttachmentExportTests: XCTestCase {
             atPath: (dataDir as NSString).appendingPathComponent("data.snapshot"),
             contents: compressed.prefix(compressedSize))
 
-        var report = XCTestReport()
+        var report = makeTestReport()
         report.xcresultPath = xcresult
         report.outputDir = (root as NSString).appendingPathComponent("out")
         report.compressVideo = false
@@ -90,7 +98,7 @@ final class AttachmentExportTests: XCTestCase {
             72, 175, 202, 44, 80, 40, 202, 47, 205, 75, 81, 40, 41, 202, 44, 224, 170, 32, 91, 18, 0,
             239, 201, 196, 67, 87, 0, 0, 0,
         ])
-        let report = XCTestReport()
+        let report = makeTestReport()
         XCTAssertEqual(
             report.decompressGzipData(gzipped),
             Data(String(repeating: "xctestreport gzip round trip\n", count: 3).utf8))
@@ -100,7 +108,7 @@ final class AttachmentExportTests: XCTestCase {
 
     /// The xcresulttool fallback decorates names; snapshot pairing needs them as written.
     func testStripsXCResultToolExportSuffixFromAttachmentNames() {
-        let report = XCTestReport()
+        let report = makeTestReport()
         XCTAssertEqual(
             report.attachmentNameWithoutExportSuffix(
                 "RouteDetailsPinButton-pinned.expected_0_BFC432E3-D995-4A29-B1D8-0368457E90D1.png"),
@@ -134,7 +142,7 @@ final class AttachmentExportTests: XCTestCase {
         data.append(UInt8(ascii: "\n"))
         data.append(try JSONSerialization.data(withJSONObject: body))
 
-        let crash = try XCTUnwrap(XCTestReport().crashReportPreview(fromIPS: data))
+        let crash = try XCTUnwrap(makeTestReport().crashReportPreview(fromIPS: data))
         XCTAssertEqual(crash.frameCount, 2)
         let lines = crash.preview.components(separatedBy: "\n")
         XCTAssertEqual(lines[0], "Transit (com.example.app 6.3) crashed: EXC_CRASH (SIGABRT)")
@@ -144,6 +152,6 @@ final class AttachmentExportTests: XCTestCase {
             "Crash site: GULMutableDictionary.m:90 in -[GULMutableDictionary setObject:forKeyedSubscript:]")
         XCTAssertTrue(crash.preview.contains("Last exception backtrace:"))
         XCTAssertTrue(crash.preview.contains("objc_exception_throw + 72"))
-        XCTAssertNil(XCTestReport().crashReportPreview(fromIPS: Data("plain text log\n".utf8)))
+        XCTAssertNil(makeTestReport().crashReportPreview(fromIPS: Data("plain text log\n".utf8)))
     }
 }

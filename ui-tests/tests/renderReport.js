@@ -4,10 +4,20 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { test } = require('@playwright/test');
+const { serveDirectory } = require('./serveDirectory');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const WEB_DIR = path.join(REPO_ROOT, 'Sources', 'xctestreport', 'Resources', 'Web');
 const TEMPLATE_PATH = path.join(WEB_DIR, 'templates', 'index.html');
+const fixtures = [];
+
+test.afterEach(async () => {
+  for (const { server, directory } of fixtures.splice(0)) {
+    await server.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 function htmlEscape(s) {
   return String(s)
@@ -64,14 +74,14 @@ function suiteSection(suite) {
   const suiteDuration = allTests.reduce((sum, t) => sum + (t.duration == null ? 1 : t.duration), 0);
   const avgDuration = suiteDuration / Math.max(allTests.length, 1);
   const rows = allTests.map(testRow).join('\n');
-  return `<div class="suite" data-suite-name="${htmlEscape(suite.name.toLowerCase())}" data-total-tests="${totalExcludingSkipped}" data-failed-tests="${failed}" data-percent-passed="${percentPassed}" data-suite-duration="${suiteDuration}" data-avg-duration="${avgDuration}"><h2 class="collapsible">
+  return `<div class="suite" data-suite-name="${htmlEscape(suite.name.toLowerCase())}" data-total-tests="${totalExcludingSkipped}" data-failed-tests="${failed}" data-percent-passed="${percentPassed}" data-suite-duration="${suiteDuration}" data-avg-duration="${avgDuration}"><h2 class="collapsible"><button type="button" class="suite-toggle" aria-expanded="true">
     <span class="suite-name">${htmlEscape(suite.name)}</span>
     <span class="suite-stats">
         <span class="stats-number">${passed}/${totalExcludingSkipped}</span> Passed
         <span class="stats-percent">(${percentPassed.toFixed(1)}%)</span>
         <span class="suite-duration">${htmlEscape(formatCompactDuration(suiteDuration))}</span>
     </span>
-</h2><div class="content"><div class="content-inner">
+</button></h2><div class="content"><div class="content-inner">
 <table class="data-table suite-tests-table" style="margin-top:0px">
 <thead><tr><th scope="col">Test Name</th><th scope="col">Status</th><th scope="col" class="sortable-duration" aria-sort="none"><button type="button" class="sort-duration-btn">Duration</button></th></tr></thead>
 <tbody>
@@ -81,9 +91,9 @@ ${rows}
 
 /**
  * @param {{ title?: string, headerNote?: string, suites?: Array<{name: string, tests: Array<{name: string, status: string, duration?: number, flaky?: boolean}>}> }} opts
- * @returns {string} file:// URL to the rendered index.html
+ * @returns {Promise<string>} HTTP URL to the rendered index.html
  */
-function renderReport(opts = {}) {
+async function renderReport(opts = {}) {
   const title = opts.title || 'MyScheme';
   const suites = opts.suites || [];
   const headerNoteHTML = opts.headerNote
@@ -119,11 +129,14 @@ function renderReport(opts = {}) {
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xctestreport-ui-'));
   fs.mkdirSync(path.join(dir, 'web'));
-  fs.copyFileSync(path.join(WEB_DIR, 'report.css'), path.join(dir, 'web', 'report.css'));
-  fs.copyFileSync(path.join(WEB_DIR, 'index-page.js'), path.join(dir, 'web', 'index-page.js'));
+  for (const asset of fs.readdirSync(WEB_DIR).filter(name => /\.(css|js)$/.test(name))) {
+    fs.copyFileSync(path.join(WEB_DIR, asset), path.join(dir, 'web', asset));
+  }
   const indexPath = path.join(dir, 'index.html');
   fs.writeFileSync(indexPath, html);
-  return 'file://' + indexPath;
+  const server = await serveDirectory(dir);
+  fixtures.push({ server, directory: dir });
+  return server.url + 'index.html';
 }
 
 module.exports = { renderReport };

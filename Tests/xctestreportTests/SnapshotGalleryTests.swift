@@ -45,8 +45,8 @@ final class SnapshotGalleryTests: XCTestCase {
         XCTAssertTrue(html.contains("aria-pressed=\"true\">Failed only"))
         XCTAssertTrue(html.contains("Showing 1 of 2 tests"))
         XCTAssertTrue(html.contains("data-suite=\"SnapTests\""))
-        XCTAssertTrue(html.contains("id=\"test-snaptests-testchanged\""))
-        XCTAssertTrue(html.contains("id=\"cmp-snaptests-testchanged-card\""))
+        XCTAssertTrue(html.contains("id=\"\(report.snapshotGalleryTestElementID(suite: "SnapTests", testName: "testChanged()", identifier: "SnapTests/testChanged()"))\""))
+        XCTAssertTrue(html.contains("id=\"\(report.snapshotGalleryComparisonElementID(suite: "SnapTests", testName: "testChanged()", comparisonName: "Card", identifier: "SnapTests/testChanged()"))\""))
         // The payload stays parked until the gallery decides to build that viewer.
         XCTAssertTrue(html.contains("data-snapshot-comparisons-pending=\""))
         XCTAssertFalse(html.contains(" data-snapshot-comparisons=\""))
@@ -156,7 +156,7 @@ final class SnapshotGalleryTests: XCTestCase {
     }
 
     private func makeReport() -> XCTestReport {
-        var report = XCTestReport()
+        var report = makeTestReport()
         report.xcresultPath = ""
         report.outputDir = NSTemporaryDirectory()
         report.noSnapshotDiff = false

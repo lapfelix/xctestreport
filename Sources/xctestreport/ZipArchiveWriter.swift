@@ -24,6 +24,8 @@ final class ZipArchiveWriter {
     }
 
     private let handle: FileHandle
+    private let outputURL: URL
+    private let temporaryURL: URL
     private var entries: [CentralEntry] = []
     private var offset: UInt64 = 0
     private var names = Set<String>()
@@ -35,12 +37,19 @@ final class ZipArchiveWriter {
 
     init(path: String) throws {
         let fm = FileManager.default
-        try? fm.removeItem(atPath: path)
-        fm.createFile(atPath: path, contents: nil)
-        guard let handle = FileHandle(forWritingAtPath: path) else {
+        outputURL = URL(fileURLWithPath: path)
+        temporaryURL = outputURL.deletingLastPathComponent().appendingPathComponent(".bundle-\(UUID().uuidString).tmp")
+        guard fm.createFile(atPath: temporaryURL.path, contents: nil),
+            let opened = FileHandle(forWritingAtPath: temporaryURL.path) else {
+            try? fm.removeItem(at: temporaryURL)
             throw XCTestReport.RuntimeError(message: "Could not open bundle for writing: \(path)")
         }
-        self.handle = handle
+        handle = opened
+    }
+
+    deinit {
+        try? handle.close()
+        try? FileManager.default.removeItem(at: temporaryURL)
     }
 
     /// Returns the name the entry was stored under, which may be uniquified on collision.
@@ -48,12 +57,18 @@ final class ZipArchiveWriter {
     func addFile(name: String, data: Data, compress: Bool? = nil) throws -> String {
         precondition(!finished, "ZipArchiveWriter.addFile after finish()")
         // Offsets and sizes are 32-bit in a classic archive; refuse rather than trap on overflow.
-        guard data.count <= Int(UInt32.max), offset < UInt64(UInt32.max) else {
+        guard entries.count < Int(UInt16.max) - 1 else {
+            throw XCTestReport.RuntimeError(message: "Classic ZIP bundles support at most 65,534 entries.")
+        }
+        guard data.count < Int(UInt32.max), offset < UInt64(UInt32.max), name.utf8.count <= Int(UInt16.max) else {
             throw XCTestReport.RuntimeError(
                 message: "Report bundle exceeds the 4 GB ZIP limit while adding \(name).")
         }
         let storedName = uniqueName(for: name)
         let nameBytes = Array(storedName.utf8)
+        guard nameBytes.count <= Int(UInt16.max) else {
+            throw XCTestReport.RuntimeError(message: "Report bundle entry name is too long.")
+        }
 
         let shouldCompress =
             compress ?? !Options.incompressibleExtensions.contains(
@@ -85,8 +100,8 @@ final class ZipArchiveWriter {
         header.appendLE(UInt16(0))  // extra field length
         header.append(contentsOf: nameBytes)
 
-        handle.write(header)
-        handle.write(payload)
+        try handle.write(contentsOf: header)
+        try handle.write(contentsOf: payload)
         offset += UInt64(header.count + payload.count)
 
         entries.append(
@@ -108,10 +123,12 @@ final class ZipArchiveWriter {
 
     func finish() throws {
         guard !finished else { return }
-        finished = true
-
         let centralStart = offset
         guard centralStart < UInt64(UInt32.max) else {
+            throw XCTestReport.RuntimeError(message: "Report bundle exceeds the 4 GB ZIP limit.")
+        }
+        let centralSize = entries.reduce(UInt64(0)) { $0 + 46 + UInt64($1.name.count) }
+        guard centralStart + centralSize + 22 <= UInt64(UInt32.max) else {
             throw XCTestReport.RuntimeError(message: "Report bundle exceeds the 4 GB ZIP limit.")
         }
         var central = Data()
@@ -136,6 +153,10 @@ final class ZipArchiveWriter {
             central.append(contentsOf: entry.name)
         }
 
+        guard central.count <= Int(UInt32.max),
+            centralStart + UInt64(central.count) + 22 <= UInt64(UInt32.max) else {
+            throw XCTestReport.RuntimeError(message: "Report bundle exceeds the 4 GB ZIP limit.")
+        }
         let centralDirectorySize = UInt32(central.count)
         central.appendLE(UInt32(0x0605_4B50))
         central.appendLE(UInt16(0))  // disk number
@@ -146,8 +167,15 @@ final class ZipArchiveWriter {
         central.appendLE(UInt32(centralStart))
         central.appendLE(UInt16(0))  // comment length
 
-        handle.write(central)
-        try? handle.close()
+        try handle.write(contentsOf: central)
+        try handle.synchronize()
+        try handle.close()
+        if FileManager.default.fileExists(atPath: outputURL.path) {
+            _ = try FileManager.default.replaceItemAt(outputURL, withItemAt: temporaryURL)
+        } else {
+            try FileManager.default.moveItem(at: temporaryURL, to: outputURL)
+        }
+        finished = true
     }
 
     var entryCount: Int { entries.count }

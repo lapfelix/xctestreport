@@ -3,19 +3,37 @@ import Foundation
 
 extension XCTestReport {
     func generateHTMLReport() throws {
+        try validateGenerationPaths()
+        let destination = URL(fileURLWithPath: outputDir).standardizedFileURL.resolvingSymlinksInPath().path
+        try Self.withStagedOutput(at: destination) { stage in
+            var report = self
+            report.outputDir = stage
+            report.generationOriginalOutputDir = destination
+            try report.generateHTMLReportInPlace()
+        }
+        print("HTML report generated at \(URL(fileURLWithPath: destination).appendingPathComponent("index.html").path)")
+    }
 
-        try? FileManager.default.createDirectory(
+    private func generateHTMLReportInPlace() throws {
+        let generationFailures = ReportGenerationFailures()
+        try FileManager.default.createDirectory(
             atPath: outputDir, withIntermediateDirectories: true)
         let webTemplates = try loadWebTemplates()
         try copyWebAssets(to: webAssetsDirectoryPath)
-        try? FileManager.default.createDirectory(
+        if htmlOnly {
+            try prepareRegenerationCaches()
+            try recoverBundledAttachments()
+        }
+        // The previous output is copied into a staging directory; remove only regenerated artifacts.
+        for directory in [testPagesDirectoryPath, (outputDir as NSString).appendingPathComponent("timeline_payloads")] {
+            if FileManager.default.fileExists(atPath: directory) { try FileManager.default.removeItem(atPath: directory) }
+        }
+        try FileManager.default.createDirectory(
             atPath: testPagesDirectoryPath, withIntermediateDirectories: true)
 
         // Check xcresult file size
-        let fileManager = FileManager.default
         var sizeInGB: Double = 0
-        if let attributes = try? fileManager.attributesOfItem(atPath: xcresultPath),
-           let fileSize = attributes[.size] as? Int64 {
+        if let fileSize = directorySizeInBytes(at: xcresultPath) {
             sizeInGB = Double(fileSize) / 1_073_741_824
             if sizeInGB > 5.0 {
                 print("WARNING: Large xcresult file detected (\(String(format: "%.2f", sizeInGB)) GB)")
@@ -57,19 +75,8 @@ extension XCTestReport {
             fullExit = 0
 
             if FileManager.default.fileExists(atPath: attachmentsDir) {
-                attachmentsByTestIdentifier = loadAttachmentsFromManifest(at: attachmentsDir)
-                let looseCount = (try? FileManager.default.contentsOfDirectory(atPath: attachmentsDir))?
-                    .filter { $0 != "manifest.json" }.count ?? 0
-                let manifestCount = attachmentsByTestIdentifier.values.reduce(0) { $0 + $1.count }
-                if manifestCount > 0, looseCount < manifestCount / 2 {
-                    print(
-                        """
-                        WARNING: \(attachmentsDir) holds \(looseCount) files but the manifest lists \
-                        \(manifestCount). A previous run packed them into per-test bundles and removed \
-                        the loose copies, so the rebuilt bundles will be missing attachments. \
-                        Re-run without --html-only, or generate with --keep-loose-attachments.
-                        """)
-                }
+                attachmentsByTestIdentifier = try loadAttachmentsFromManifest(at: attachmentsDir)
+                try validateRegenerationAttachments(attachmentsByTestIdentifier)
             } else {
                 print("Attachment directory not found at \(attachmentsDir). Continuing without attachments.")
             }
@@ -103,9 +110,12 @@ extension XCTestReport {
             exportGroup.enter()
             exportQueue.async {
                 let startTime = Date()
-                let attachments = exportAttachments()
+                do {
+                    attachmentsByTestIdentifier = try exportAttachments()
+                } catch {
+                    generationFailures.record(error, context: "Attachment export")
+                }
                 attachmentsExportDuration = Date().timeIntervalSince(startTime)
-                attachmentsByTestIdentifier = attachments
                 exportGroup.leave()
             }
 
@@ -134,6 +144,7 @@ extension XCTestReport {
             }
 
             exportGroup.wait()
+            try generationFailures.throwIfAny()
         }
 
         print("Summary command completed in \(String(format: "%.2f", summaryDuration)) seconds")
@@ -205,7 +216,9 @@ extension XCTestReport {
             return testCases
         }
 
-        var allTests = collectTestCases(fullResults.testNodes)
+        let savedInventory = htmlOnly ? try loadSavedInventory() : nil
+        var allTests = savedInventory?.tests ?? collectTestCases(fullResults.testNodes)
+        var inventorySources = savedInventory?.sourceBundles ?? [xcresultPath]
 
         // Tests from additional bundles are only enumerated here; details, activities and
         // attachments still resolve against the main bundle, which contains every plan.
@@ -220,8 +233,7 @@ extension XCTestReport {
                 guard exitCode == 0, let data = json?.data(using: .utf8),
                     let additionalResults = try? decoder.decode(FullTestResults.self, from: data)
                 else {
-                    print("Warning: could not read tests from \(bundlePath); skipping.")
-                    continue
+                    throw RuntimeError(message: "Could not read explicitly requested additional tests from \(bundlePath).")
                 }
                 let additionalTests = collectTestCases(additionalResults.testNodes).filter { test in
                     guard let identifier = test.nodeIdentifier else { return true }
@@ -229,10 +241,17 @@ extension XCTestReport {
                 }
                 knownTestIdentifiers.formUnion(additionalTests.compactMap { $0.nodeIdentifier })
                 allTests.append(contentsOf: additionalTests)
+                inventorySources.append(bundlePath)
                 print("Appended \(additionalTests.count) tests from \(bundlePath)")
             }
         }
 
+        try writeSavedInventory(tests: allTests, sourceBundles: inventorySources)
+        try writeRunMetadata(summary: summary)
+        let previousResults = findPreviousResults()
+        if baseline != nil, previousResults == nil {
+            throw RuntimeError(message: "Could not decode the explicitly requested baseline report.")
+        }
         let overallCounts = Self.testCounts(for: allTests)
 
         let groupedTests = Dictionary(grouping: allTests) { test -> String in
@@ -302,8 +321,7 @@ extension XCTestReport {
             preprocessingGroup.enter()
             preprocessingQueue.async {
                 for test in chunk {
-                    let testPageName = "test_\(test.nodeIdentifier ?? test.name).html"
-                        .replacingOccurrences(of: "/", with: "_")
+                    let testPageName = Self.testPageName(for: test)
                     let result = test.result ?? "Unknown"
                     let statusBadgeClass: String
                     if Self.isPassedTestResult(result) {
@@ -333,7 +351,7 @@ extension XCTestReport {
                     var testDetails: TestDetails?
                     var testActivities: TestActivities?
                     // Skip getTestDetails for large xcresult files to avoid timeout
-                    if sizeInGB < 10.0 {  // Only get details for xcresults < 10GB
+                    if htmlOnly || sizeInGB < 10.0 {  // Cached data never needs a source-bundle size limit.
                         if let testIdentifier = test.nodeIdentifier {
                             testDetails = getTestDetails(for: testIdentifier)
                             testActivities = getTestActivities(for: testIdentifier)
@@ -383,7 +401,7 @@ extension XCTestReport {
                             let previousRuns = getPreviousRuns(for: testIdentifier)
                             if !previousRuns.isEmpty {
                                 let runsEmoji = previousRuns.prefix(10).map {
-                                    $0.result == "Passed" ? "✅" : "❌"
+                                    Self.isPassedTestResult($0.result) ? "✅" : "❌"
                                 }.joined()
                                 failureInfo += """
                                     <h3>Previous Runs (Last 10)</h3>
@@ -484,7 +502,8 @@ extension XCTestReport {
                         let anchor = snapshotGalleryComparisonElementID(
                             suite: snapshotSuiteName,
                             testName: test.name,
-                            comparisonName: firstComparison.name)
+                            comparisonName: firstComparison.name,
+                            identifier: test.nodeIdentifier)
                         snapshotGalleryLinkHTML =
                             " <a class=\"snapshot-gallery-link\" "
                             + "href=\"../\(snapshotGalleryFileName)#\(anchor)\">All snapshots</a>"
@@ -563,15 +582,19 @@ extension XCTestReport {
                             ],
                             templateName: "test-detail.html")
                     } catch {
-                        print(
-                            "Failed to render test detail template for \(test.name): \(error)")
+                        generationFailures.record(error, context: "Rendering test page for \(test.name)")
                         continue
                     }
                     let testPagePath = (testPagesDirectoryPath as NSString).appendingPathComponent(
                         testPageName)
                     let minimizedTestDetailHTML = minifyHTMLInterTagWhitespace(testDetailHTML)
-                    try? minimizedTestDetailHTML.write(
-                        toFile: testPagePath, atomically: true, encoding: .utf8)
+                    do {
+                        try minimizedTestDetailHTML.write(
+                            toFile: testPagePath, atomically: true, encoding: .utf8)
+                    } catch {
+                        generationFailures.record(error, context: "Writing test page for \(test.name)")
+                        continue
+                    }
 
                     bundle.addEntry(name: Self.bundleMarkdownEntry, text: testMarkdown)
                     let bundlePath = (self.testPagesDirectoryPath as NSString)
@@ -585,7 +608,8 @@ extension XCTestReport {
                             keepLooseAttachmentFileNames.formUnion(bundle.looseFileNames)
                         }
                     } catch {
-                        print("Failed to write report bundle for \(test.name): \(error)")
+                        generationFailures.record(error, context: "Writing report bundle for \(test.name)")
+                        continue
                     }
 
                     if snapshotDiffEnabled {
@@ -636,21 +660,18 @@ extension XCTestReport {
         preprocessingGroup.wait()
         print("\n")
 
-        pruneLooseAttachments(
-            packed: packedAttachmentFileNames, keepLoose: keepLooseAttachmentFileNames,
-            attachmentsDirectory: attachmentsDir)
-        writeTestDetailsIndex()
+        try generationFailures.throwIfAny()
+        try writeTestDetailsIndex()
+        try writeTestActivitiesIndex()
 
         var snapshotGalleryIndexLinkHTML = ""
         if snapshotDiffEnabled {
-            writeSnapshotReport(entries: snapshotReportEntries)
-            snapshotGalleryIndexLinkHTML = writeSnapshotGalleryPage(
+            try writeSnapshotReport(entries: snapshotReportEntries)
+            snapshotGalleryIndexLinkHTML = try writeSnapshotGalleryPage(
                 entries: snapshotGalleryEntries,
                 reportTitle: summary.title,
                 template: webTemplates.snapshotGalleryTemplate)
         }
-
-        let previousResults = findPreviousResults()
 
         // Parallelize test HTML generation for suites
         print("Processing \(totalTests) tests for suite generation using \(suiteWorkers) cores...")
@@ -679,12 +700,12 @@ extension XCTestReport {
                 suiteSections[suite]?.append((index: -1, html:
                     """
                     <div class="suite" data-suite-name="\(htmlEscape(suite.lowercased()))"\(suiteNotesAttribute) data-total-tests="\(suiteCounts.totalTests)" data-failed-tests="\(suiteCounts.failedTests)" data-percent-passed="\(suiteCounts.percentagePassed)" data-suite-duration="\(totalDuration)" data-avg-duration="\(avgDuration)"><h2 class="collapsible">
-                        <span class="suite-name">\(htmlEscape(suite))</span>
+                        <button type="button" class="suite-toggle" aria-expanded="true"><span class="suite-name">\(htmlEscape(suite))</span>
                         <span class="suite-stats">
                             <span class="stats-number">\(suiteCounts.passedTests)/\(suiteCounts.totalTests)</span> Passed
                             <span class="stats-percent">(\(String(format: "%.1f", suiteCounts.percentagePassed))%)</span>
                             <span class="suite-duration">\(durationText)</span>
-                        </span>
+                        </span></button>
                     </h2><div class="content"><div class="content-inner">
                     <table class="data-table suite-tests-table" style="margin-top:0px">
                     <thead><tr><th scope="col">Test Name</th><th scope="col">Status</th><th scope="col" class="sortable-duration" aria-sort="none"><button type="button" class="sort-duration-btn">Duration</button></th></tr></thead>
@@ -701,8 +722,7 @@ extension XCTestReport {
                     let suite =
                         test.nodeIdentifier?.split(separator: "/").first.map(String.init)
                         ?? "Unknown Suite"
-                    let testPageName = "test_\(test.nodeIdentifier ?? test.name).html"
-                        .replacingOccurrences(of: "/", with: "_")
+                    let testPageName = Self.testPageName(for: test)
                     let result = test.result ?? "Unknown"
                     let statusClass: String
                     let rowClass: String
@@ -730,12 +750,12 @@ extension XCTestReport {
                         print(
                             "Comparing test [\(testId)]: Current=\(result) Previous=\(previousResult.status)"
                         )
-                        if result == "Failed" && previousResult.status == "Passed" {
+                        if Self.isFailureTestResult(result) && Self.isPassedTestResult(previousResult.status) {
                             print("Found newly failed test: \(test.name)")
                             statusEmoji = """
                                  <span class="emoji-status" title="Newly failed test">⭕️</span>
                                 """
-                        } else if result == "Passed" && previousResult.status == "Failed" {
+                        } else if Self.isPassedTestResult(result) && Self.isFailureTestResult(previousResult.status) {
                             print("Found fixed test: \(test.name)")
                             statusEmoji = """
                                  <span class="emoji-status" title="Fixed test">✨</span>
@@ -845,7 +865,7 @@ extension XCTestReport {
             try jsonData.write(to: URL(fileURLWithPath: jsonPath))
             print("Grouped tests exported to \(jsonPath)")
         } catch {
-            print("Error exporting grouped tests to JSON: \(error)")
+            throw RuntimeError(message: "Could not write grouped tests: \(error)")
         }
 
         // Close all suite sections
@@ -861,7 +881,27 @@ extension XCTestReport {
             "xcrun", "xcresulttool", "get", "build-results", "--path", xcresultPath, "--format",
             "json",
         ]
-        let (buildResultsJSON, buildResultsExit) = shell(buildResultsCmd)
+        let buildResultsPath = (outputDir as NSString).appendingPathComponent("build_results.json")
+        let buildResultsJSON: String?
+        let buildResultsExit: Int32
+        if htmlOnly, FileManager.default.fileExists(atPath: buildResultsPath) {
+            let data = try Data(contentsOf: URL(fileURLWithPath: buildResultsPath))
+            guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw RuntimeError(message: "Invalid cached build results JSON.")
+            }
+            if !object.isEmpty { _ = try decoder.decode(BuildResults.self, from: data) }
+            buildResultsJSON = String(data: data, encoding: .utf8)
+            buildResultsExit = 0
+        } else if htmlOnly, !FileManager.default.fileExists(atPath: xcresultPath) {
+            buildResultsJSON = nil
+            buildResultsExit = 1
+        } else {
+            (buildResultsJSON, buildResultsExit) = shell(buildResultsCmd)
+        }
+        if !htmlOnly || !FileManager.default.fileExists(atPath: buildResultsPath) {
+            try (buildResultsExit == 0 ? buildResultsJSON ?? "{}" : "{}").write(
+                toFile: buildResultsPath, atomically: true, encoding: .utf8)
+        }
         if buildResultsExit == 0, let jsonStr = buildResultsJSON,
             let bdData = jsonStr.data(using: .utf8)
         {
@@ -887,8 +927,7 @@ extension XCTestReport {
             let delta = Self.previousRunDelta(
                 current: allTests, previous: previousResults.results,
                 pagePath: { test in
-                    let pageName = "test_\(test.nodeIdentifier ?? test.name).html"
-                        .replacingOccurrences(of: "/", with: "_")
+                    let pageName = Self.testPageName(for: test)
                     return "\(testPagesDirectoryName)/\(pageName)"
                 })
             comparisonInfoHTML = renderPreviousRunDeltaHTML(delta, dateHTML: dateString)
@@ -932,7 +971,7 @@ extension XCTestReport {
         let minimizedIndexHTML = minifyHTMLInterTagWhitespace(indexHTML)
         try minimizedIndexHTML.write(toFile: indexPath, atomically: true, encoding: .utf8)
 
-        writeAgentReport(
+        try writeAgentReport(
             summaryTitle: summary.title,
             counts: overallCounts,
             result: summary.result,
@@ -941,7 +980,7 @@ extension XCTestReport {
             buildWarningCount: buildWarningCount,
             previousResultsDate: previousResults?.date)
 
-        writeFailuresReport(
+        try writeFailuresReport(
             summaryTitle: summary.title,
             counts: overallCounts,
             result: summary.result,
@@ -951,7 +990,9 @@ extension XCTestReport {
             previousResultsDate: previousResults?.date)
 
         let overallDuration = Date().timeIntervalSince(overallStartTime)
-        print("HTML report generated at \(indexPath)")
+        pruneLooseAttachments(
+            packed: packedAttachmentFileNames, keepLoose: keepLooseAttachmentFileNames,
+            attachmentsDirectory: attachmentsDir)
         print("Report generation completed in \(String(format: "%.2f", overallDuration)) seconds")
     }
 }

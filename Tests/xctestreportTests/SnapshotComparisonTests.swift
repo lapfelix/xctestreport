@@ -45,13 +45,13 @@ final class SnapshotComparisonTests: XCTestCase {
 
     // MARK: - Comparison
 
-    func testComparisonUsesUnionRectWhenSizesDiffer() {
+    func testComparisonUsesUnionRectWhenSizesDiffer() throws {
         let report = makeReport()
         let expected = solidBitmap(width: 4, height: 4, color: (255, 255, 255, 255))
         let actual = solidBitmap(width: 4, height: 2, color: (255, 255, 255, 255))
 
-        let result = report.compareSnapshotBitmaps(
-            expected: expected, actual: actual, tolerance: 12)
+        let result = try XCTUnwrap(report.compareSnapshotBitmaps(
+            expected: expected, actual: actual, tolerance: 12))
 
         XCTAssertEqual(result.width, 4)
         XCTAssertEqual(result.height, 4)
@@ -63,13 +63,13 @@ final class SnapshotComparisonTests: XCTestCase {
         XCTAssertEqual(result.overlapMaxChannelDelta, 0)
     }
 
-    func testOverlapMeasuresIgnoreAreaThatExistsInOnlyOneImage() {
+    func testOverlapMeasuresIgnoreAreaThatExistsInOnlyOneImage() throws {
         let report = makeReport()
         let expected = solidBitmap(width: 4, height: 4, color: (100, 100, 100, 255))
         let actual = solidBitmap(width: 4, height: 5, color: (100, 100, 228, 255))
 
-        let result = report.compareSnapshotBitmaps(
-            expected: expected, actual: actual, tolerance: 0)
+        let result = try XCTUnwrap(report.compareSnapshotBitmaps(
+            expected: expected, actual: actual, tolerance: 0))
 
         XCTAssertEqual(result.changedPixels, 20)
         XCTAssertEqual(result.maxChannelDelta, 255)
@@ -78,19 +78,53 @@ final class SnapshotComparisonTests: XCTestCase {
         XCTAssertEqual(result.overlapMaxChannelDelta, 128)
     }
 
-    func testToleranceSuppressesSmallChannelDifferences() {
+    func testToleranceSuppressesSmallChannelDifferences() throws {
         let report = makeReport()
         let expected = solidBitmap(width: 3, height: 3, color: (100, 100, 100, 255))
         let actual = solidBitmap(width: 3, height: 3, color: (108, 100, 100, 255))
 
-        let withinTolerance = report.compareSnapshotBitmaps(
-            expected: expected, actual: actual, tolerance: 12)
+        let withinTolerance = try XCTUnwrap(report.compareSnapshotBitmaps(
+            expected: expected, actual: actual, tolerance: 12))
         XCTAssertEqual(withinTolerance.changedPixels, 0)
         XCTAssertEqual(withinTolerance.maxChannelDelta, 8)
         XCTAssertTrue(withinTolerance.boundingBoxes.isEmpty)
 
-        let strict = report.compareSnapshotBitmaps(expected: expected, actual: actual, tolerance: 0)
+        let strict = try XCTUnwrap(report.compareSnapshotBitmaps(
+            expected: expected, actual: actual, tolerance: 0))
         XCTAssertEqual(strict.changedPixels, 9)
+    }
+
+    func testHighToleranceAndAlphaChannelDifferences() throws {
+        let report = makeReport()
+        let expected = solidBitmap(width: 1, height: 1, color: (0, 0, 0, 128))
+        let actual = solidBitmap(width: 1, height: 1, color: (180, 0, 0, 255))
+        let tolerant = try XCTUnwrap(report.compareSnapshotBitmaps(
+            expected: expected, actual: actual, tolerance: 200))
+        XCTAssertEqual(tolerant.changedPixels, 0)
+        XCTAssertEqual(tolerant.maxChannelDelta, 180)
+        let stricter = try XCTUnwrap(report.compareSnapshotBitmaps(
+            expected: expected, actual: actual, tolerance: 128))
+        XCTAssertEqual(stricter.changedPixels, 1)
+        let alphaOnly = try XCTUnwrap(report.compareSnapshotBitmaps(
+            expected: expected,
+            actual: solidBitmap(width: 1, height: 1, color: (0, 0, 0, 255)), tolerance: 12))
+        XCTAssertEqual(alphaOnly.maxChannelDelta, 127)
+        XCTAssertEqual(alphaOnly.changedPixels, 1)
+    }
+
+    func testRejectsOversizedUnionAndMalformedBitmapBeforeAllocating() {
+        let report = makeReport()
+        XCTAssertNil(report.snapshotPixelCount(width: 16_000, height: 16_000))
+        XCTAssertNil(report.snapshotPixelCount(width: Int.max, height: Int.max))
+        XCTAssertNil(report.snapshotPixelCount(width: 0, height: 10))
+        XCTAssertEqual(report.snapshotPixelCount(width: 16_000, height: 100), 1_600_000)
+        // Empty buffers deliberately prove the comparison rejects the dimensions before access.
+        XCTAssertNil(report.compareSnapshotBitmaps(
+            expected: .init(width: 16_000, height: 100, pixels: []),
+            actual: .init(width: 100, height: 16_000, pixels: []), tolerance: 12))
+        XCTAssertNil(report.compareSnapshotBitmaps(
+            expected: .init(width: 2, height: 2, pixels: []),
+            actual: solidBitmap(width: 2, height: 2, color: (0, 0, 0, 255)), tolerance: 12))
     }
 
     func testBoundingBoxesSeparateDistantRegions() {
@@ -122,7 +156,83 @@ final class SnapshotComparisonTests: XCTestCase {
         XCTAssertTrue(merged.contains(XCTestReport.SnapshotBoundingBox(x: 200, y: 200, w: 4, h: 4)))
     }
 
+    func testBoundingBoxesJoinMultipleRunsAcrossABridge() {
+        let report = makeReport()
+        let width = 30
+        var changed = [Bool](repeating: false, count: width * 3)
+        for x in [0, 2, 25] { changed[x] = true }
+        for x in 0...2 { changed[width + x] = true }
+        changed[width + 25] = true
+        for x in [0, 2, 25] { changed[2 * width + x] = true }
+        XCTAssertEqual(report.snapshotBoundingBoxes(changed: changed, width: width, height: 3), [
+            .init(x: 0, y: 0, w: 3, h: 3), .init(x: 25, y: 0, w: 1, h: 3),
+        ])
+    }
+
+    func testBoundingBoxesHandleWideCheckerboardsAndBoundNoisyRunStorage() {
+        let report = makeReport()
+        let width = 2048
+        let height = 64
+        var checkerboard = [Bool](repeating: false, count: width * height)
+        for y in 0..<height {
+            for x in stride(from: y % 2, to: width, by: 2) { checkerboard[y * width + x] = true }
+        }
+        XCTAssertEqual(report.snapshotBoundingBoxes(
+            changed: checkerboard, width: width, height: height), [
+                .init(x: 0, y: 0, w: width, h: height),
+            ])
+        let noisyWidth = 2048
+        let noisyHeight = 512
+        var noisy = [Bool](repeating: false, count: noisyWidth * noisyHeight)
+        for y in 0..<noisyHeight {
+            for x in stride(from: 0, to: noisyWidth, by: 2) { noisy[y * noisyWidth + x] = true }
+        }
+        XCTAssertEqual(report.snapshotBoundingBoxes(
+            changed: noisy, width: noisyWidth, height: noisyHeight), [
+                .init(x: 0, y: 0, w: noisyWidth - 1, h: noisyHeight),
+            ])
+    }
+
     // MARK: - End-to-end grouping
+
+    func testSkipsOversizedUnionUsingSmallImageMetadata() throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let report = makeReport(outputDir: directory.path)
+        try FileManager.default.createDirectory(
+            atPath: report.attachmentsDirectoryPath, withIntermediateDirectories: true)
+        writePNG(report, solidBitmap(width: 10_001, height: 1, color: (0, 0, 0, 255)), "1.png")
+        writePNG(report, solidBitmap(width: 1, height: 10_001, color: (0, 0, 0, 255)), "2.png")
+        let comparisons = report.buildSnapshotComparisons(attachments: [
+            makeItem(fileName: "1.png", name: "Crossed.expected.png"),
+            makeItem(fileName: "2.png", name: "Crossed.actual.png"),
+        ])
+        XCTAssertTrue(comparisons.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath:
+            (report.attachmentsDirectoryPath as NSString).appendingPathComponent("1.synth-diff.png")))
+    }
+
+    func testTransparentImagesComparePremultipliedSRGBChannels() throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let report = makeReport(outputDir: directory.path)
+        try FileManager.default.createDirectory(
+            atPath: report.attachmentsDirectoryPath, withIntermediateDirectories: true)
+        // Straight red values are about 20 and 40; alpha halves their compared channel values.
+        writePNG(report, solidBitmap(width: 1, height: 1, color: (10, 0, 0, 128)), "1.png")
+        writePNG(report, solidBitmap(width: 1, height: 1, color: (20, 0, 0, 128)), "2.png")
+        let expectedSize = try XCTUnwrap(report.snapshotImageDimensions(
+            atPath: (report.attachmentsDirectoryPath as NSString).appendingPathComponent("1.png")))
+        XCTAssertEqual(expectedSize.width, 1)
+        XCTAssertEqual(expectedSize.height, 1)
+        let comparisons = report.buildSnapshotComparisons(attachments: [
+            makeItem(fileName: "1.png", name: "Transparent.expected.png"),
+            makeItem(fileName: "2.png", name: "Transparent.actual.png"),
+        ])
+        let comparison = try XCTUnwrap(comparisons.first)
+        XCTAssertEqual(comparison.changedPixels, 0)
+        XCTAssertEqual(comparison.overlapMaxChannelDelta, 10)
+    }
 
     func testBuildsComparisonAndSynthesizesDiffImage() throws {
         let directory = try makeTempDirectory()
@@ -332,7 +442,7 @@ final class SnapshotComparisonTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let report = makeReport(outputDir: directory.path)
 
-        report.writeSnapshotReport(entries: [])
+        try report.writeSnapshotReport(entries: [])
 
         let path = directory.appendingPathComponent("snapshots.json")
         let object = try XCTUnwrap(
@@ -341,6 +451,15 @@ final class SnapshotComparisonTests: XCTestCase {
         XCTAssertEqual(object["failedComparisons"] as? Int, 0)
         XCTAssertEqual((object["tests"] as? [Any])?.count, 0)
         XCTAssertNotNil(object["generatedAt"] as? String)
+    }
+
+    func testRequiredSnapshotReportWriteErrorsPropagate() throws {
+        let directory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let report = makeReport(outputDir: directory.path)
+        try FileManager.default.createDirectory(
+            at: directory.appendingPathComponent("snapshots.json"), withIntermediateDirectories: false)
+        XCTAssertThrowsError(try report.writeSnapshotReport(entries: []))
     }
 
     func testSnapshotReportEntryCarriesDeviceAndRootRelativePaths() throws {
@@ -379,7 +498,7 @@ final class SnapshotComparisonTests: XCTestCase {
                     diffSynthesized: false),
             ])
 
-        report.writeSnapshotReport(entries: [entry])
+        try report.writeSnapshotReport(entries: [entry])
 
         let object = try XCTUnwrap(
             try JSONSerialization.jsonObject(
@@ -403,7 +522,7 @@ final class SnapshotComparisonTests: XCTestCase {
     // MARK: - Helpers
 
     private func makeReport(outputDir: String = NSTemporaryDirectory()) -> XCTestReport {
-        var report = XCTestReport()
+        var report = makeTestReport()
         report.xcresultPath = ""
         report.outputDir = outputDir
         // ArgumentParser property wrappers only hold a value once parsed or assigned.

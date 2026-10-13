@@ -108,9 +108,13 @@
     var returnFocus = null;
     var indexTitle = document.title;
     var hoverTimer = null;
+    var inertElements = [];
 
     var layer = document.createElement('div');
     layer.className = 'report-shell-layer';
+    layer.setAttribute('role', 'dialog');
+    layer.setAttribute('aria-modal', 'true');
+    layer.setAttribute('aria-label', 'Test details');
     document.body.appendChild(layer);
 
     function frameFor(path) {
@@ -134,6 +138,7 @@
         if (frame !== current) { return; }
         if (frame.shellUnusable) { navigateTo(frame, path); return; }
         syncTitle();
+        focusFrame(frame);
         preloadNeighbors(path);
       });
       layer.appendChild(frame);
@@ -162,7 +167,32 @@
 
     function syncTitle() {
       var doc = current && frameDocument(current);
-      if (doc && doc.title) { document.title = doc.title; }
+      if (doc && doc.title) {
+        document.title = doc.title;
+        current.title = doc.title;
+        layer.setAttribute('aria-label', doc.title);
+      }
+    }
+
+    function focusFrame(frame) {
+      try {
+        if (frame.contentWindow.XCTestReportFrame) { frame.contentWindow.XCTestReportFrame.focus(); }
+        else { frame.contentWindow.focus(); }
+      } catch (error) { frame.focus(); }
+    }
+
+    function setIndexInert(inert) {
+      if (inert) {
+        if (inertElements.length) { return; }
+        Array.prototype.forEach.call(document.body.children, function(element) {
+          if (element === layer || /^(SCRIPT|STYLE)$/.test(element.tagName)) { return; }
+          inertElements.push({ element: element, previous: element.inert });
+          element.inert = true;
+        });
+      } else {
+        inertElements.forEach(function(entry) { entry.element.inert = entry.previous; });
+        inertElements = [];
+      }
     }
 
     function activate(frame) {
@@ -278,8 +308,9 @@
       if (doc && doc.readyState === 'complete' && !frame.shellUnusable) { preloadNeighbors(path); }
       document.documentElement.classList.add('report-shell-open');
       layer.classList.add('is-open');
+      setIndexInert(true);
       syncTitle();
-      try { frame.contentWindow.focus(); } catch (error) { frame.focus(); }
+      focusFrame(frame);
     }
 
     function hide() {
@@ -289,12 +320,16 @@
       current = null;
       layer.classList.remove('is-open');
       document.documentElement.classList.remove('report-shell-open');
+      setIndexInert(false);
       document.title = indexTitle;
       if (returnFocus && document.contains(returnFocus)) {
         // Stepping through tests can end far from where the list was left; bring the last one
         // into view.
-        returnFocus.focus({ preventScroll: true });
-        var row = returnFocus.closest('tr');
+        var index = window.XCTestReportIndex;
+        var visible = !index || index.revealTest(returnFocus);
+        var target = visible ? returnFocus : document.getElementById('test-search');
+        if (target) { target.focus({ preventScroll: true }); }
+        var row = visible && returnFocus.closest('tr');
         if (row) { row.scrollIntoView({ block: 'nearest' }); }
       }
     }
@@ -312,6 +347,7 @@
     }
 
     function open(path, options) {
+      if (window.XCTestReportIndex) { window.XCTestReportIndex.flushFilters(); }
       if (!(options && options.fromHistory)) {
         var state = { xctestreportTest: path };
         if (current && !(options && options.push)) {
@@ -410,7 +446,12 @@
     document.documentElement.classList.add('report-shell-framed');
     window.XCTestReportFrame = {
       activate: function() { resumeVideos(); renderListNav(); },
-      deactivate: suspendVideos
+      deactivate: suspendVideos,
+      focus: function() {
+        var back = document.querySelector('.test-back-link');
+        if (back) { back.focus({ preventScroll: true }); }
+        else { window.focus(); }
+      }
     };
 
     var root = indexURL(window.location.href);
@@ -497,7 +538,21 @@
 
     window.addEventListener('keydown', function(event) {
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) { return; }
-      if (document.querySelector('dialog[open]') || isTyping(event.target)) { return; }
+      if (document.querySelector('dialog[open]')) { return; }
+      if (event.key === 'Tab') {
+        var focusable = Array.prototype.filter.call(document.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), summary, video[controls], audio[controls], [tabindex]:not([tabindex="-1"])'), function(element) {
+          return element.tabIndex >= 0 && element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden' && !element.closest('[inert]');
+        });
+        var first = focusable[0];
+        var last = focusable[focusable.length - 1];
+        if (first && event.shiftKey && document.activeElement === first) {
+          event.preventDefault(); last.focus();
+        } else if (last && !event.shiftKey && document.activeElement === last) {
+          event.preventDefault(); first.focus();
+        }
+        return;
+      }
+      if (isTyping(event.target)) { return; }
       if (event.key === 'Escape') {
         shell.close();
       } else if (event.key === 'j' || event.key === 'k') {

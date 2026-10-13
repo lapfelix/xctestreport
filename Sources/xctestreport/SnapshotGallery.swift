@@ -48,15 +48,17 @@ extension XCTestReport {
         return slug.isEmpty ? "x" : slug
     }
 
-    func snapshotGalleryTestElementID(suite: String, testName: String) -> String {
-        "test-\(snapshotGallerySlug(suite))-\(snapshotGallerySlug(testName))"
+    func snapshotGalleryTestElementID(suite: String, testName: String, identifier: String? = nil) -> String {
+        Self.artifactSlug(identity: identifier ?? Self.artifactIdentity([suite, testName]), prefix: "test-")
     }
 
-    func snapshotGalleryComparisonElementID(suite: String, testName: String, comparisonName: String)
+    func snapshotGalleryComparisonElementID(
+        suite: String, testName: String, comparisonName: String, identifier: String? = nil)
         -> String
     {
-        "cmp-\(snapshotGallerySlug(suite))-\(snapshotGallerySlug(testName))"
-            + "-\(snapshotGallerySlug(comparisonName))"
+        Self.artifactSlug(
+            identity: Self.artifactIdentity([identifier ?? Self.artifactIdentity([suite, testName]), comparisonName]),
+            prefix: "cmp-")
     }
 
     // MARK: - Model
@@ -83,7 +85,7 @@ extension XCTestReport {
                         entry: entry,
                         comparisons: comparisons,
                         elementID: snapshotGalleryTestElementID(
-                            suite: entry.suiteName, testName: entry.testName),
+                            suite: entry.suiteName, testName: entry.testName, identifier: entry.testIdentifier),
                         failed: Self.isFailureTestResult(entry.result)
                             || comparisons.contains { $0.changedPixels > 0 })
                 }
@@ -126,28 +128,17 @@ extension XCTestReport {
     @discardableResult
     func writeSnapshotGalleryPage(
         entries: [SnapshotReportTestEntry], reportTitle: String, template: String
-    ) -> String {
+    ) throws -> String {
         let suites = buildSnapshotGallerySuites(entries: entries)
         guard !suites.isEmpty else { return "" }
 
-        let html: String
-        do {
-            html = try renderSnapshotGalleryPage(
-                suites: suites, reportTitle: reportTitle, template: template)
-        } catch {
-            print("Error rendering snapshot gallery: \(error)")
-            return ""
-        }
+        let html = try renderSnapshotGalleryPage(
+            suites: suites, reportTitle: reportTitle, template: template)
 
         let path = (outputDir as NSString).appendingPathComponent(snapshotGalleryFileName)
-        do {
-            try minifyHTMLInterTagWhitespace(html).write(
-                toFile: path, atomically: true, encoding: .utf8)
-            print("Snapshot gallery written to \(path)")
-        } catch {
-            print("Error writing snapshot gallery: \(error)")
-            return ""
-        }
+        try minifyHTMLInterTagWhitespace(html).write(
+            toFile: path, atomically: true, encoding: .utf8)
+        print("Snapshot gallery written to \(path)")
 
         let allComparisons = suites.flatMap { $0.items.flatMap { $0.comparisons } }
         let changed = allComparisons.filter { $0.changedPixels > 0 }.count
@@ -265,7 +256,8 @@ extension XCTestReport {
 
         let anchors = item.comparisons.map { comparison in
             let id = snapshotGalleryComparisonElementID(
-                suite: entry.suiteName, testName: entry.testName, comparisonName: comparison.name)
+                suite: entry.suiteName, testName: entry.testName, comparisonName: comparison.name,
+                identifier: entry.testIdentifier)
             return "<span class=\"sg-anchor\" id=\"\(id)\"></span>"
         }.joined()
 

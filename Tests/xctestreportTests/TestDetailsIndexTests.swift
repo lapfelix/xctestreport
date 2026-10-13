@@ -5,6 +5,28 @@ import XCTest
 
 final class TestDetailsIndexTests: XCTestCase {
 
+    func testParameterizedRepetitionsWithoutParentDurationRemainDecodable() throws {
+        let data = Data(#"""
+        {
+          "name": "\"adult\"", "nodeType": "Arguments", "result": "Passed",
+          "children": [
+            {"name": "Arguments", "nodeType": "Arguments", "children": [
+              {"name": "category : \"adult\"", "nodeType": "Test Value"}
+            ]},
+            {"name": "First Run", "nodeType": "Repetition", "result": "Passed", "durationInSeconds": 0.0052},
+            {"name": "Retry 1", "nodeType": "Repetition", "result": "Passed", "durationInSeconds": 0.0001}
+          ]
+        }
+        """#.utf8)
+        let run = try JSONDecoder().decode(XCTestReport.TestRunDetail.self, from: data)
+        XCTAssertEqual(run.name, "\"adult\"")
+        XCTAssertEqual(run.result, "Passed")
+        XCTAssertEqual(run.duration, "5ms")
+        XCTAssertEqual(run.children?.map { $0.name }, ["Arguments", "First Run", "Retry 1"])
+        XCTAssertEqual(run.children?.last?.durationInSeconds, 0.0001)
+        XCTAssertEqual(run.children?.first?.children?.first?.name, "category : \"adult\"")
+    }
+
     func testIndexRoundTripsCollectedTestDetails() throws {
         let reportDir = try makeReportDir()
         var report = makeReport()
@@ -16,7 +38,7 @@ final class TestDetailsIndexTests: XCTestCase {
         report.recordTestDetailsJSON(
             testDetailsJSON(identifier: "MyTests/testBeta()", runName: "Run 1", result: "Failed"),
             for: "MyTests/testBeta()")
-        report.writeTestDetailsIndex()
+        try report.writeTestDetailsIndex()
 
         let indexPath = (reportDir as NSString).appendingPathComponent("test_details.json")
         XCTAssertTrue(FileManager.default.fileExists(atPath: indexPath))
@@ -48,8 +70,8 @@ final class TestDetailsIndexTests: XCTestCase {
         var report = makeReport()
         report.outputDir = reportDir
 
-        report.writeTestDetailsIndex()
-        report.writeTestDetailsIndex()
+        try report.writeTestDetailsIndex()
+        try report.writeTestDetailsIndex()
 
         let indexPath = (reportDir as NSString).appendingPathComponent("test_details.json")
         let contents = try String(contentsOfFile: indexPath, encoding: .utf8)
@@ -84,7 +106,7 @@ final class TestDetailsIndexTests: XCTestCase {
             testDetailsJSON(
                 identifier: "MyTests/testAlpha()", runName: "Indexed run", result: "Passed"),
             for: "MyTests/testAlpha()")
-        previousReport.writeTestDetailsIndex()
+        try previousReport.writeTestDetailsIndex()
 
         var report = makeReport()
         report.outputDir = (parentDir as NSString).appendingPathComponent("2024-01-02")
@@ -98,7 +120,7 @@ final class TestDetailsIndexTests: XCTestCase {
     // MARK: - Helpers
 
     private func makeReport() -> XCTestReport {
-        var report = XCTestReport()
+        var report = makeTestReport()
         report.xcresultPath = ""
         report.outputDir = NSTemporaryDirectory()
         return report

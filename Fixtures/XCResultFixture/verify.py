@@ -50,6 +50,25 @@ CUSTOM_ATTACHMENT_NAMES = {
     "search-results.txt", "accessibility-hierarchy.txt",
 }
 
+EXPECTED_ACTIVITY_TITLES = {
+    "ActivityTests/testNestedActivitiesAndAttachments()": "Plan a journey: Montréal → Downtown",
+    "ActivityTests/testPerformanceMeasurement()": "Measure local route serialization",
+    "ActivityTests/testSlowPassingOperation()": "Wait for a deliberately slow local operation",
+    "OutcomeTests/testPassingAssertion()": "Verify a plain assertion without attachments",
+    "OutcomeTests/testSkippedWithReason()": "Check subscription eligibility",
+    "OutcomeTests/testExpectedFailure()": "Verify fare rounding",
+    "OutcomeTests/testMultipleFailuresInNestedStep()": "Verify response",
+    "OutcomeTests/testThrownError()": "Request route service",
+    "OutcomeTests/testFailsOnceThenPasses()": "Connect to route service",
+    "SnapshotTests/testChangedCard()": "Compare route card without a supplied diff",
+    "SnapshotTests/testResizedCard()": "Compare images of different sizes",
+    "SnapshotTests/testProvidedDifferenceAndAliases()": "Compare reference/failure aliases with supplied difference",
+    "SnapshotTests/testMatchingCardWithoutAttachments()": "Verify matching card without retaining images",
+    "JourneyUITests/testPinRoute()": "Open journey",
+    "JourneyUITests/testSearchRoutes()": "Search for Orange line",
+    "JourneyUITests/testFailureWithScreenshotAndHierarchy()": "Verify pin state after tapping",
+}
+
 
 def require(condition, message):
     if not condition:
@@ -79,6 +98,11 @@ def walk(nodes, child_key="children"):
 
 def verify(bundle, plan):
     mixed = plan == "Mixed"
+    detail_exports = {}
+    activity_exports = {}
+
+    def save(topic, value):
+        bundle.with_suffix(f".{topic}.json").write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n")
 
     def result(topic, test_id=None):
         args = ["xcrun", "xcresulttool", "get", "test-results", topic,
@@ -89,6 +113,8 @@ def verify(bundle, plan):
 
     summary = result("summary")
     tree = result("tests")
+    save("summary", summary)
+    save("tests", tree)
     cases = {canonical(node["nodeIdentifier"]): node
              for node in walk(tree["testNodes"]) if node["nodeType"] == "Test Case"}
     require(set(cases) == EXPECTED_CASES,
@@ -112,10 +138,14 @@ def verify(bundle, plan):
             require(node.get("result") == expected, f"{key}: expected {expected}, got {node.get('result')}")
 
     def details(key):
-        return result("test-details", cases[key]["nodeIdentifier"])
+        detail_exports[key] = result("test-details", cases[key]["nodeIdentifier"])
+        save("details", detail_exports)
+        return detail_exports[key]
 
     def activities(key):
-        return result("activities", cases[key]["nodeIdentifier"])["testRuns"]
+        activity_exports[key] = result("activities", cases[key]["nodeIdentifier"])["testRuns"]
+        save("activities", activity_exports)
+        return activity_exports[key]
 
     metric = details("ActivityTests/testPerformanceMeasurement()")
     require(metric["hasPerformanceMetrics"], "Missing XCTest performance measurement")
@@ -142,11 +172,13 @@ def verify(bundle, plan):
     require(any(child["title"] == "Decode → validate → render"
                 for child in nested_steps["Load offline response"].get("childActivities", [])),
             "Activity hierarchy was flattened")
-    for key in sorted(EXPECTED_CASES - {key for key in EXPECTED_CASES if key.startswith("ModernTests/")}):
+    # Public activity exports omit the private SQLite activityType. Check the fixture's
+    # exact named user steps instead of treating missing optional metadata as missing steps.
+    for key, title in sorted(EXPECTED_ACTIVITY_TITLES.items()):
         runs = activities(key)
-        require(all(any(node.get("activityType") == "com.apple.dt.xctest.activity-type.userCreated"
+        require(all(any(node.get("title") == title
                         for node in walk(run["activities"], "childActivities")) for run in runs),
-                f"Missing XCTContext.runActivity steps for {key}")
+                f"Missing XCTContext.runActivity step {title!r} for {key}")
 
     if mixed:
         issue_steps = [node for run in activities("OutcomeTests/testMultipleFailuresInNestedStep()")
@@ -159,6 +191,7 @@ def verify(bundle, plan):
     with tempfile.TemporaryDirectory(prefix="xcresult-fixture-verify-") as temp:
         run("xcrun", "xcresulttool", "export", "attachments", "--path", str(bundle), "--output-path", temp)
         manifest = json.loads((Path(temp) / "manifest.json").read_text())
+        save("attachments", manifest)
         attachments = {}
         videos_by_test = set()
         images_by_test = set()

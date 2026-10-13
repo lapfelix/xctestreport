@@ -40,6 +40,7 @@
     var ALIGN_SEARCH_MARGIN = 8;
     var ALIGN_SEARCH_SAMPLES = 40000;
     var MAX_LIVE_BOXES = 50;
+    var MAX_CHANGED_RUNS = 500000;
     var BOX_MERGE_GAP = 4;
     var ALIGNMENTS = [
         { id: "top", label: "Top" },
@@ -92,6 +93,24 @@
         if (value < low) { return low; }
         if (value > high) { return high; }
         return value;
+    }
+
+    // Core Graphics compares premultiplied sRGB bytes; canvas exposes straight RGBA.
+    // Keep straight values for swatches and normalize only the comparison math.
+    function premultipliedChannel(value, alpha) {
+        return alpha === 255 ? value : Math.round(value * alpha / 255);
+    }
+
+    function pixelDelta(expected, ei, actual, ai) {
+        var ea = expected[ei + 3];
+        var aa = actual[ai + 3];
+        var delta = Math.abs(ea - aa);
+        for (var channel = 0; channel < 3; channel += 1) {
+            delta = Math.max(delta, Math.abs(
+                premultipliedChannel(expected[ei + channel], ea)
+                - premultipliedChannel(actual[ai + channel], aa)));
+        }
+        return delta;
     }
 
     function fmtInt(value) {
@@ -246,7 +265,7 @@
             blinkTimer: null,
             blinkInterval: 500,
             // Start from the tolerance the report measured with, so live numbers match the badges.
-            tolerance: typeof data.tolerance === "number" ? clamp(Math.round(data.tolerance), 0, 128) : 0,
+            tolerance: typeof data.tolerance === "number" ? clamp(Math.round(data.tolerance), 0, 255) : 0,
             boxIndex: -1,
             showBoxes: true,
             expW: expectedWidth,
@@ -475,7 +494,7 @@
 
         var toleranceWrap = el("label", "snapdiff-field");
         toleranceWrap.appendChild(el("span", "snapdiff-fieldlabel", "Tolerance"));
-        var toleranceSlider = range("snapdiff-range", 0, 128, 1, state.tolerance, "Per-channel tolerance");
+        var toleranceSlider = range("snapdiff-range", 0, 255, 1, state.tolerance, "Per-channel tolerance");
         var toleranceValue = el("span", "snapdiff-fieldvalue", String(state.tolerance));
         toleranceSlider.addEventListener("input", function() {
             state.tolerance = Number(toleranceSlider.value);
@@ -934,8 +953,7 @@
                 for (var x = 0; x < width; x += stride) {
                     var ei = eRow + x * 4;
                     var ai = aRow + x * 4;
-                    if (ed[ei] !== ad[ai] || ed[ei + 1] !== ad[ai + 1]
-                        || ed[ei + 2] !== ad[ai + 2] || ed[ei + 3] !== ad[ai + 3]) {
+                    if (pixelDelta(ed, ei, ad, ai) > 0) {
                         diffs += 1;
                     }
                     samples += 1;
@@ -1548,6 +1566,10 @@
     // Paints the world-sized canvas and measures only where both images exist; the rest
     // is hatched and reported separately as a size change.
     function compute(state, paint) {
+        // Auto alignment can enlarge the canvas after the initial pixel-read budget check.
+        if (state.unionW * state.unionH > MAX_COMPUTE_PIXELS) {
+            throw new Error("comparison canvas exceeds pixel budget");
+        }
         var ctx = ensureCanvas(state);
         if (!ctx) { throw new Error("no 2d context"); }
 
@@ -1594,17 +1616,7 @@
                 overlap += 1;
                 var ei = eRow + x * 4;
                 var ai = aRow + x * 4;
-                var dr = ed[ei] - ad[ai];
-                if (dr < 0) { dr = -dr; }
-                var dg = ed[ei + 1] - ad[ai + 1];
-                if (dg < 0) { dg = -dg; }
-                var db = ed[ei + 2] - ad[ai + 2];
-                if (db < 0) { db = -db; }
-                var da = ed[ei + 3] - ad[ai + 3];
-                if (da < 0) { da = -da; }
-                var d = dr > dg ? dr : dg;
-                if (db > d) { d = db; }
-                if (da > d) { d = da; }
+                var d = pixelDelta(ed, ei, ad, ai);
                 if (d > maxDelta) { maxDelta = d; }
 
                 if (d <= tolerance) {
@@ -1648,12 +1660,13 @@
     }
 
     // Same grouping as the report's server-side boxes: connected runs, then nearby boxes merged.
-    // Returns null when the mask is too noisy to group cheaply.
+    // Very noisy masks fall back to one enclosing region with bounded run storage.
     function changedBoxes(mask, W, H) {
         var runY = [];
         var runStart = [];
         var runEnd = [];
         var parents = [];
+        var ranks = [];
         function find(i) {
             while (parents[i] !== i) {
                 parents[i] = parents[parents[i]];
@@ -1665,6 +1678,7 @@
         var previousTo = 0;
         for (var y = 0; y < H; y += 1) {
             var rowFrom = runY.length;
+            var previousCursor = previousFrom;
             var base = y * W;
             var x = 0;
             while (x < W) {
@@ -1672,16 +1686,24 @@
                 var end = x;
                 while (end + 1 < W && mask[base + end + 1]) { end += 1; }
                 var id = runY.length;
-                if (id > 500000) { return null; }
+                if (id >= MAX_CHANGED_RUNS) { return changedBounds(mask, W, H); }
                 runY.push(y);
                 runStart.push(x);
                 runEnd.push(end);
                 parents.push(id);
-                for (var p = previousFrom; p < previousTo; p += 1) {
-                    if (runStart[p] <= end + 1 && x <= runEnd[p] + 1) {
-                        var a = find(p);
-                        var b = find(id);
-                        if (a !== b) { parents[b] = a; }
+                ranks.push(0);
+                while (previousCursor < previousTo && runEnd[previousCursor] + 1 < x) {
+                    previousCursor += 1;
+                }
+                for (var p = previousCursor; p < previousTo && runStart[p] <= end + 1; p += 1) {
+                    var a = find(p);
+                    var b = find(id);
+                    if (a !== b) {
+                        if (ranks[a] < ranks[b]) { parents[a] = b; }
+                        else {
+                            parents[b] = a;
+                            if (ranks[a] === ranks[b]) { ranks[a] += 1; }
+                        }
                     }
                 }
                 x = end + 2;
@@ -1709,6 +1731,18 @@
         });
         boxes.sort(compareBoxes);
         return coalesceBoxes(boxes.slice(0, 2000), BOX_MERGE_GAP).sort(compareBoxes).slice(0, MAX_LIVE_BOXES);
+    }
+
+    function changedBounds(mask, W, H) {
+        var minX = W, minY = H, maxX = -1, maxY = -1;
+        for (var y = 0; y < H; y += 1) {
+            for (var x = 0; x < W; x += 1) {
+                if (!mask[y * W + x]) { continue; }
+                minX = Math.min(minX, x); minY = Math.min(minY, y);
+                maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
+            }
+        }
+        return maxX < minX ? [] : [{ x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 }];
     }
 
     function compareBoxes(a, b) {
@@ -1826,10 +1860,11 @@
         var deltaNode;
         if (expected && actual) {
             deltaNode = el("span", "snapdiff-inspector-delta", "Δ "
-                + Math.abs(expected[0] - actual[0]) + ", "
-                + Math.abs(expected[1] - actual[1]) + ", "
-                + Math.abs(expected[2] - actual[2]) + ", "
+                + Math.abs(premultipliedChannel(expected[0], expected[3]) - premultipliedChannel(actual[0], actual[3])) + ", "
+                + Math.abs(premultipliedChannel(expected[1], expected[3]) - premultipliedChannel(actual[1], actual[3])) + ", "
+                + Math.abs(premultipliedChannel(expected[2], expected[3]) - premultipliedChannel(actual[2], actual[3])) + ", "
                 + Math.abs(expected[3] - actual[3]));
+            deltaNode.title = "Channel differences use premultiplied sRGB, matching the snapshot report.";
         } else {
             deltaNode = el("span", "snapdiff-inspector-delta",
                 "outside the " + (expected ? "actual" : "expected") + " image");

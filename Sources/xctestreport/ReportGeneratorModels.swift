@@ -98,6 +98,31 @@ extension XCTestReport {
         let testResult: String
         let testRuns: [TestRunDetail]?
         var previousRuns: [TestRunDetail]?
+
+        private enum CodingKeys: String, CodingKey {
+            case devices, duration, hasMediaAttachments, hasPerformanceMetrics, startTime
+            case testDescription, testIdentifier, testIdentifierURL, testName
+            case testPlanConfigurations, testResult, testRuns
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            devices = try container.decode([Device].self, forKey: .devices)
+            duration = try container.decode(String.self, forKey: .duration)
+            hasMediaAttachments = try container.decode(Bool.self, forKey: .hasMediaAttachments)
+            hasPerformanceMetrics = try container.decode(Bool.self, forKey: .hasPerformanceMetrics)
+            startTime = try container.decodeIfPresent(Double.self, forKey: .startTime)
+            testDescription = try container.decode(String.self, forKey: .testDescription)
+            testIdentifier = try container.decode(String.self, forKey: .testIdentifier)
+            testIdentifierURL = try container.decodeIfPresent(String.self, forKey: .testIdentifierURL)
+            testName = try container.decode(String.self, forKey: .testName)
+            testPlanConfigurations = try container.decode(
+                [TestPlanConfiguration].self, forKey: .testPlanConfigurations)
+            testResult = try container.decode(String.self, forKey: .testResult)
+            testRuns = try container.decodeIfPresent([TestRunNode].self, forKey: .testRuns)
+                .map(TestRunDetail.flatten)
+            previousRuns = nil
+        }
     }
 
     struct TestRunDetail: Decodable {
@@ -107,15 +132,75 @@ extension XCTestReport {
         let nodeIdentifier: String?
         let nodeType: String
         let result: String?
+        /// Device and configuration the run belongs to, when the result nests runs under them.
+        var destination: String? = nil
+
+        private static let destinationNodeTypes: Set<String> = ["Device", "Test Plan Configuration"]
+
+        /// Bundles with several destinations nest runs as Device > Test Plan Configuration >
+        /// [Repetition], without a duration on the device; single-destination bundles list
+        /// repetitions directly. Either way, each leaf is one attempt.
+        static func flatten(_ nodes: [TestRunNode]) -> [TestRunDetail] {
+            var runs = [TestRunDetail]()
+            func visit(_ node: TestRunNode, path: [String]) {
+                let children = node.children ?? []
+                let nestsRuns =
+                    destinationNodeTypes.contains(node.nodeType)
+                    && children.contains {
+                        destinationNodeTypes.contains($0.nodeType) || $0.nodeType == "Repetition"
+                    }
+                if nestsRuns {
+                    for child in children {
+                        visit(child, path: path + [node.name])
+                    }
+                    return
+                }
+                var run = TestRunDetail(node: node)
+                if !path.isEmpty {
+                    let destination = path.joined(separator: " · ")
+                    run = TestRunDetail(
+                        children: run.children, duration: run.duration,
+                        name: "\(destination) · \(run.name)", nodeIdentifier: run.nodeIdentifier,
+                        nodeType: run.nodeType, result: run.result, destination: destination)
+                }
+                runs.append(run)
+            }
+            for node in nodes {
+                visit(node, path: [])
+            }
+            return runs
+        }
     }
 
-    struct TestRunChild: Decodable {
+    /// Raw `testRuns` node from `xcresulttool get test-results test-details`.
+    struct TestRunNode: Decodable {
+        let children: [TestRunNode]?
+        let duration: String?
+        let durationInSeconds: Double?
+        let name: String
+        let nodeIdentifier: String?
+        let nodeType: String
+        let result: String?
+        let url: String?
+        let sourceLocation: TestRunSourceLocation?
+    }
+
+    struct TestRunChild {
         let children: [TestRunChildDetail]?
         let name: String
         let nodeType: String
         let result: String?
         let sourceLocation: TestRunSourceLocation?
         var durationInSeconds: Double? = nil
+
+        init(_ node: TestRunNode) {
+            children = node.children?.map(TestRunChildDetail.init)
+            name = node.name
+            nodeType = node.nodeType
+            result = node.result
+            sourceLocation = node.sourceLocation
+            durationInSeconds = node.durationInSeconds
+        }
     }
 
     struct TestRunSourceLocation: Decodable {
@@ -123,13 +208,22 @@ extension XCTestReport {
         let lineNumber: Int
     }
 
-    struct TestRunChildDetail: Decodable {
+    struct TestRunChildDetail {
         let children: [TestRunChildDetail]?
         let name: String
         let nodeType: String
         let result: String?
         let url: String?
         let sourceLocation: TestRunSourceLocation?
+
+        init(_ node: TestRunNode) {
+            children = node.children?.map(TestRunChildDetail.init)
+            name = node.name
+            nodeType = node.nodeType
+            result = node.result
+            url = node.url
+            sourceLocation = node.sourceLocation
+        }
     }
 
     struct TestHistory {
@@ -394,21 +488,16 @@ extension XCTestReport {
 }
 
 extension XCTestReport.TestRunDetail {
-    private enum CodingKeys: String, CodingKey {
-        case children, duration, durationInSeconds, name, nodeIdentifier, nodeType, result
+    init(from decoder: Decoder) throws {
+        self.init(node: try XCTestReport.TestRunNode(from: decoder))
     }
 
-    init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        children = try values.decodeIfPresent([XCTestReport.TestRunChild].self, forKey: .children)
-        name = try values.decode(String.self, forKey: .name)
-        nodeIdentifier = try values.decodeIfPresent(String.self, forKey: .nodeIdentifier)
-        nodeType = try values.decode(String.self, forKey: .nodeType)
-        result = try values.decodeIfPresent(String.self, forKey: .result)
-
-        if let supplied = try values.decodeIfPresent(String.self, forKey: .duration) {
+    init(node: XCTestReport.TestRunNode) {
+        let children = node.children?.map(XCTestReport.TestRunChild.init)
+        let duration: String
+        if let supplied = node.duration {
             duration = supplied
-        } else if let seconds = try values.decodeIfPresent(Double.self, forKey: .durationInSeconds) {
+        } else if let seconds = node.durationInSeconds {
             duration = formatCompactDuration(seconds)
         } else {
             // Swift Testing groups repetitions under their argument and omits the group's
@@ -417,5 +506,8 @@ extension XCTestReport.TestRunDetail {
                 .compactMap { $0.durationInSeconds }
             duration = repetitions.isEmpty ? "--" : formatCompactDuration(repetitions.reduce(0, +))
         }
+        self.init(
+            children: children, duration: duration, name: node.name,
+            nodeIdentifier: node.nodeIdentifier, nodeType: node.nodeType, result: node.result)
     }
 }

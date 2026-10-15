@@ -58,6 +58,7 @@ final class FailureSourceReferenceTests: XCTestCase {
     }
 
     private func decodeRuns(_ json: String) throws -> [XCTestReport.TestRunDetail] {
-        try JSONDecoder().decode([XCTestReport.TestRunDetail].self, from: Data(json.utf8))
+        XCTestReport.TestRunDetail.flatten(
+            try JSONDecoder().decode([XCTestReport.TestRunNode].self, from: Data(json.utf8)))
     }
 }

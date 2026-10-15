@@ -34,6 +34,50 @@ final class ReportIndexTests: XCTestCase {
         XCTAssertFalse(XCTestReport.isFlakyTest(result: "Passed", testRuns: nil))
     }
 
+    func testMultiDestinationRunsFlattenToLabeledAttempts() throws {
+        let details = try JSONDecoder().decode(
+            XCTestReport.TestDetails.self,
+            from: Data(
+                """
+                {"devices": [], "duration": "Average duration 4 minutes", "hasMediaAttachments": false,
+                 "hasPerformanceMetrics": false, "testDescription": "Test case with 3 runs",
+                 "testIdentifier": "Suite/testFoo()", "testName": "testFoo()",
+                 "testPlanConfigurations": [], "testResult": "Passed",
+                 "testRuns": [
+                   {"name": "iPhone 16 Pro", "nodeType": "Device", "result": "Passed", "children": [
+                     {"name": "Configuration 1", "duration": "13min", "nodeType": "Test Plan Configuration",
+                      "result": "Passed", "children": [
+                        {"name": "First Run", "duration": "10min", "nodeType": "Repetition", "result": "Failed",
+                         "children": [{"name": "Timed out", "nodeType": "Test Case Run", "result": "Failed"}]},
+                        {"name": "Retry 1", "duration": "3min", "nodeType": "Repetition", "result": "Passed"}
+                     ]}
+                   ]},
+                   {"name": "iPhone 18 Pro", "nodeType": "Device", "result": "Passed", "children": [
+                     {"name": "Configuration 1", "duration": "2min", "nodeType": "Test Plan Configuration",
+                      "result": "Passed"}
+                   ]}
+                 ]}
+                """.utf8))
+        let runs = try XCTUnwrap(details.testRuns)
+
+        XCTAssertEqual(runs.map(\.name), [
+            "iPhone 16 Pro · Configuration 1 · First Run",
+            "iPhone 16 Pro · Configuration 1 · Retry 1",
+            "iPhone 18 Pro · Configuration 1",
+        ])
+        XCTAssertEqual(runs.map(\.duration), ["10min", "3min", "2min"])
+        XCTAssertEqual(runs.first?.children?.first?.name, "Timed out")
+        XCTAssertTrue(XCTestReport.isFlakyTest(result: "Passed", testRuns: runs))
+    }
+
+    func testFailureOnOneDestinationIsNotARetry() {
+        let runs = [
+            makeRun("Failed", destination: "iPhone 16 Pro"),
+            makeRun("Passed", destination: "iPhone 18 Pro"),
+        ]
+        XCTAssertFalse(XCTestReport.isFlakyTest(result: "Passed", testRuns: runs))
+    }
+
     func testPreviousRunDeltaListsNewlyFailingAndFixed() {
         let current = [
             makeTestNode("Suite/testBroke", result: "Failed"),
@@ -71,10 +115,10 @@ final class ReportIndexTests: XCTestCase {
         XCTAssertTrue(empty.contains("no status changes"))
     }
 
-    private func makeRun(_ result: String) -> XCTestReport.TestRunDetail {
+    private func makeRun(_ result: String, destination: String? = nil) -> XCTestReport.TestRunDetail {
         return XCTestReport.TestRunDetail(
             children: nil, duration: "1s", name: "Run", nodeIdentifier: nil,
-            nodeType: "Test Case Run", result: result)
+            nodeType: "Test Case Run", result: result, destination: destination)
     }
 
     private func makeTestNode(_ identifier: String, result: String) -> XCTestReport.TestNode {

@@ -39,10 +39,12 @@ extension XCTestReport {
 
     /// A test that passed overall after at least one earlier attempt did not.
     static func isFlakyTest(result: String?, testRuns: [TestRunDetail]?) -> Bool {
-        guard isPassedTestResult(result), let testRuns, testRuns.count > 1,
-            let firstResult = testRuns.first?.result
-        else { return false }
-        return !isPassedTestResult(firstResult)
+        guard isPassedTestResult(result), let testRuns else { return false }
+        // Runs on different destinations are separate tests, not retries of each other.
+        return Dictionary(grouping: testRuns, by: { $0.destination ?? "" }).values.contains { runs in
+            guard runs.count > 1, let firstResult = runs.first?.result else { return false }
+            return !isPassedTestResult(firstResult)
+        }
     }
 
     static func previousRunDelta(

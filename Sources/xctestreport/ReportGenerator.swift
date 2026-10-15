@@ -31,17 +31,6 @@ extension XCTestReport {
         try FileManager.default.createDirectory(
             atPath: testPagesDirectoryPath, withIntermediateDirectories: true)
 
-        // Check xcresult file size
-        var sizeInGB: Double = 0
-        if let fileSize = directorySizeInBytes(at: xcresultPath) {
-            sizeInGB = Double(fileSize) / 1_073_741_824
-            if sizeInGB > 5.0 {
-                print("WARNING: Large xcresult file detected (\(String(format: "%.2f", sizeInGB)) GB)")
-                print("This may take a very long time to process...")
-                print("Consider using smaller test batches or filtering tests")
-            }
-        }
-
         let overallStartTime = Date()
         var attachmentsByTestIdentifier = [String: [AttachmentManifestItem]]()
         var attachmentsExportDuration: TimeInterval = 0
@@ -350,17 +339,11 @@ extension XCTestReport {
 
                     var testDetails: TestDetails?
                     var testActivities: TestActivities?
-                    // Skip getTestDetails for large xcresult files to avoid timeout
-                    if htmlOnly || sizeInGB < 10.0 {  // Cached data never needs a source-bundle size limit.
-                        if let testIdentifier = test.nodeIdentifier {
-                            testDetails = getTestDetails(for: testIdentifier)
-                            testActivities = getTestActivities(for: testIdentifier)
-                        } else {
-                            print("No test identifier for test: \(test.name)")
-                        }
-                    } else if showsFailureDetails {
-                        // For large files, only log failed tests
-                        print("Skipping details for \(test.name) (large xcresult: \(String(format: "%.2f", sizeInGB)) GB)")
+                    if let testIdentifier = test.nodeIdentifier {
+                        testDetails = getTestDetails(for: testIdentifier)
+                        testActivities = getTestActivities(for: testIdentifier)
+                    } else {
+                        print("No test identifier for test: \(test.name)")
                     }
 
                     if let testDetails = testDetails {
@@ -396,8 +379,7 @@ extension XCTestReport {
                                 """
                         }
 
-                        // Add previous runs information (skip for large files)
-                        if sizeInGB < 10.0, let testIdentifier = test.nodeIdentifier {
+                        if let testIdentifier = test.nodeIdentifier {
                             let previousRuns = getPreviousRuns(for: testIdentifier)
                             if !previousRuns.isEmpty {
                                 let runsEmoji = previousRuns.prefix(10).map {
@@ -764,8 +746,7 @@ extension XCTestReport {
                     }
 
                     var isFlaky = false
-                    if sizeInGB < 10.0,
-                        Self.isPassedTestResult(result),
+                    if Self.isPassedTestResult(result),
                         let testId = test.nodeIdentifier,
                         let testRuns = getTestDetails(for: testId)?.testRuns,
                         Self.isFlakyTest(result: result, testRuns: testRuns)

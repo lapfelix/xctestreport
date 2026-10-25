@@ -150,7 +150,8 @@ def markdown_identifiers(content):
 GESTURE_KEY = "JourneyUITests/testGestureTiming()"
 GESTURE_TOLERANCE = 0.08
 VIDEO_LAG = (-0.03, 0.15)
-FRAME_STEP = 0.02
+# Recordings use variable frame timing; on a loaded CI machine a tap can be one 10 ms frame.
+FRAME_STEP = 0.004
 
 
 def sample_frames(video, times):

@@ -32,7 +32,7 @@ jobs:
           ${{ env.XCTESTREPORT_RAW_FIXTURE_CACHE }}/Baseline.xcresult
           ${{ env.XCTESTREPORT_RAW_FIXTURE_CACHE }}/Mixed.xcresult
           ${{ env.XCTESTREPORT_RAW_FIXTURE_CACHE }}/verified.json
-        key: raw-xcresults-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.fixture-cache-key.outputs.xcode }}-${{ hashFiles('Fixtures/XCResultFixture/App/**', 'Fixtures/XCResultFixture/UnitTests/**', 'Fixtures/XCResultFixture/UITests/**', 'Fixtures/XCResultFixture/XCResultFixture.xcodeproj/**', 'Fixtures/XCResultFixture/project.yml', 'Fixtures/XCResultFixture/TestPlans/**', 'Fixtures/XCResultFixture/generate.sh') }}
+        key: raw-xcresults-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.fixture-cache-key.outputs.xcode }}-${{ hashFiles('Fixtures/XCResultFixture/App/**', 'Fixtures/XCResultFixture/UnitTests/**', 'Fixtures/XCResultFixture/UITests/**', 'Fixtures/XCResultFixture/XCResultFixture.xcodeproj/**', 'Fixtures/XCResultFixture/project.yml', 'Fixtures/XCResultFixture/TestPlans/Baseline.xctestplan', 'Fixtures/XCResultFixture/TestPlans/Mixed.xctestplan', 'Fixtures/XCResultFixture/generate.sh') }}
     - name: Restore verified raw performance xcresult
       id: raw-performance-cache
       uses: actions/cache/restore@v4

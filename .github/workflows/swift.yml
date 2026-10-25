@@ -16,9 +16,13 @@ jobs:
     - name: Set fixture output paths
       id: fixture-cache-key
       run: |
-        printf 'XCTESTREPORT_GENERATED_REPORT=%s/xctestreport-generated-report\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
-        printf 'XCTESTREPORT_REAL_FIXTURES=%s/xctestreport-real-fixtures\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
-        printf 'XCTESTREPORT_RAW_FIXTURE_CACHE=%s/xctestreport-raw-fixture-cache\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+        {
+          printf 'XCTESTREPORT_GENERATED_REPORT=%s/xctestreport-generated-report\n' "$RUNNER_TEMP"
+          printf 'XCTESTREPORT_REAL_FIXTURES=%s/xctestreport-real-fixtures\n' "$RUNNER_TEMP"
+          printf 'XCTESTREPORT_RAW_FIXTURE_CACHE=%s/xctestreport-raw-fixture-cache\n' "$RUNNER_TEMP"
+          printf 'XCTESTREPORT_PERFORMANCE_FIXTURES=%s/xctestreport-performance-fixtures\n' "$RUNNER_TEMP"
+          printf 'XCTESTREPORT_RAW_PERFORMANCE_CACHE=%s/xctestreport-raw-performance-cache\n' "$RUNNER_TEMP"
+        } >> "$GITHUB_ENV"
         printf 'xcode=%s\n' "$(xcodebuild -version | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
     - name: Restore verified raw xcresult fixtures
       id: raw-fixture-cache
@@ -29,6 +33,14 @@ jobs:
           ${{ env.XCTESTREPORT_RAW_FIXTURE_CACHE }}/Mixed.xcresult
           ${{ env.XCTESTREPORT_RAW_FIXTURE_CACHE }}/verified.json
         key: raw-xcresults-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.fixture-cache-key.outputs.xcode }}-${{ hashFiles('Fixtures/XCResultFixture/App/**', 'Fixtures/XCResultFixture/UnitTests/**', 'Fixtures/XCResultFixture/UITests/**', 'Fixtures/XCResultFixture/XCResultFixture.xcodeproj/**', 'Fixtures/XCResultFixture/project.yml', 'Fixtures/XCResultFixture/TestPlans/**', 'Fixtures/XCResultFixture/generate.sh') }}
+    - name: Restore verified raw performance xcresult
+      id: raw-performance-cache
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          ${{ env.XCTESTREPORT_RAW_PERFORMANCE_CACHE }}/Performance.xcresult
+          ${{ env.XCTESTREPORT_RAW_PERFORMANCE_CACHE }}/verified.json
+        key: raw-performance-xcresult-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.fixture-cache-key.outputs.xcode }}-${{ hashFiles('Fixtures/XCResultFixture/App/**', 'Fixtures/XCResultFixture/UnitTests/**', 'Fixtures/XCResultFixture/UITests/**', 'Fixtures/XCResultFixture/XCResultFixture.xcodeproj/**', 'Fixtures/XCResultFixture/project.yml', 'Fixtures/XCResultFixture/TestPlans/**', 'Fixtures/XCResultFixture/generate.sh', 'Fixtures/XCResultFixture/retarget_baselines.py') }}
     - uses: actions/setup-node@v4
       with:
         node-version: '22'
@@ -42,6 +54,16 @@ jobs:
       run: Scripts/test-installed-report.sh "$XCTESTREPORT_GENERATED_REPORT"
     - name: Generate and verify actual xcresult reports
       run: Scripts/test-real-fixtures.sh "$XCTESTREPORT_REAL_FIXTURES"
+    - name: Generate and verify the performance xcresult report
+      run: Scripts/test-performance-fixture.sh "$XCTESTREPORT_PERFORMANCE_FIXTURES"
+    - name: Save verified raw performance xcresult
+      if: always() && steps.raw-performance-cache.outputs.cache-hit != 'true' && hashFiles(format('{0}/verified.json', env.XCTESTREPORT_RAW_PERFORMANCE_CACHE)) != ''
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          ${{ env.XCTESTREPORT_RAW_PERFORMANCE_CACHE }}/Performance.xcresult
+          ${{ env.XCTESTREPORT_RAW_PERFORMANCE_CACHE }}/verified.json
+        key: ${{ steps.raw-performance-cache.outputs.cache-primary-key }}
     - name: Install UI Test Dependencies
       run: npm --prefix ui-tests ci
     - name: Install Playwright Browsers
@@ -84,5 +106,8 @@ jobs:
           ${{ runner.temp }}/xctestreport-real-fixtures/reports/
           ${{ runner.temp }}/xctestreport-real-fixtures/*.xcresult/
           ${{ runner.temp }}/xctestreport-real-fixtures/archived-xcresults/
+          ${{ runner.temp }}/xctestreport-performance-fixtures/*.log
+          ${{ runner.temp }}/xctestreport-performance-fixtures/*.json
+          ${{ runner.temp }}/xctestreport-performance-fixtures/*.xcresult/
         if-no-files-found: ignore
         retention-days: 7

@@ -351,6 +351,11 @@ outcomes, snapshots, media and history, then checks packed regeneration without 
 sources and preservation on failure. Set `XCTESTREPORT_REAL_FIXTURES` to that directory to run
 the actual-report browser cases. CI requires this check in addition to the small installation fixture.
 
+`Scripts/test-performance-fixture.sh /absolute/path/to/empty/fixture-output` does the same for
+the Performance plan (`generate.sh --performance`): it verifies the bundle's metrics, baselines and
+deliberate failures, then checks the report against `xcresulttool`'s metrics export and its
+HTML-only regeneration. Set `XCTESTREPORT_RAW_PERFORMANCE_CACHE` to reuse a verified bundle. CI runs it too.
+
 ### Browser regression checks
 
 Install Node.js 20+ and set up the browser checks:

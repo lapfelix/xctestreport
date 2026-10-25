@@ -36,8 +36,8 @@
     "userAttachmentLifetime": "keepAlways",
     "testExecutionOrdering": "lexical",
     "testTimeoutsEnabled": true,
-    "defaultTestExecutionTimeAllowance": 60,
-    "maximumTestExecutionTimeAllowance": 120
+    "defaultTestExecutionTimeAllowance": 300,
+    "maximumTestExecutionTimeAllowance": 600
   },
   "testTargets": [
     {

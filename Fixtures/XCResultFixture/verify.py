@@ -30,6 +30,7 @@ EXPECTED_CASES = {
     "ModernTests/modernAssertion()",
     "JourneyUITests/testPinRoute()",
     "JourneyUITests/testSearchRoutes()",
+    "JourneyUITests/testGestureTiming()",
     "JourneyUITests/testFailureWithScreenshotAndHierarchy()",
 }
 
@@ -47,7 +48,7 @@ CUSTOM_ATTACHMENT_NAMES = {
     "journey.log", "response.json", "route-state.plist", "route-state-xml.plist",
     "duplicate-name.txt", "opaque.bin", "empty.txt", "timing.txt", "failure-context.txt",
     "response-context.txt", "service.log", "attempt.txt", "pin-state.json",
-    "search-results.txt", "accessibility-hierarchy.txt",
+    "search-results.txt", "accessibility-hierarchy.txt", "touch-log.json",
 }
 
 EXPECTED_ACTIVITY_TITLES = {
@@ -66,6 +67,7 @@ EXPECTED_ACTIVITY_TITLES = {
     "SnapshotTests/testMatchingCardWithoutAttachments()": "Verify matching card without retaining images",
     "JourneyUITests/testPinRoute()": "Open journey",
     "JourneyUITests/testSearchRoutes()": "Search for Orange line",
+    "JourneyUITests/testGestureTiming()": "Tap, swipe and drag",
     "JourneyUITests/testFailureWithScreenshotAndHierarchy()": "Verify pin state after tapping",
 }
 
@@ -124,8 +126,8 @@ def verify(bundle, plan):
     require(summary["failedTests"] == (7 if mixed else 0), "Unexpected failure count")
     require(summary["skippedTests"] == (1 if mixed else 0), "Unexpected skip count")
     require(summary["expectedFailures"] == (1 if mixed else 0), "Missing/unexpected expected failure")
-    require(summary["totalTestCount"] == 18, "Unexpected total test-function count")
-    require(summary["passedTests"] == (9 if mixed else 18), "Unexpected passing-test count")
+    require(summary["totalTestCount"] == 19, "Unexpected total test-function count")
+    require(summary["passedTests"] == (10 if mixed else 19), "Unexpected passing-test count")
 
     for key, node in cases.items():
         expected = "Failed" if mixed and key in MIXED_FAILURES else "Passed"

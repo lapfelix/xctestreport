@@ -69,6 +69,31 @@ final class JourneyUITests: XCTestCase {
         }
     }
 
+    func testGestureTiming() throws {
+        let pad = app.descendants(matching: .any)["gesture-pad"].firstMatch
+        XCTAssertTrue(pad.waitForExistence(timeout: 5))
+        XCTContext.runActivity(named: "Tap, swipe and drag") { _ in
+            app.buttons["pin-route"].tap()
+            pad.swipeLeft()
+            pad.swipeUp()
+            let start = pad.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.5))
+            let end = pad.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5))
+            start.press(forDuration: 0.4, thenDragTo: end, withVelocity: 200, thenHoldForDuration: 0.3)
+            app.buttons["pin-route"].tap()
+        }
+        try XCTContext.runActivity(named: "Attach the app's touch log") { activity in
+            // The app records when it actually received each touch: the oracle for the overlay.
+            let log = try XCTUnwrap(app.staticTexts["touch-log"].value as? String)
+            let attachment = XCTAttachment(data: Data(log.utf8), uniformTypeIdentifier: "public.json")
+            attachment.name = "touch-log.json"
+            attachment.lifetime = .keepAlways
+            activity.add(attachment)
+            let touches = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(log.utf8)) as? [[String: Any]])
+            XCTAssertEqual(touches.count, 5, "Expected one logged touch per interaction")
+            XCTAssertTrue(touches.allSatisfy { $0["up"] != nil }, "A touch never ended")
+        }
+    }
+
     func testFailureWithScreenshotAndHierarchy() {
         XCTContext.runActivity(named: "Verify pin state after tapping") { activity in
             app.buttons["pin-route"].tap()

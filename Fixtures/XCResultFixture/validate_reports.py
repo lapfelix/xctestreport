@@ -5,11 +5,13 @@ import argparse
 import hashlib
 from html.parser import HTMLParser
 import json
+import math
 from pathlib import Path
 import plistlib
 import re
 import subprocess
 import sys
+import tempfile
 from urllib.parse import unquote, urlsplit
 import zipfile
 
@@ -142,6 +144,73 @@ def markdown_identifiers(content):
     return {canonical(value) for value in re.findall(r"^- \*\*Identifier:\*\* `([^`]+)`$", content, re.M)}
 
 
+# The fixture app logs when it actually received each touch and shows a magenta bar while a
+# finger is down. Overlay gestures must match the log, and the video must show the bar where
+# the overlay says the touch is; the video lags by a frame or two of render/capture latency.
+GESTURE_KEY = "JourneyUITests/testGestureTiming()"
+GESTURE_TOLERANCE = 0.08
+VIDEO_LAG = (-0.03, 0.15)
+FRAME_STEP = 0.02
+
+
+def sample_frames(video, times):
+    script = Path(__file__).with_name("sample_frames.swift")
+    with tempfile.TemporaryDirectory(prefix="xctestreport-frames-") as module_cache:
+        result = subprocess.run(
+            ["xcrun", "swift", "-module-cache-path", module_cache, str(script), str(video)]
+            + [f"{time:.3f}" for time in times],
+            capture_output=True, text=True, check=True)
+    samples = {}
+    for line in result.stdout.splitlines():
+        time, *rgb = line.split()
+        if rgb[0] != "none":
+            red, green, blue = map(int, rgb)
+            samples[round(float(time), 3)] = red > 180 and green < 90 and blue > 180
+    return samples
+
+
+def verify_gesture_timing(report, pages, manifest, mixed):
+    touches = json.loads(payload(report, pages, manifest, GESTURE_KEY, "touch-log.json")[1])
+    require(len(touches) == 5 and all("up" in touch for touch in touches), "Fixture touch log is incomplete")
+    page = pages[GESTURE_KEY]
+    with zipfile.ZipFile(page["archive"]) as bundle:
+        run_states = json.loads(bundle.read("timeline/runstates.json"))
+    # Compact run state: [base, label, failure index, events, gestures, hierarchy].
+    gestures = [{"start": g[0], "end": g[1], "first": g[4][0][1:], "last": g[4][-1][1:]} for g in run_states[0][4]]
+    require(len(gestures) == len(touches), f"Expected {len(touches)} overlay gestures, found {len(gestures)}")
+
+    matched = []
+    remaining = list(gestures)
+    for touch in touches:
+        gesture = min(remaining, key=lambda g: math.dist(g["first"], touch["downPoint"]) + math.dist(g["last"], touch["upPoint"]))
+        remaining.remove(gesture)
+        require(math.dist(gesture["first"], touch["downPoint"]) < 12 and math.dist(gesture["last"], touch["upPoint"]) < 12,
+                f"Overlay gesture at {gesture['first']} does not match the touch at {touch['downPoint']}")
+        start_error, end_error = gesture["start"] - touch["down"], gesture["end"] - touch["up"]
+        require(abs(start_error) <= GESTURE_TOLERANCE and abs(end_error) <= GESTURE_TOLERANCE,
+                f"Overlay gesture at {touch['downPoint']} is off by {start_error:+.3f}s (start) / {end_error:+.3f}s (end)")
+        matched.append(gesture)
+    if not mixed:
+        return
+
+    video = next(node for node in page["document"].root.elements() if node.tag == "video")
+    video_start = float(video.attributes["data-video-start"])
+    source = next(node for node in video.elements() if node.tag == "source")
+    recording = local_path(report / "attachments", Path(unquote(source.attributes["src"])).name)
+    # Look just around each gesture: the fixture's gestures are about 0.3s apart.
+    windows = [(g["start"] - video_start, g["end"] - video_start) for g in matched]
+    ranges = [(start - 0.1, end + VIDEO_LAG[1] + FRAME_STEP) for start, end in windows]
+    times = sorted({round(low + index * FRAME_STEP, 3) for low, high in ranges
+                    for index in range(int((high - low) / FRAME_STEP) + 1)})
+    samples = sample_frames(recording, times)
+    for (start, end), (low, high) in zip(windows, ranges):
+        lit = [time for time, on in samples.items() if on and low <= time <= high]
+        require(lit, f"Video never shows the touch the overlay places at {start:.3f}s")
+        first_lag, last_lag = min(lit) - start, max(lit) - end
+        require(VIDEO_LAG[0] <= first_lag <= VIDEO_LAG[1] and VIDEO_LAG[0] <= last_lag <= VIDEO_LAG[1] + FRAME_STEP,
+                f"Video shows the touch at {min(lit):.3f}-{max(lit):.3f}s; the overlay places it at {start:.3f}-{end:.3f}s")
+
+
 def verify_report(fixture, plan):
     mixed = plan == "Mixed"
     report = fixture / "reports" / plan.lower()
@@ -215,6 +284,8 @@ def verify_report(fixture, plan):
     pin_state = json.loads(payload(report, pages, manifest, pin_key, "pin-state.json")[1])
     require(pin_state["pinned"] and pin_state["city"] == "Montréal", "UI state JSON changed")
     require(b"Visible: Orange line" in payload(report, pages, manifest, search_key, "search-results.txt")[1], "UI search log changed")
+    require_ownership(pages[GESTURE_KEY], "Attach the app's touch log", "touch-log.json")
+    verify_gesture_timing(report, pages, manifest, mixed)
     if mixed:
         require_ownership(pages["OutcomeTests/testMultipleFailuresInNestedStep()"], "Validate status & route name <rail>", "failure-context.txt")
         failure_steps = [node for run in activities["OutcomeTests/testMultipleFailuresInNestedStep()"]["testRuns"] for node in walk(run["activities"], "childActivities")]
@@ -257,7 +328,8 @@ def verify_report(fixture, plan):
         require(all(any("previous-runs-table" in node.classes for node in page["document"].root.elements()) for page in pages.values()), "Missing prior runs in real detail pages")
         baseline_metadata = load_json(fixture / "reports" / "baseline" / "report_metadata.json")
         require(baseline_metadata["startTime"] < load_json(report / "report_metadata.json")["startTime"], "Fixture timestamps are not ordered")
-    print(f"Verified {plan} report: 18 cases/pages/ZIPs; outcomes, retries, payload ownership, media, snapshots and history.")
+    print(f"Verified {plan} report: {len(EXPECTED_CASES)} cases/pages/ZIPs; outcomes, retries, payload ownership, media, "
+          "snapshots, history and touch-overlay timing.")
 
 
 def check_failure_preservation(fixture, executable):

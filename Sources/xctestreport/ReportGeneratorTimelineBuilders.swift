@@ -640,8 +640,26 @@ extension XCTestReport {
         return data
     }
 
+    /// Where a synthesized event record sits in time. Attachments are timestamped when XCTest
+    /// finishes the "Synthesize event" step, a settle delay after the last touch; activities
+    /// only know when that step started.
+    enum SynthesizedEventAnchor {
+        case completion(Double)
+        case start(Double)
+
+        /// Measured against the fixture app's own touch log: the last touch lands 0.21s
+        /// before the synthesize step finishes, for taps, swipes and long drags alike.
+        static let completionSettle = 0.21
+
+        var timestamp: Double {
+            switch self {
+            case .completion(let timestamp), .start(let timestamp): return timestamp
+            }
+        }
+    }
+
     func parseSynthesizedEventGesture(
-        at filePath: String, baseTimestamp: Double
+        at filePath: String, anchor: SynthesizedEventAnchor
     ) -> TouchGestureOverlay? {
         guard let data = readAttachmentData(at: filePath) else { return nil }
         let plistObject = (try? PropertyListSerialization.propertyList(
@@ -664,8 +682,8 @@ extension XCTestReport {
         let eventPaths = keyedArchiveArray(rootArchiveObject["eventPaths"], objects: objects)
         guard !eventPaths.isEmpty else { return nil }
 
-        var points = [TouchGesturePoint]()
-        points.reserveCapacity(16)
+        var samples = [(offset: Double, x: Double, y: Double)]()
+        samples.reserveCapacity(16)
 
         for eventPathObject in eventPaths {
             guard let eventPath = eventPathObject as? [String: Any] else { continue }
@@ -687,17 +705,27 @@ extension XCTestReport {
                     hasUsableWindowBounds
                     ? min(max(0, y), height)
                     : max(0, y)
-                let absoluteTime = baseTimestamp + max(0, offset)
-                points.append(TouchGesturePoint(time: absoluteTime, x: pointX, y: pointY))
+                samples.append((max(0, offset), pointX, pointY))
             }
         }
+
+        let lastOffset = samples.map(\.offset).max() ?? 0
+        let points = samples.map { sample -> TouchGesturePoint in
+            let time: Double
+            switch anchor {
+            case .completion(let finished):
+                time = finished - SynthesizedEventAnchor.completionSettle - (lastOffset - sample.offset)
+            case .start(let started):
+                time = started + sample.offset
+            }
+            return TouchGesturePoint(time: time, x: sample.x, y: sample.y)
+        }.sorted { $0.time < $1.time }
 
         guard !points.isEmpty else { return nil }
         let hasMeaningfulPoint = points.contains { point in
             abs(point.x) > 0.5 || abs(point.y) > 0.5
         }
         guard hasMeaningfulPoint else { return nil }
-        points.sort { $0.time < $1.time }
 
         guard let first = points.first, let last = points.last else { return nil }
         return TouchGestureOverlay(
@@ -800,29 +828,6 @@ extension XCTestReport {
         var seenGestureKeys = Set<String>()
         var seenExportedFiles = Set<String>()
         var writtenPreviewFiles = Set<String>()
-        let synthesizedEventTimestamps = flatNodes.compactMap { node -> Double? in
-            guard node.title.localizedCaseInsensitiveContains("synthesize event") else { return nil }
-            return node.timestamp
-        }
-
-        func nearestSynthesizedEventTimestamp(for timestamp: Double) -> Double? {
-            guard !synthesizedEventTimestamps.isEmpty else { return nil }
-            var bestTimestamp: Double?
-            var bestDistance = Double.greatestFiniteMagnitude
-            for candidate in synthesizedEventTimestamps {
-                let distance = abs(candidate - timestamp)
-                if distance < bestDistance {
-                    bestDistance = distance
-                    bestTimestamp = candidate
-                }
-            }
-
-            let maxSynthesizedAnchorSkew: Double = 1.2
-            if bestDistance > maxSynthesizedAnchorSkew {
-                return nil
-            }
-            return bestTimestamp
-        }
 
         for node in flatNodes {
             for attachment in node.attachments {
@@ -833,8 +838,15 @@ extension XCTestReport {
 
                 let fileName = attachmentFileName(fromRelativePath: relativePath)
                 let filePath = (attachmentRoot as NSString).appendingPathComponent(fileName)
-                let baseTimestamp = attachment.timestamp ?? node.timestamp
-                guard let baseTimestamp else { continue }
+                let anchor: SynthesizedEventAnchor
+                if let timestamp = attachment.timestamp {
+                    anchor = .completion(timestamp)
+                } else if let timestamp = node.timestamp {
+                    anchor = .start(timestamp)
+                } else {
+                    continue
+                }
+                let baseTimestamp = anchor.timestamp
 
                 seenExportedFiles.insert(fileName)
                 let cacheKey = "\(filePath)|\(String(format: "%.6f", baseTimestamp))"
@@ -842,8 +854,7 @@ extension XCTestReport {
                 if let cached = parsedCache[cacheKey] {
                     overlay = cached
                 } else {
-                    let parsed = parseSynthesizedEventGesture(
-                        at: filePath, baseTimestamp: baseTimestamp)
+                    let parsed = parseSynthesizedEventGesture(at: filePath, anchor: anchor)
                     parsedCache[cacheKey] = parsed
                     overlay = parsed
                 }
@@ -883,7 +894,7 @@ extension XCTestReport {
                     overlay = cached
                 } else {
                     let parsed = parseSynthesizedEventGesture(
-                        at: filePath, baseTimestamp: baseTimestamp)
+                        at: filePath, anchor: .completion(baseTimestamp))
                     parsedCache[cacheKey] = parsed
                     overlay = parsed
                 }
@@ -906,55 +917,11 @@ extension XCTestReport {
             }
         }
 
-        let alignedGestures = gestures.map { gesture -> TouchGestureOverlay in
-            let duration = max(0, gesture.endTime - gesture.startTime)
-            let pathDistance = gesture.points.enumerated().reduce(0.0) {
-                partial, entry in
-                let index = entry.offset
-                guard index > 0 else { return partial }
-                let current = entry.element
-                let previous = gesture.points[index - 1]
-                return partial + hypot(current.x - previous.x, current.y - previous.y)
-            }
-            let displacement: Double = {
-                guard let first = gesture.points.first, let last = gesture.points.last else { return 0 }
-                return hypot(last.x - first.x, last.y - first.y)
-            }()
-            let isTapLike =
-                duration <= 0.09
-                && displacement <= 12
-                && pathDistance <= 12
-                && gesture.points.count <= 3
-            guard isTapLike else { return gesture }
-
-            guard let synthesizedAnchor = nearestSynthesizedEventTimestamp(for: gesture.startTime)
-            else { return gesture }
-
-            // Attachments often timestamp synthesized events at completion.
-            // Pull tap gestures back to the synthesized event activity start when the skew is plausible.
-            let skew = gesture.startTime - synthesizedAnchor
-            let maxBackshift: Double = 1.2
-            guard skew > 0.08, skew <= maxBackshift else { return gesture }
-            let shift = -skew
-
-            let shiftedPoints = gesture.points.map { point in
-                TouchGesturePoint(time: point.time + shift, x: point.x, y: point.y)
-            }
-
-            return TouchGestureOverlay(
-                startTime: gesture.startTime + shift,
-                endTime: gesture.endTime + shift,
-                width: gesture.width,
-                height: gesture.height,
-                points: shiftedPoints
-            )
-        }
-
-        let fallbackSizeGesture = alignedGestures.first { $0.width > 1 && $0.height > 1 }
+        let fallbackSizeGesture = gestures.first { $0.width > 1 && $0.height > 1 }
         let fallbackWidth = fallbackSizeGesture?.width ?? 402
         let fallbackHeight = fallbackSizeGesture?.height ?? 874
 
-        let normalizedGestures = alignedGestures.map { gesture -> TouchGestureOverlay in
+        let normalizedGestures = gestures.map { gesture -> TouchGestureOverlay in
             guard gesture.width <= 1 || gesture.height <= 1 else { return gesture }
 
             let maxX = gesture.points.map(\.x).max() ?? 0

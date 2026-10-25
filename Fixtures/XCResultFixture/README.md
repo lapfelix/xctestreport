@@ -60,6 +60,7 @@ The plans run the same test identifiers, which also makes them useful for previo
 | `ModernTests/modernAssertion` | Pass | Fail | Swift Testing failure and Unicode/HTML escaping |
 | `JourneyUITests/testPinRoute` | Pass, screenshots | Pass, video + screenshots | Nested action/assertion activities; before/after screenshots and custom `pin-state.json` on the verification step |
 | `JourneyUITests/testSearchRoutes` | Pass, automatic screenshots | Pass, video only | Nested query/assertion activities and custom `search-results.txt`; no explicit screenshots |
+| `JourneyUITests/testGestureTiming` | Pass | Pass, video only | Tap, two swipes and a slow press-and-drag, plus the app's own `touch-log.json`; the oracle for touch-overlay timing |
 | `JourneyUITests/testFailureWithScreenshotAndHierarchy` | Pass | Fail | UI assertion failure, screenshot, accessibility text, and XCTest diagnostic snapshots/input-event records |
 
 Mixed retries failed tests at most twice. Its seven deliberately failing test
@@ -83,9 +84,9 @@ The media inventory records attachment names by test and separates `videoOnly`,
 | Custom text attachment without media | `OutcomeTests/testFailsOnceThenPasses()` |
 | No media or custom attachments | `OutcomeTests/testPassingAssertion()` |
 
-There are 18 test functions. The parameterized function contributes three
-argument runs, so Xcode's device statistics count 20 baseline executions.
-The mixed summary has seven failures, one skip, one expected failure, and nine
+There are 19 test functions. The parameterized function contributes three
+argument runs, so Xcode's device statistics count 21 baseline executions.
+The mixed summary has seven failures, one skip, one expected failure, and ten
 passes. Repeated failures appear separately in the run details.
 
 The images are generated with fixed pixels, without system fonts or external
@@ -134,7 +135,11 @@ point to an already-built executable with its resource bundle.
 
 `validate_reports.py` compares report inventories, outcomes, cached arguments/retries,
 attachment bytes and direct step ownership, snapshot groups, media distribution, and
-history against the independent fixture contract. The script then moves the sources
+history against the independent fixture contract. For touch overlays, the fixture app
+logs when it actually received each touch and shows a magenta bar while a finger is
+down: every overlay gesture must start and end within 80 ms of the logged touch, and in
+Mixed, `sample_frames.swift` checks that the recording shows the bar where the overlay
+places the touch. The script then moves the sources
 away, regenerates default packed reports, repeats validation, and verifies that a corrupt
 required cache fails without changing published artifacts. Source bundles are restored
 on exit. Browser checks use the regenerated output and discover its actual page/bundle

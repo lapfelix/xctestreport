@@ -452,8 +452,9 @@ def verify_performance(bundle):
         outer = [node for node in test_run["activities"] if node["title"] == "Measure route encoding"]
         require(len(outer) == 1, "Missing activity around measure")
         # One user activity per invocation, including the discarded warm-up.
+        # Matched by title: older xcresulttool versions omit activityType from this export.
         titles = [child["title"] for child in outer[0].get("childActivities", [])
-                  if child.get("activityType") == "com.apple.dt.xctest.activity-type.userCreated"]
+                  if child["title"].startswith("Encode iteration")]
         require(titles == [f"Encode iteration {n}" for n in range(1, 5)], f"Unexpected iteration activities {titles}")
     for test_run in activity_runs("PerformanceUITests/testLaunchPerformance()"):
         launches = [node["title"] for node in test_run["activities"] if node["title"] == f"Open {APP}"]

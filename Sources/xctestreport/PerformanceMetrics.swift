@@ -203,8 +203,9 @@ extension XCTestReport {
         let exceedsRegressionLimit: Bool
         /// Relative standard deviation over XCTest's limit.
         let exceedsDeviationLimit: Bool
-        /// Iterations worse than the average by more than 4× the deviation limit, which XCTest
-        /// fails as "measurement #N is X% worse than average"; only checked against a baseline.
+        /// Iterations above the average by more than 4× the deviation limit, which XCTest fails as
+        /// "measurement #N is X% worse (or, when larger is better, better) than average". It checks
+        /// only upward spikes, whatever the polarity, and only against a baseline.
         let iterationsOverLimit: [Int]
         /// Averages from earlier reports, oldest first.
         let history: [Double]
@@ -239,12 +240,10 @@ extension XCTestReport {
                 exceedsDeviationLimit = false
             }
 
-            if metric.baseline != nil, let limit = metric.maxPercentRelativeStandardDeviation, limit > 0,
-                let prefersSmaller = metric.prefersSmaller
-            {
+            if metric.baseline != nil, let limit = metric.maxPercentRelativeStandardDeviation, limit > 0 {
                 iterationsOverLimit = metric.measurements.indices.filter { index in
                     guard let change = Self.percentChange(from: statistics.mean, to: metric.measurements[index]) else { return false }
-                    return (prefersSmaller ? change : -change) > 4 * limit
+                    return change > 4 * limit
                 }
             } else {
                 iterationsOverLimit = []

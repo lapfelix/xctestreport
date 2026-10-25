@@ -318,9 +318,9 @@ table on `index.html`, a **Performance** chip, and a `## Performance` section in
   the standard deviation and relative standard deviation (RSD). Values are scaled to readable units
   (`kB` → MB, `kI` → G instr, `kC` → G cycles, seconds → ms/µs); hover for the value as recorded.
 - When a baseline is set, the change from it is colored by the metric's polarity and flagged
-  **regressed** past `maxPercentRegression` (and `maxRegression`, when set). An iteration worse
-  than the average by more than 4× `maxPercentRelativeStandardDeviation` is flagged too: XCTest
-  fails those as "measurement #N is X% worse than average".
+  **regressed** past `maxPercentRegression` (and `maxRegression`, when set). An iteration above
+  the average by more than 4× `maxPercentRelativeStandardDeviation` is flagged too: XCTest fails
+  those as "measurement #N is X% worse than average" ("better" when larger values are better).
 - An RSD over `maxPercentRelativeStandardDeviation` is flagged as noisy. XCTest enforces these
   limits only against a baseline, so without one they warn that the measurement is unreliable.
 - Iterations with a modified z-score above 3.5 and at least 5% off the median are outliers. The

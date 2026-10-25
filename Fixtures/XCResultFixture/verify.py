@@ -341,7 +341,8 @@ PERFORMANCE_BASELINES = {
     ("PerformanceTests/testHighRelativeStandardDeviation()", CLOCK[1]): (0.033, 10, 5),
     ("PerformanceTests/testOutlierMeasurement()", CLOCK[1]): (0.035, 10, 10),
     ("PerformanceTests/testLegacyBaselineWithinTolerance()", WALL_CLOCK[1]): (0.02, 10, 10),
-    ("PerformanceTests/testSignpostAndCustomMetrics()", "dev.xctestreport.fixture.routes-per-second"): (1.0, 10, 10),
+    # A rate over a few milliseconds of work swings widely on shared CI machines.
+    ("PerformanceTests/testSignpostAndCustomMetrics()", "dev.xctestreport.fixture.routes-per-second"): (1.0, 10, 100),
     ("PerformanceUITests/testLaunchPerformance()",
      "com.apple.dt.XCTMetric_ApplicationLaunch-AppLaunch.duration"): (10.0, 10, 50),
 }

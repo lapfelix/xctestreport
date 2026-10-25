@@ -105,6 +105,9 @@ final class PerformanceMetricsTests: XCTestCase {
         let spike = analysis(metric(values: [0.0207, 0.0203, 0.0207, 0.0797], baseline: 0.035))
         XCTAssertEqual(spike.iterationsOverLimit, [3])
         XCTAssertFalse(spike.exceedsRegressionLimit)
+        // And "measurement #2 is 46% better than average" for a rate that prefers larger values.
+        let rate = analysis(metric(values: [2_863_250, 5_899_576, 3_363_583], baseline: 1, polarity: "prefers larger"))
+        XCTAssertEqual(rate.iterationsOverLimit, [1])
         XCTAssertEqual(analysis(metric(values: [0.0207, 0.0203, 0.0207, 0.0797])).iterationsOverLimit, [],
                        "XCTest checks iterations only against a baseline")
 

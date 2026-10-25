@@ -42,9 +42,10 @@ extension XCTestReport {
                 for index in item.iterationsOverLimit {
                     let change = PerformanceMetricAnalysis.percentChange(from: statistics.mean, to: metric.measurements[index]) ?? 0
                     let limit = 4 * (metric.maxPercentRelativeStandardDeviation ?? 0)
+                    let worse = metric.prefersSmaller ?? true
                     regressions.append(PerformanceFinding(
                         severity: .regression,
-                        text: "\(runPrefix)Iteration \(index + 1) of \(name) is \(formatPercent(abs(change))) worse than the average (\(format.format(metric.measurements[index])) vs \(format.format(statistics.mean))); XCTest allows \(formatPercent(limit))."))
+                        text: "\(runPrefix)Iteration \(index + 1) of \(name) is \(formatPercent(change)) \(worse ? "worse" : "better") than average (\(format.format(metric.measurements[index])) vs \(format.format(statistics.mean))); XCTest allows \(formatPercent(limit)) above it."))
                 }
                 if item.exceedsDeviationLimit, let deviation = statistics.relativeStandardDeviation {
                     noisy.append("\(name) \(formatPercent(deviation))")

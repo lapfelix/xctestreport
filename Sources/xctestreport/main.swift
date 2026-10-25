@@ -73,6 +73,18 @@ struct XCTestReport: ParsableCommand {
     )
     var noNotes: Bool = false
 
+    @Flag(
+        name: .customLong("gcs-signed-in-viewing"),
+        help: """
+        Make the report work when opened from a private Google Cloud Storage bucket through \
+        its signed-in storage.cloud.google.com link, by adding a service worker that resolves \
+        the report's relative URLs. Also upload web/gcs-viewer-sw.js to the bucket root as \
+        xctestreport-gcs-viewer-sw-v1.js (Content-Type text/javascript). Has no effect when \
+        the report is opened anywhere else.
+        """
+    )
+    var gcsSignedInViewing: Bool = false
+
     @Option(name: .customLong("baseline"), help: "Compare against this report directory instead of automatically selecting a previous run.")
     var baseline: String?
 

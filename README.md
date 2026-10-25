@@ -46,6 +46,13 @@ into failures without the `.xcresult`:
 All links are relative, so the output folder works the same whether read locally or
 hosted remotely. Point an agent at `report.md` and let it follow the links.
 
+A private Google Cloud Storage bucket's signed-in link (`storage.cloud.google.com`) is the
+exception: it redirects every object to a URL with the whole object name in one encoded
+segment, so relative links break. Generate with `--gcs-signed-in-viewing` and also upload
+`web/gcs-viewer-sw.js` to the bucket root as `xctestreport-gcs-viewer-sw-v1.js`
+(`Content-Type: text/javascript`); a service worker then resolves the report's URLs, after
+one automatic reload on the first visit to that bucket.
+
 Markdown preserves Unicode in test names, failure messages, and attachment content.
 Serve `.md` files with a UTF-8 charset so those details remain readable.
 

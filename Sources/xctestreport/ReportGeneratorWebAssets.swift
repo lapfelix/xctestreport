@@ -152,7 +152,7 @@ extension XCTestReport {
         try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
     }
 
-    private func webResourceURL(
+    func webResourceURL(
         named resourceName: String,
         withExtension fileExtension: String,
         subdirectory: String

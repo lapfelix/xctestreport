@@ -10,6 +10,9 @@ extension XCTestReport {
             report.outputDir = stage
             report.generationOriginalOutputDir = destination
             try report.generateHTMLReportInPlace()
+            if gcsSignedInViewing {
+                try GCSSignedInViewing.install(inReportAt: stage, report: report)
+            }
         }
         print("HTML report generated at \(URL(fileURLWithPath: destination).appendingPathComponent("index.html").path)")
     }

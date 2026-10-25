@@ -56,8 +56,15 @@ jobs:
       run: Scripts/test-real-fixtures.sh "$XCTESTREPORT_REAL_FIXTURES"
     - name: Generate and verify the performance xcresult report
       run: Scripts/test-performance-fixture.sh "$XCTESTREPORT_PERFORMANCE_FIXTURES"
+    - name: Check raw performance cache is verified
+      if: always() && steps.raw-performance-cache.outputs.cache-hit != 'true'
+      id: raw-performance-cache-ready
+      run: |
+        if [[ -d "$XCTESTREPORT_RAW_PERFORMANCE_CACHE/Performance.xcresult" && -f "$XCTESTREPORT_RAW_PERFORMANCE_CACHE/verified.json" ]]; then
+          printf 'verified=true\n' >> "$GITHUB_OUTPUT"
+        fi
     - name: Save verified raw performance xcresult
-      if: always() && steps.raw-performance-cache.outputs.cache-hit != 'true' && hashFiles(format('{0}/verified.json', env.XCTESTREPORT_RAW_PERFORMANCE_CACHE)) != ''
+      if: always() && steps.raw-performance-cache-ready.outputs.verified == 'true'
       uses: actions/cache/save@v4
       with:
         path: |

@@ -2207,7 +2207,7 @@ button#toggle-all,
 th.sortable-duration[data-sort="desc"] .sort-duration-btn::after { content: " \2193"; opacity: 1; }
 th.sortable-duration[data-sort="asc"] .sort-duration-btn::after { content: " \2191"; opacity: 1; }
 
-.flaky-chip[hidden] {
+.status-chip[hidden] {
     display: none;
 }
 
@@ -4753,3 +4753,159 @@ html.report-shell-open, html.report-shell-open body { overflow: hidden; }
 .notes-copy-dialog { width: min(640px, calc(100vw - 32px)); border: 1px solid var(--report-line); border-radius: 10px; background: var(--report-surface); color: var(--report-ink); }
 .notes-copy-dialog textarea { box-sizing: border-box; width: 100%; height: 50vh; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .notes-copy-dialog form { margin-top: 8px; text-align: right; }
+
+/* Performance metrics: the test page section and the index overview. */
+:root {
+    --perf-worse: light-dark(#b23e45, #ffa9b2);
+    --perf-better: light-dark(#26734b, #8ed5b2);
+    --perf-warn: light-dark(#8d5a00, #f5c77e);
+    --perf-warn-soft: light-dark(#fff3dc, #3a2f1a);
+    --perf-worse-soft: light-dark(#fff1f0, #3b2428);
+}
+.perf-section {
+    flex: 0 1 auto;
+    min-height: 0;
+    max-height: 55%;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    margin-bottom: 12px;
+    border: 1px solid var(--report-line);
+    border-radius: 10px;
+    background: var(--report-surface);
+}
+.perf-panel > summary, .perf-overview > details > summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px 12px;
+    cursor: pointer;
+    list-style: none;
+}
+.perf-panel > summary { position: sticky; top: 0; z-index: 1; padding: 12px 16px; background: var(--report-surface); border-radius: 10px; }
+.perf-panel[open] > summary { border-bottom: 1px solid var(--report-line); border-radius: 10px 10px 0 0; }
+.perf-panel > summary::-webkit-details-marker, .perf-overview > details > summary::-webkit-details-marker { display: none; }
+.perf-panel > summary::before, .perf-overview > details > summary::before {
+    content: "\25B6";
+    font-size: 0.7em;
+    color: var(--report-muted);
+    transition: transform 0.15s;
+    align-self: center;
+}
+.perf-panel[open] > summary::before, .perf-overview > details[open] > summary::before { transform: rotate(90deg); }
+.perf-title, .perf-overview h2 { margin: 0; padding: 0; background: none; font-size: 16px; border-radius: 0; color: var(--report-ink); }
+.perf-meta { color: var(--report-muted); font-size: 13px; }
+.perf-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.5;
+    white-space: nowrap;
+}
+.perf-badge-regression { background: var(--perf-worse-soft); color: var(--perf-worse); }
+.perf-badge-noise, .perf-badge-outlier { background: var(--perf-warn-soft); color: var(--perf-warn); }
+.perf-body { padding: 4px 16px 16px; }
+.perf-findings { margin: 10px 0 4px; padding-left: 20px; font-size: 13px; }
+.perf-findings li { margin: 3px 0; }
+.perf-finding-regression { color: var(--perf-worse); font-weight: 600; }
+.perf-finding-noise, .perf-finding-outlier { color: var(--perf-warn); }
+.perf-run + .perf-run { margin-top: 16px; }
+.perf-run-title { margin: 14px 0 6px; padding: 0; background: none; font-size: 14px; color: var(--report-ink); }
+.perf-table-wrap { overflow-x: auto; }
+.perf-table, .perf-overview-table, .perf-raw-table {
+    width: 100%;
+    margin: 8px 0 0;
+    border: 0;
+    border-collapse: collapse;
+    box-shadow: none;
+    background: transparent;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+}
+.perf-table th, .perf-table td, .perf-overview-table th, .perf-overview-table td, .perf-raw-table th, .perf-raw-table td {
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--report-line);
+    background: transparent;
+    color: var(--report-ink);
+    vertical-align: middle;
+    text-align: left;
+}
+.perf-table thead th, .perf-overview-table thead th, .perf-raw-table thead th {
+    color: var(--report-muted);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.perf-table tbody th, .perf-overview-table tbody th { font-weight: 400; }
+.perf-table tbody tr:last-child > *, .perf-overview-table tbody tr:last-child > * { border-bottom: 0; }
+.perf-metric-name { display: block; font-weight: 600; }
+.perf-sub, .perf-metric-sub { display: block; color: var(--report-muted); font-size: 11.5px; }
+.perf-value { font-weight: 600; white-space: nowrap; }
+.perf-range, .perf-deviation { white-space: nowrap; }
+.perf-range-dash { color: var(--report-muted); }
+.perf-over-limit { color: var(--perf-warn); font-weight: 600; }
+.perf-change { font-weight: 600; white-space: nowrap; }
+.perf-better { color: var(--perf-better); }
+.perf-worse { color: var(--perf-worse); }
+.perf-neutral { color: var(--report-muted); }
+.perf-baseline-value { margin-left: 4px; color: var(--report-muted); white-space: nowrap; }
+.perf-baseline .perf-badge { margin-left: 6px; }
+.perf-empty { color: var(--report-muted); }
+.perf-row-regressed { background: var(--perf-worse-soft); }
+.perf-row-regressed > th { box-shadow: inset 3px 0 0 var(--perf-worse); }
+.perf-chart { display: block; overflow: visible; }
+.perf-trend { display: inline-block; vertical-align: middle; margin-right: 6px; overflow: visible; }
+.perf-chart-line { fill: none; stroke: var(--report-muted); stroke-width: 1.5; stroke-linejoin: round; opacity: 0.55; }
+.perf-chart-mean { stroke: var(--report-muted); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.6; }
+.perf-chart-baseline { stroke: var(--report-accent); stroke-width: 1.5; stroke-dasharray: 5 3; }
+.perf-chart-dot { fill: var(--report-accent); stroke: var(--report-surface); stroke-width: 1; }
+.perf-chart-outlier { fill: var(--perf-warn); }
+.perf-raw { margin-top: 10px; font-size: 13px; }
+.perf-raw > summary { cursor: pointer; color: var(--report-muted); font-weight: 600; }
+.perf-raw-table td { white-space: nowrap; }
+.perf-raw-table td.perf-outlier { color: var(--perf-warn); font-weight: 700; background: var(--perf-warn-soft); }
+.perf-raw-table tbody th { font-weight: 500; white-space: nowrap; }
+
+.perf-overview { margin: 16px 0; padding: 14px 18px; background: var(--report-surface); border: 1px solid var(--report-line); border-radius: 8px; }
+.perf-overview-table thead th { position: sticky; top: 0; }
+.perf-overview-table tbody th a { font-weight: 600; }
+.perf-overview-table th:first-child { position: sticky; left: 0; z-index: 1; min-width: 200px; max-width: 280px; background: var(--report-surface); overflow-wrap: break-word; }
+.perf-overview-table thead th:first-child { z-index: 2; }
+.perf-cell { white-space: nowrap; }
+.perf-cell .perf-change, .perf-cell .perf-outlier-mark { display: block; font-size: 11.5px; }
+.perf-cell-regressed { background: var(--perf-worse-soft); }
+.perf-cell-noisy .perf-value { color: var(--perf-warn); }
+.perf-outlier-mark { color: var(--perf-warn); }
+.perf-overview .perf-table-wrap + .perf-table-wrap { margin-top: 14px; }
+.perf-row-badge {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 1px 7px;
+    border: 1px solid var(--report-line);
+    border-radius: 999px;
+    color: var(--report-muted);
+    font-size: 11px;
+    font-weight: 600;
+    text-decoration: none;
+    vertical-align: 1px;
+}
+.perf-row-badge-regressed { border-color: transparent; background: var(--perf-worse-soft); color: var(--perf-worse); }
+
+@media (max-width: 980px) {
+    .perf-section { max-height: none; overflow: visible; }
+    .perf-panel > summary { position: static; }
+}
+@media (max-width: 767px) {
+    .perf-body { padding: 4px 12px 12px; }
+    .perf-overview { padding: 12px; }
+    .perf-table thead { display: none; }
+    .perf-table, .perf-table tbody, .perf-table tr, .perf-table th, .perf-table td { display: block; width: auto; }
+    .perf-table tr { padding: 8px 0; border-bottom: 1px solid var(--report-line); }
+    .perf-table tbody tr:last-child { border-bottom: 0; }
+    .perf-table th, .perf-table td { border: 0; padding: 3px 0; }
+    .perf-table td { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+    .perf-table td::before { content: attr(data-label); flex: 0 0 92px; color: var(--report-muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+    .perf-table td .perf-sub { display: inline; margin-left: 4px; }
+    .perf-row-regressed > th { box-shadow: none; }
+}

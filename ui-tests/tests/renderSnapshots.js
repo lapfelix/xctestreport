@@ -58,6 +58,7 @@ function renderSnapshotDetail() {
     compact_failure_box_html: '<div class="test-error-box"><pre>Snapshot differs from its reference.</pre></div>',
     failure_nav_html: '<nav class="test-failure-nav" aria-label="Failed tests"><a class="test-failure-nav-link" rel="prev" href="detail.html" title="Previous failure: testPinButtonUnpinned()" aria-label="Previous failure: testPinButtonUnpinned()">&lsaquo;</a><span class="test-failure-nav-count">Failure 2 of 2</span><span class="test-failure-nav-link is-disabled" aria-hidden="true">&rsaquo;</span></nav>',
     timeline_and_video_section_html: '',
+    performance_html: '',
     bundle_src: 'detail.zip',
     notes_body_attributes: '',
     notes_script_html: '',

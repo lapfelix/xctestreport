@@ -1,0 +1,67 @@
+{
+  "configurations": [
+    {
+      "id": "AB94D504-32A9-4D56-B7F3-CA6C89799013",
+      "name": "Warm",
+      "options": {
+        "environmentVariableEntries": [
+          {
+            "key": "FIXTURE_PERF_CONFIGURATION",
+            "value": "warm"
+          }
+        ]
+      }
+    },
+    {
+      "id": "AB94D504-32A9-4D56-B7F3-CA6C89799014",
+      "name": "Repeat",
+      "options": {
+        "environmentVariableEntries": [
+          {
+            "key": "FIXTURE_PERF_CONFIGURATION",
+            "value": "repeat"
+          }
+        ]
+      }
+    }
+  ],
+  "defaultOptions": {
+    "codeCoverage": false,
+    "environmentVariableEntries": [
+      {
+        "key": "FIXTURE_SCENARIO",
+        "value": "performance"
+      }
+    ],
+    "userAttachmentLifetime": "keepAlways",
+    "testExecutionOrdering": "lexical",
+    "testTimeoutsEnabled": true,
+    "defaultTestExecutionTimeAllowance": 60,
+    "maximumTestExecutionTimeAllowance": 120
+  },
+  "testTargets": [
+    {
+      "parallelizable": false,
+      "selectedTests": [
+        "PerformanceTests"
+      ],
+      "target": {
+        "containerPath": "container:XCResultFixture.xcodeproj",
+        "identifier": "B90BC3521B9B3501077DF0F5",
+        "name": "FixtureUnitTests"
+      }
+    },
+    {
+      "parallelizable": false,
+      "selectedTests": [
+        "PerformanceUITests"
+      ],
+      "target": {
+        "containerPath": "container:XCResultFixture.xcodeproj",
+        "identifier": "A85CFD80D2FC56E8C0CD03B0",
+        "name": "FixtureUITests"
+      }
+    }
+  ],
+  "version": 1
+}

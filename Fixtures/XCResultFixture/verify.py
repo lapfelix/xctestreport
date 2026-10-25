@@ -279,13 +279,208 @@ def verify(bundle, plan):
           "custom attachments, nested activities, snapshots, metrics, parameters, retries, and media mix intact.")
 
 
+CLOCK = ("Clock Monotonic Time", "com.apple.dt.XCTMetric_Clock.time.monotonic", "s", "prefers smaller")
+WALL_CLOCK = ("Time", "com.apple.XCTPerformanceMetric_WallClockTime", "seconds", "prefers smaller")
+MEMORY = [("Memory Physical", "com.apple.dt.XCTMetric_Memory.physical", "kB", "prefers smaller"),
+          ("Memory Peak Physical", "com.apple.dt.XCTMetric_Memory.physical_peak", "kB", "prefers smaller")]
+APP = "dev.xctestreport.fixture.FixtureApp"
+
+
+def signpost(name):
+    return (f"Duration ({name})", f"com.apple.dt.XCTMetric_OSSignpost-{name}.duration", "s", "prefers smaller")
+
+
+# test -> (outcome, measurements per metric, metrics). Measurements exclude the discarded warm-up.
+PERFORMANCE_CASES = {
+    "PerformanceTests/testLegacyMeasureBlock()": ("Passed", 10, [WALL_CLOCK]),
+    "PerformanceTests/testLegacyManualStartStop()": ("Passed", 10, [WALL_CLOCK]),
+    "PerformanceTests/testLegacyBaselineWithinTolerance()": ("Passed", 10, [WALL_CLOCK]),
+    "PerformanceTests/testHostMetricsWithCustomIterationCount()": ("Passed", 4, [
+        CLOCK, *MEMORY,
+        ("CPU Time", "com.apple.dt.XCTMetric_CPU.time", "s", "prefers smaller"),
+        ("CPU Cycles", "com.apple.dt.XCTMetric_CPU.cycles", "kC", "prefers smaller"),
+        ("CPU Instructions Retired", "com.apple.dt.XCTMetric_CPU.instructions_retired", "kI", "prefers smaller"),
+        ("Disk Logical Writes", "com.apple.dt.XCTMetric_Disk.logical_writes", "kB", "prefers smaller")]),
+    "PerformanceTests/testManualStartStopOptions()": ("Passed", 3, [CLOCK, *MEMORY]),
+    "PerformanceTests/testSignpostAndCustomMetrics()": ("Passed", 3, [
+        signpost("Encode routes"),
+        ("Routes Encoded", "dev.xctestreport.fixture.routes-per-second", "routes/s", "prefers larger")]),
+    "PerformanceTests/testBaselineRegression()": ("Failed", 3, [CLOCK]),
+    "PerformanceTests/testBaselineImprovement()": ("Passed", 3, [CLOCK]),
+    "PerformanceTests/testHighRelativeStandardDeviation()": ("Failed", 4, [CLOCK]),
+    "PerformanceTests/testOutlierMeasurement()": ("Failed", 4, [CLOCK]),
+    "PerformanceTests/testAssertionFailuresInAndAfterMeasure()": ("Failed", 2, [CLOCK]),
+    "PerformanceTests/testActivityWrappedMeasureWithIterationActivities()": ("Passed", 3, [CLOCK, *MEMORY]),
+    "PerformanceUITests/testLaunchPerformance()": ("Passed", 2, [
+        ("Duration (AppLaunch)", "com.apple.dt.XCTMetric_ApplicationLaunch-AppLaunch.duration", "s",
+         "prefers smaller"),
+        ("Duration (ApplicationFirstFramePresentationResponsive)",
+         "com.apple.dt.XCTMetric_ApplicationLaunch-ApplicationFirstFramePresentationResponsive.duration", "s",
+         "prefers smaller")]),
+    # XCTHitchMetric is requested too, but simulators record no hitch measurements.
+    "PerformanceUITests/testScrollDeceleration()": ("Passed", 2, [
+        signpost("Scroll_Deceleration"), signpost("Scroll_Dragging"), signpost("Scroll_DraggingAndDeceleration")]),
+    "PerformanceUITests/testNavigationWithAppMetrics()": ("Passed", 2, [
+        CLOCK, signpost("NavigationTransition"), signpost("Load departures"),
+        ("CPU Time (FixtureApp)", f"com.apple.dt.XCTMetric_CPU-{APP}.time", "s", "prefers smaller"),
+        ("CPU Cycles (FixtureApp)", f"com.apple.dt.XCTMetric_CPU-{APP}.cycles", "kC", "prefers smaller"),
+        ("CPU Instructions Retired (FixtureApp)", f"com.apple.dt.XCTMetric_CPU-{APP}.instructions_retired", "kI",
+         "prefers smaller"),
+        ("Memory Physical (FixtureApp)", f"com.apple.dt.XCTMetric_Memory-{APP}.physical", "kB", "prefers smaller"),
+        ("Memory Peak Physical (FixtureApp)", f"com.apple.dt.XCTMetric_Memory-{APP}.physical_peak", "kB",
+         "prefers smaller"),
+        ("Absolute Memory Physical (FixtureApp)", f"com.apple.dt.XCTMetric_Memory-{APP}.physical_absolute", "kB",
+         "prefers smaller")]),
+}
+
+# Committed xcbaselines: (test, identifier) ->
+#   (baselineAverage, maxPercentRegression, maxPercentRelativeStandardDeviation)
+PERFORMANCE_BASELINES = {
+    ("PerformanceTests/testBaselineRegression()", CLOCK[1]): (0.01, 10, 10),
+    ("PerformanceTests/testBaselineImprovement()", CLOCK[1]): (0.5, 25, 10),
+    ("PerformanceTests/testHighRelativeStandardDeviation()", CLOCK[1]): (0.033, 10, 5),
+    ("PerformanceTests/testOutlierMeasurement()", CLOCK[1]): (0.035, 10, 10),
+    ("PerformanceTests/testLegacyBaselineWithinTolerance()", WALL_CLOCK[1]): (0.02, 10, 10),
+    ("PerformanceTests/testSignpostAndCustomMetrics()", "dev.xctestreport.fixture.routes-per-second"): (1.0, 10, 10),
+    ("PerformanceUITests/testLaunchPerformance()",
+     "com.apple.dt.XCTMetric_ApplicationLaunch-AppLaunch.duration"): (10.0, 10, 50),
+}
+
+# Every run of a failing test reports this first issue; percentages vary by run.
+PERFORMANCE_FAILURES = {
+    "PerformanceTests/testBaselineRegression()":
+        r"failed: Clock Monotonic Time average is \d+% worse \(max allowed: 10%\)\.",
+    "PerformanceTests/testHighRelativeStandardDeviation()":
+        r"failed: Clock Monotonic Time standard deviation is \d+% \(max allowed: 5%\)\.",
+    "PerformanceTests/testOutlierMeasurement()":
+        r"failed: Clock Monotonic Time measurement #4 is \d+% worse than average \(max allowed: 40%\)\.",
+    "PerformanceTests/testAssertionFailuresInAndAfterMeasure()":
+        r"XCTAssertLessThan failed: .*Fixture performance failure inside the final measured iteration\.",
+}
+
+PERFORMANCE_CONFIGURATIONS = ["Warm", "Repeat"]
+
+
+def verify_performance(bundle):
+    exports = {}
+
+    def result(topic, test_id=None):
+        args = ["xcrun", "xcresulttool", "get", "test-results", topic, "--path", str(bundle), "--compact"]
+        if test_id:
+            args.extend(["--test-id", test_id])
+        value = json.loads(run(*args))
+        exports.setdefault(topic, {})[test_id or ""] = value
+        return value
+
+    summary = result("summary")
+    tree = result("tests")
+    cases = {canonical(node["nodeIdentifier"]): node
+             for node in walk(tree["testNodes"]) if node["nodeType"] == "Test Case"}
+    expected = set(PERFORMANCE_CASES)
+    require(set(cases) == expected,
+            f"Case set changed: missing {expected - set(cases)}, extra {set(cases) - expected}")
+    for key, (outcome, _, _) in PERFORMANCE_CASES.items():
+        require(cases[key].get("result") == outcome, f"{key}: expected {outcome}, got {cases[key].get('result')}")
+    failing = {key for key, (outcome, _, _) in PERFORMANCE_CASES.items() if outcome == "Failed"}
+    require(summary["totalTestCount"] == len(expected), "Unexpected total test-function count")
+    require(summary["failedTests"] == len(failing), "Unexpected failure count")
+    require(summary["passedTests"] == len(expected) - len(failing), "Unexpected passing-test count")
+    configurations = sorted(entry["testPlanConfiguration"]["configurationName"]
+                            for entry in summary["devicesAndConfigurations"])
+    require(configurations == sorted(PERFORMANCE_CONFIGURATIONS), f"Unexpected configurations: {configurations}")
+    statistics = {entry["title"] for entry in summary.get("statistics", [])}
+    require(f"{len(expected)} tests collected performance metrics" in statistics,
+            f"Missing performance statistic: {statistics}")
+    summary_failures = {canonical(item["testIdentifierString"]): item["failureText"]
+                        for item in summary["testFailures"]}
+    require(set(summary_failures) == failing, f"Unexpected summary failures: {sorted(summary_failures)}")
+    for key, pattern in PERFORMANCE_FAILURES.items():
+        require(re.fullmatch(pattern, summary_failures[key]), f"{key}: unexpected failure {summary_failures[key]!r}")
+
+    metrics = {canonical(entry["testIdentifier"]): entry["testRuns"] for entry in result("metrics")}
+    require(set(metrics) == expected, f"Tests without metrics: {expected - set(metrics)}")
+    for key, (_, count, specs) in PERFORMANCE_CASES.items():
+        runs = metrics[key]
+        names = sorted(test_run["testPlanConfiguration"]["configurationName"] for test_run in runs)
+        require(names == sorted(PERFORMANCE_CONFIGURATIONS), f"{key}: unexpected metric runs {names}")
+        for run_metrics in runs:
+            found = {metric["identifier"]: metric for metric in run_metrics["metrics"]}
+            wanted = {spec[1]: spec for spec in specs}
+            require(set(found) == set(wanted),
+                    f"{key}: missing metrics {set(wanted) - set(found)}, extra {set(found) - set(wanted)}")
+            for identifier, (display, _, unit, polarity) in wanted.items():
+                metric = found[identifier]
+                shape = (metric["displayName"], metric["unitOfMeasurement"], metric["polarity"],
+                         len(metric["measurements"]))
+                require(shape == (display, unit, polarity, count), f"{key} {identifier}: unexpected {shape}")
+                baseline = PERFORMANCE_BASELINES.get((key, identifier))
+                if baseline:
+                    average, regression, deviation = baseline
+                    require(metric["baselineName"] == "Local Baseline" and
+                            abs(metric["baselineAverage"] - average) < 1e-9,
+                            f"{key} {identifier}: baseline not applied (run generate.sh to retarget it)")
+                    require((metric["maxPercentRegression"], metric["maxPercentRelativeStandardDeviation"]) ==
+                            (regression, deviation), f"{key} {identifier}: unexpected baseline thresholds")
+                else:
+                    require(metric["baselineName"] == "" and metric["baselineAverage"] == 0,
+                            f"{key} {identifier}: unexpected baseline")
+
+    for key, (outcome, _, _) in PERFORMANCE_CASES.items():
+        details = result("test-details", cases[key]["nodeIdentifier"])
+        require(details["hasPerformanceMetrics"], f"{key}: hasPerformanceMetrics is false")
+        runs = details["testRuns"]
+        require(sorted(test_run["name"] for test_run in runs) == sorted(PERFORMANCE_CONFIGURATIONS),
+                f"{key}: unexpected detail runs")
+        require(all(test_run["result"] == outcome for test_run in runs),
+                f"{key}: a configuration had another outcome")
+        if key in PERFORMANCE_FAILURES:
+            for test_run in runs:
+                messages = [child["name"] for child in test_run.get("children", [])]
+                require(any(re.fullmatch(PERFORMANCE_FAILURES[key], message) for message in messages),
+                        f"{key}: failure missing from {test_run['name']} details: {messages}")
+    in_and_after = [child["name"] for test_run in exports["test-details"][
+        cases["PerformanceTests/testAssertionFailuresInAndAfterMeasure()"]["nodeIdentifier"]]["testRuns"]
+        for child in test_run.get("children", [])]
+    require(sum("the measured routes were not cached" in message for message in in_and_after) == 2,
+            "Missing the assertion failure after the measure block")
+
+    def activity_runs(key):
+        return result("activities", cases[key]["nodeIdentifier"])["testRuns"]
+
+    for test_run in activity_runs("PerformanceTests/testActivityWrappedMeasureWithIterationActivities()"):
+        outer = [node for node in test_run["activities"] if node["title"] == "Measure route encoding"]
+        require(len(outer) == 1, "Missing activity around measure")
+        # One user activity per invocation, including the discarded warm-up.
+        titles = [child["title"] for child in outer[0].get("childActivities", [])
+                  if child.get("activityType") == "com.apple.dt.xctest.activity-type.userCreated"]
+        require(titles == [f"Encode iteration {n}" for n in range(1, 5)], f"Unexpected iteration activities {titles}")
+    for test_run in activity_runs("PerformanceUITests/testLaunchPerformance()"):
+        launches = [node["title"] for node in test_run["activities"] if node["title"] == f"Open {APP}"]
+        require(len(launches) == 3, f"Expected a warm-up and two measured launches, got {len(launches)}")
+    for test_run in activity_runs("PerformanceTests/testBaselineRegression()"):
+        require(any(node["isAssociatedWithFailure"] and re.fullmatch(
+                    PERFORMANCE_FAILURES["PerformanceTests/testBaselineRegression()"], node["title"])
+                    for node in test_run["activities"]), "Regression is missing from the activity tree")
+    result("insights")
+
+    for topic, values in exports.items():
+        value = values.get("", values)
+        bundle.with_suffix(f".{topic}.json").write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n")
+    print(f"Verified Performance: {len(cases)} test functions in {len(PERFORMANCE_CONFIGURATIONS)} configurations, "
+          f"{len(failing)} failures; metrics, units, polarities, baselines, regressions, and iteration "
+          "activities intact.")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("bundle", type=Path)
-    parser.add_argument("plan", choices=["Baseline", "Mixed"])
+    parser.add_argument("plan", choices=["Baseline", "Mixed", "Performance"])
     args = parser.parse_args()
     try:
-        verify(args.bundle.resolve(), args.plan)
+        if args.plan == "Performance":
+            verify_performance(args.bundle.resolve())
+        else:
+            verify(args.bundle.resolve(), args.plan)
     except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as error:
         print(f"Fixture verification failed: {error}", file=sys.stderr)
         if isinstance(error, subprocess.CalledProcessError):

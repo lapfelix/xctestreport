@@ -52,6 +52,24 @@ test('the Flaky chip appears for flaky rows and narrows to them', async ({ page 
   await expect(page.locator('.suite-tests-table tbody tr:visible')).toHaveCount(5);
 });
 
+test('the Performance chip appears for tests with metrics and narrows to them', async ({ page }) => {
+  const withMetrics = suites.map((suite) => ({
+    ...suite,
+    tests: suite.tests.map((t) => (t.name === 'testBeta' ? { ...t, performance: true } : t)),
+  }));
+  await page.goto(await renderReport({ suites: withMetrics }));
+  const chip = page.locator('.performance-chip');
+  await expect(chip).toBeVisible();
+  await expect(page.locator('.flaky-chip')).toBeHidden();
+  await chip.click();
+  await expect(page.locator('.suite-tests-table tbody tr:visible')).toHaveCount(1);
+  await expect(page.locator('tr:visible', { hasText: 'testBeta' })).toHaveCount(1);
+  await expect(page).toHaveURL(/status=performance/);
+  await page.reload();
+  await expect(chip).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.suite-tests-table tbody tr:visible')).toHaveCount(1);
+});
+
 test('selecting several chips shows the union', async ({ page }) => {
   const withFlaky = suites.map((suite) => ({
     ...suite,

@@ -66,6 +66,9 @@
          <TestPlanReference
             reference = "container:TestPlans/Mixed.xctestplan">
          </TestPlanReference>
+         <TestPlanReference
+            reference = "container:TestPlans/Performance.xctestplan">
+         </TestPlanReference>
       </TestPlans>
       <MacroExpansion>
          <BuildableReference

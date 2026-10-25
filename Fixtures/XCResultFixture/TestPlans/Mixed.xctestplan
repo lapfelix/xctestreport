@@ -31,7 +31,10 @@
         "containerPath": "container:XCResultFixture.xcodeproj",
         "identifier": "B90BC3521B9B3501077DF0F5",
         "name": "FixtureUnitTests"
-      }
+      },
+      "skippedTests": [
+        "PerformanceTests"
+      ]
     },
     {
       "parallelizable": false,
@@ -39,7 +42,10 @@
         "containerPath": "container:XCResultFixture.xcodeproj",
         "identifier": "A85CFD80D2FC56E8C0CD03B0",
         "name": "FixtureUITests"
-      }
+      },
+      "skippedTests": [
+        "PerformanceUITests"
+      ]
     }
   ],
   "version": 1

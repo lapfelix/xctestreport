@@ -58,7 +58,8 @@ function testRow(test) {
   const result = statusClass.charAt(0).toUpperCase() + statusClass.slice(1);
   const seconds = test.duration == null ? 1 : test.duration;
   const flaky = test.flaky ? ' data-flaky="true"' : '';
-  return `<tr${rowClass} data-status="${statusClass}"${flaky} data-duration="${seconds}"><td data-label="Test Name"><a href="tests/test_${htmlEscape(test.name)}.html">${htmlEscape(test.name)}</a></td>` +
+  const performance = test.performance ? ' data-performance="true"' : '';
+  return `<tr${rowClass} data-status="${statusClass}"${flaky}${performance} data-duration="${seconds}"><td data-label="Test Name"><a href="tests/test_${htmlEscape(test.name)}.html">${htmlEscape(test.name)}</a></td>` +
     `<td data-label="Status" class="${statusClass}">${result}</td>` +
     `<td data-label="Duration">${htmlEscape(formatCompactDuration(seconds))}</td></tr>`;
 }
@@ -90,7 +91,7 @@ ${rows}
 }
 
 /**
- * @param {{ title?: string, headerNote?: string, suites?: Array<{name: string, tests: Array<{name: string, status: string, duration?: number, flaky?: boolean}>}> }} opts
+ * @param {{ title?: string, headerNote?: string, suites?: Array<{name: string, tests: Array<{name: string, status: string, duration?: number, flaky?: boolean, performance?: boolean}>}> }} opts
  * @returns {Promise<string>} HTTP URL to the rendered index.html
  */
 async function renderReport(opts = {}) {
@@ -110,6 +111,7 @@ async function renderReport(opts = {}) {
     skipped_tests: String(counts.filter((t) => t.status === 'skipped').length),
     build_results_html: '',
     comparison_info_html: '',
+    performance_overview_html: opts.performanceOverviewHTML || '',
     suite_sections_html: suites.map(suiteSection).join('\n'),
     snapshot_gallery_link_html: opts.snapshotGalleryLinkHTML || '',
     snapshot_gallery_nav_html: opts.snapshotGalleryLinkHTML ? '<a href="snapshots.html">Snapshots</a>' : '',

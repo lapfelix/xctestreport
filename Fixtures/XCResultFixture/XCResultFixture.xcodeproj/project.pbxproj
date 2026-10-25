@@ -8,12 +8,14 @@
 
 /* Begin PBXBuildFile section */
 		06E43EC9622BE1287CEC6B01 /* FixtureApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBFB79F9A01E229B2AA97DC3 /* FixtureApp.swift */; };
+		12B76B36D1F67CC8CDF2F815 /* PerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1C34201EABE1252EC0DC2DF /* PerformanceTests.swift */; };
 		18DCFE2F702CFDB803E63564 /* JourneyUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089F8CCB72C6DF6CB6A2E9F4 /* JourneyUITests.swift */; };
 		74404B3B3B2081A3F9092F41 /* ActivityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87B1C75C92E3A5F7A93B57CC /* ActivityTests.swift */; };
 		8D5AA589783FB84EE595BD07 /* OutcomeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67B37FEA099A900E377967D4 /* OutcomeTests.swift */; };
 		966226B183EB7E8CB412B961 /* ModernTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22E88B910BA0D96BCB9F0F23 /* ModernTests.swift */; };
 		9DD458D65EF55BF7308ADDD5 /* SnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CA22561D0F5C9C9B171F66 /* SnapshotTests.swift */; };
 		CF88070EBB4EEAE4CE2ADBCF /* FixtureSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3208902502A22E4CE46F5DE2 /* FixtureSupport.swift */; };
+		ECD9FC8735827A659EA734D8 /* PerformanceUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7462742D38FBE462F2FB866 /* PerformanceUITests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -40,9 +42,11 @@
 		67B37FEA099A900E377967D4 /* OutcomeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutcomeTests.swift; sourceTree = "<group>"; };
 		723A7488CB99B7D7C7134C80 /* FixtureApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = FixtureApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		87B1C75C92E3A5F7A93B57CC /* ActivityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityTests.swift; sourceTree = "<group>"; };
+		B7462742D38FBE462F2FB866 /* PerformanceUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceUITests.swift; sourceTree = "<group>"; };
 		C1CA22561D0F5C9C9B171F66 /* SnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapshotTests.swift; sourceTree = "<group>"; };
 		DAACBBF3553F962182817564 /* FixtureUnitTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = FixtureUnitTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F16D048991332A5B9C2F4560 /* FixtureUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = FixtureUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		F1C34201EABE1252EC0DC2DF /* PerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceTests.swift; sourceTree = "<group>"; };
 		FBFB79F9A01E229B2AA97DC3 /* FixtureApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureApp.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -54,6 +58,7 @@
 				3208902502A22E4CE46F5DE2 /* FixtureSupport.swift */,
 				22E88B910BA0D96BCB9F0F23 /* ModernTests.swift */,
 				67B37FEA099A900E377967D4 /* OutcomeTests.swift */,
+				F1C34201EABE1252EC0DC2DF /* PerformanceTests.swift */,
 				C1CA22561D0F5C9C9B171F66 /* SnapshotTests.swift */,
 			);
 			path = UnitTests;
@@ -91,6 +96,7 @@
 			isa = PBXGroup;
 			children = (
 				089F8CCB72C6DF6CB6A2E9F4 /* JourneyUITests.swift */,
+				B7462742D38FBE462F2FB866 /* PerformanceUITests.swift */,
 			);
 			path = UITests;
 			sourceTree = "<group>";
@@ -192,6 +198,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				18DCFE2F702CFDB803E63564 /* JourneyUITests.swift in Sources */,
+				ECD9FC8735827A659EA734D8 /* PerformanceUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -211,6 +218,7 @@
 				CF88070EBB4EEAE4CE2ADBCF /* FixtureSupport.swift in Sources */,
 				966226B183EB7E8CB412B961 /* ModernTests.swift in Sources */,
 				8D5AA589783FB84EE595BD07 /* OutcomeTests.swift in Sources */,
+				12B76B36D1F67CC8CDF2F815 /* PerformanceTests.swift in Sources */,
 				9DD458D65EF55BF7308ADDD5 /* SnapshotTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

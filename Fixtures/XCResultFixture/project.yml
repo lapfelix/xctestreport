@@ -45,3 +45,4 @@ schemes:
         - path: TestPlans/Baseline.xctestplan
           defaultPlan: true
         - path: TestPlans/Mixed.xctestplan
+        - path: TestPlans/Performance.xctestplan

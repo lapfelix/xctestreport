@@ -1,3 +1,4 @@
+import os
 import SwiftUI
 import UIKit
 
@@ -6,7 +7,14 @@ import UIKit
 @main
 struct FixtureApp: App {
     var body: some Scene {
-        WindowGroup { FixtureScreen() }
+        WindowGroup {
+            // Performance UI tests opt in, so the journey screens and screenshots never change.
+            if ProcessInfo.processInfo.arguments.contains("-FixturePerformanceList") {
+                PerformanceListScreen()
+            } else {
+                FixtureScreen()
+            }
+        }
     }
 }
 
@@ -170,5 +178,38 @@ private struct TouchObserverInstaller: UIViewRepresentable {
             window.addGestureRecognizer(observer)
             installed = true
         }
+    }
+}
+
+/// A long scrollable list with pushable rows for scroll, navigation and app-signpost metrics.
+private struct PerformanceListScreen: View {
+    private let stops = (1...300).map { "Stop \($0)" }
+
+    var body: some View {
+        NavigationStack {
+            List(stops, id: \.self) { stop in
+                NavigationLink(stop, value: stop)
+            }
+            .accessibilityIdentifier("perf-list")
+            .navigationTitle("Stops")
+            .navigationDestination(for: String.self) { StopDetail(stop: $0) }
+        }
+    }
+}
+
+private struct StopDetail: View {
+    static let signposter = OSSignposter(subsystem: "dev.xctestreport.fixture.FixtureApp", category: "Performance")
+    let stop: String
+    @State private var departures = [String]()
+
+    var body: some View {
+        List(departures, id: \.self) { Text($0) }
+            .accessibilityIdentifier("perf-detail")
+            .navigationTitle(stop)
+            .onAppear {
+                let state = Self.signposter.beginInterval("Load departures")
+                departures = (1...40).map { "\(stop) departure \($0)" }.sorted()
+                Self.signposter.endInterval("Load departures", state)
+            }
     }
 }

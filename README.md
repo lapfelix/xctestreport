@@ -4,13 +4,15 @@ Generate static HTML reports from XCTest `.xcresult` bundles.
 
 ## Highlights
 - Builds an `index.html` suite overview and per-test detail pages.
-- Search box, "Show only" chips (passed, failed, skipped, flaky; combine to see several), and Duration-column sort
+- Search box, "Show only" chips (passed, failed, skipped, flaky, performance; combine to see several), and Duration-column sort
   on the main page, plus a collapsible "Slowest tests" section.
 - Optional custom header note under the title (`--header-note`), e.g. the branch under test.
 - Review notes on tests and suites, optionally pinned to a moment in the recording, copied in
   one go for an agent (see [Review notes](#review-notes)).
 - Writes an agent/LLM-readable `report.md`, a failures-only `failures.md`, and per-test Markdown (see below).
 - Renders timeline + scrubber + media previews for test activities.
+- Reports XCTest performance metrics: every iteration, spread, outliers, baselines and run-to-run
+  trends (see [Performance metrics](#performance-metrics)).
 - Exports attachments and supports video, image, text, and plist preview flows.
 - Compares against previous report folders in the same parent directory.
 - Packs each test's payloads into one ZIP per test, so a full run writes hundreds of files
@@ -195,6 +197,8 @@ Typical output directory:
   everything else is bundled). Videos are named after their test (`Suite_testName.mp4`, then
   `-2`, `-3`, ...), and diagnostic reports keep an `.ips` extension.
 - `test_details.json` (per-test detail keyed by test identifier, used to compare against previous runs)
+- `performance_metrics.json` (every `measure` metric with its raw iterations, baseline and limits, as
+  `xcresulttool get test-results metrics` reports it; used for regeneration and run-to-run trends)
 - `test_activities.json`, `build_results.json`, `tests_inventory.json`, `report_metadata.json`
   (cached data for regeneration and report history)
 
@@ -305,6 +309,26 @@ and from the back-link in each test page's snapshot section (anchored at that co
 - Snapshot libraries typically retain comparison images when an assertion fails. A test that passed in a class that
   produced comparisons is still listed, as a compact "matched, no images" row - the result bundle
   carries no record of what it captured. The page says so; nothing is inferred from test names.
+
+## Performance metrics
+Tests that call `measure` get a **Performance** section at the top of their page, an overview
+table on `index.html`, a **Performance** chip, and a `## Performance` section in their Markdown.
+
+- Each metric shows its average and median, every iteration as a small chart, the min–max range,
+  the standard deviation and relative standard deviation (RSD). Values are scaled to readable units
+  (`kB` → MB, `kI` → G instr, `kC` → G cycles, seconds → ms/µs); hover for the value as recorded.
+- When a baseline is set, the change from it is colored by the metric's polarity and flagged
+  **regressed** past `maxPercentRegression` (and `maxRegression`, when set). An iteration worse
+  than the average by more than 4× `maxPercentRelativeStandardDeviation` is flagged too: XCTest
+  fails those as "measurement #N is X% worse than average".
+- An RSD over `maxPercentRelativeStandardDeviation` is flagged as noisy. XCTest enforces these
+  limits only against a baseline, so without one they warn that the measurement is unreliable.
+- Iterations with a modified z-score above 3.5 and at least 5% off the median are outliers. The
+  section groups them by iteration, so "iteration 5 is low in every metric" reads as one line.
+- With an earlier report (sibling folder or `--baseline`), each metric shows the change from the
+  previous run and a trend across up to ten runs, matched by device and test-plan configuration.
+- XCTest discards a warm-up iteration and records no per-iteration timestamps, so iterations are not
+  marked on the timeline.
 
 ## Notes
 - Very large `.xcresult` bundles can still take time due to attachment export and test detail extraction.

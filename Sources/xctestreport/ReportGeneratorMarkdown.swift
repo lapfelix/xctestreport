@@ -51,6 +51,7 @@ extension XCTestReport {
         primaryFailureMessage: String?,
         sourceLocationCandidateTexts: [String],
         snapshotComparisons: [SnapshotComparison] = [],
+        performance: PerformanceTestAnalysis? = nil,
         bundleFileName: String
     ) -> (markdown: String, failureSummary: String?) {
         let isFailure = Self.isFailureTestResult(result)
@@ -181,6 +182,10 @@ extension XCTestReport {
                 lines.append("`\(history)` (most recent first; P = passed, F = failed)")
                 lines.append("")
             }
+        }
+
+        if let performance {
+            lines.append(contentsOf: renderPerformanceMarkdown(performance))
         }
 
         let stepsMarkdown = renderStepsMarkdown(
@@ -458,7 +463,8 @@ extension XCTestReport {
         entries: [AgentTestEntry],
         buildErrorCount: Int?,
         buildWarningCount: Int?,
-        previousResultsDate: Date?
+        previousResultsDate: Date?,
+        performance: [String: PerformanceTestAnalysis] = [:]
     ) throws {
         var lines = [String]()
         lines.append("# \(summaryTitle) - Test Report")
@@ -473,6 +479,9 @@ extension XCTestReport {
         lines.append("- `\(testPagesDirectoryName)/<page>.html` - the browser view of the same test; not useful to read as text.")
         lines.append("- `attachments/` - files that stay loose: screen recordings named after their test (`Suite_testName.mp4`), snapshot images, and crash reports quoted in a failure. `manifest.json` maps every attachment to its test.")
         lines.append("- `summary.json`, `tests_full.json`, `tests_grouped.json`, `test_details.json` - raw `xcresulttool` data; the Markdown files already carry what they say.")
+        if !performance.isEmpty {
+            lines.append("- `\(Self.performanceMetricsFileName)` - every performance metric with its raw iteration values, baseline and limits; each test's `## Performance` section summarizes it.")
+        }
         lines.append("- `index.html`, `web/` - the browser report.")
         lines.append("")
 
@@ -517,6 +526,39 @@ extension XCTestReport {
             lines.append("")
             for entry in skipped {
                 lines.append("- [\(markdownInline(entry.name))](\(entry.markdownRelativePath)) - \(markdownInline(entry.suite))")
+            }
+            lines.append("")
+        }
+
+        let performanceEntries = entries.compactMap { entry -> (AgentTestEntry, PerformanceTestAnalysis)? in
+            guard let analysis = entry.identifier.flatMap({ performance[$0] }), !analysis.runs.isEmpty else { return nil }
+            return (entry, analysis)
+        }.sorted { $0.0.suite == $1.0.suite ? $0.0.name < $1.0.name : $0.0.suite < $1.0.suite }
+        if !performanceEntries.isEmpty {
+            lines.append("## Performance (\(performanceEntries.count) tests)")
+            lines.append("")
+            lines.append("| Test | Suite | Metrics | Regressed | Over RSD limit | Outlier metrics |")
+            lines.append("| --- | --- | --- | --- | --- | --- |")
+            for (entry, analysis) in performanceEntries {
+                let labelRuns = analysis.runs.count > 1
+                let regressed = analysis.runs.flatMap { run in
+                    run.metrics.filter { $0.exceedsRegressionLimit || !$0.iterationsOverLimit.isEmpty }.map { item in
+                        item.metric.displayName + (labelRuns ? run.run.label.map { " (\($0))" } ?? "" : "")
+                    }
+                }
+                let cells = [
+                    "[\(markdownTableCell(entry.name))](\(entry.markdownRelativePath))",
+                    markdownTableCell(entry.suite),
+                    "\(analysis.allMetrics.count)",
+                    regressed.isEmpty ? "0" : "**\(regressed.count)**: \(markdownTableCell(regressed.joined(separator: ", ")))",
+                    "\(analysis.noisyCount)",
+                    "\(analysis.outlierMetricCount)",
+                ]
+                lines.append("| \(cells.joined(separator: " | ")) |")
+            }
+            if !performanceEntries.contains(where: { $0.1.hasBaselines }) {
+                lines.append("")
+                lines.append("No metric has a baseline, so XCTest did not check any for regressions.")
             }
             lines.append("")
         }

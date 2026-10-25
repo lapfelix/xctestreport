@@ -9,8 +9,11 @@
   var restoringState = false;
   var debounce;
 
-  var flakyChip = document.querySelector('.flaky-chip');
-  if (flakyChip) { flakyChip.hidden = !document.querySelector('tr[data-flaky="true"]'); }
+  // Attribute chips (Flaky, Performance) match rows with data-<filter>="true" and show only when some row does.
+  var filterChips = chips.filter(function(chip) { return chip.hasAttribute('data-filter'); });
+  filterChips.forEach(function(chip) {
+    chip.hidden = !document.querySelector('tr[data-' + chip.getAttribute('data-filter') + '="true"]');
+  });
 
   function selectedStatuses() {
     var set = {};
@@ -148,8 +151,10 @@
   function applyFilter() {
     var query = (searchInput ? searchInput.value : '').trim().toLowerCase();
     var statuses = selectedStatuses();
-    var flakySelected = !!flakyChip && !flakyChip.hidden && flakyChip.getAttribute('aria-pressed') === 'true';
-    var anySelected = flakySelected || Object.keys(statuses).length > 0;
+    var selectedFilters = filterChips.filter(function(chip) {
+      return !chip.hidden && chip.getAttribute('aria-pressed') === 'true';
+    }).map(function(chip) { return chip.getAttribute('data-filter'); });
+    var anySelected = selectedFilters.length > 0 || Object.keys(statuses).length > 0;
     var anyVisible = false;
 
     if (query !== previousQuery) { searchCollapseOverrides = {}; previousQuery = query; }
@@ -166,7 +171,7 @@
         var row = rows[r];
         var matchesChips = !anySelected
           || !!statuses[row.getAttribute('data-status')]
-          || (flakySelected && row.getAttribute('data-flaky') === 'true');
+          || selectedFilters.some(function(filter) { return row.getAttribute('data-' + filter) === 'true'; });
         var matchesQuery = query === '' || suiteMatches || rowName(row).indexOf(query) !== -1;
         var visible = matchesChips && matchesQuery;
         row.style.display = visible ? '' : 'none';
@@ -359,7 +364,7 @@
   chips.forEach(function(chip) {
     var selector = chip.hasAttribute('data-status')
       ? 'tr[data-status="' + chip.getAttribute('data-status') + '"]'
-      : 'tr[data-flaky="true"]';
+      : 'tr[data-' + chip.getAttribute('data-filter') + '="true"]';
     var count = document.querySelectorAll('.suite-tests-table tbody ' + selector).length;
     chip.setAttribute('data-label', chip.textContent.trim());
     var badge = document.createElement('span');

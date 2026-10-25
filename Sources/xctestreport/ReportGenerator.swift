@@ -242,6 +242,11 @@ extension XCTestReport {
             throw RuntimeError(message: "Could not decode the explicitly requested baseline report.")
         }
         let overallCounts = Self.testCounts(for: allTests)
+        let performanceMetrics = try loadPerformanceMetrics()
+        let performanceHistory = performanceMetrics.isEmpty ? [] : loadPreviousPerformanceMetrics()
+        let performanceAnalyses = performanceMetrics.mapValues {
+            Self.analyzePerformance($0, history: performanceHistory)
+        }
 
         let groupedTests = Dictionary(grouping: allTests) { test -> String in
             if let identifier = test.nodeIdentifier,
@@ -339,6 +344,7 @@ extension XCTestReport {
 
                     var testDetails: TestDetails?
                     var testActivities: TestActivities?
+                    let performanceAnalysis = test.nodeIdentifier.flatMap { performanceAnalyses[$0] }
                     if let testIdentifier = test.nodeIdentifier {
                         testDetails = getTestDetails(for: testIdentifier)
                         testActivities = getTestActivities(for: testIdentifier)
@@ -533,6 +539,7 @@ extension XCTestReport {
                         primaryFailureMessage: primaryFailureMessage,
                         sourceLocationCandidateTexts: sourceLocationCandidateTexts,
                         snapshotComparisons: snapshotComparisons,
+                        performance: performanceAnalysis,
                         bundleFileName: bundleFileName)
 
                     let testDetailHTML: String
@@ -552,6 +559,7 @@ extension XCTestReport {
                                 "details_panel_html": detailsPanelHtml,
                                 "timeline_and_video_section_html": timelineAndVideoSection,
                                 "snapshot_diff_html": snapshotDiffHtml,
+                                "performance_html": performanceAnalysis.map(self.renderPerformanceSection) ?? "",
                                 "bundle_src": htmlEscape(bundleFileName),
                                 "notes_body_attributes": self.reviewNotesBodyAttributes(
                                     reportID: reviewNotesReportID, reportRoot: "../",
@@ -759,11 +767,18 @@ extension XCTestReport {
 
                     let durationSeconds = parseDuration(duration) ?? 0
                     let flakyAttribute = isFlaky ? " data-flaky=\"true\"" : ""
+                    let performanceAnalysis = test.nodeIdentifier.flatMap { performanceAnalyses[$0] }
+                    let performanceAttribute = performanceAnalysis == nil ? "" : " data-performance=\"true\""
+                    let performanceBadge = performanceAnalysis.map { analysis -> String in
+                        let regressed = analysis.regressionCount > 0
+                        let title = regressed ? "Performance regressed against its baseline" : "Recorded performance metrics"
+                        return " <a class=\"perf-row-badge\(regressed ? " perf-row-badge-regressed" : "")\" href=\"\(escapedPageName)#performance\" title=\"\(title)\">\(regressed ? "Regressed" : "Metrics")</a>"
+                    } ?? ""
                     let notesAttributes = self.reviewNotesEnabled
                         ? " data-test-id=\"\(htmlEscape(test.nodeIdentifier ?? test.name))\" data-md=\"\(htmlEscape(self.agentMarkdownAnchorLink(identifier: test.nodeIdentifier, name: test.name)))\""
                         : ""
                     let testRow =
-                        "<tr\(rowClass) data-status=\"\(statusClass)\"\(flakyAttribute)\(notesAttributes) data-duration=\"\(durationSeconds)\"><td data-label=\"Test Name\"><a href=\"\(escapedPageName)\">\(escapedTestName)</a></td><td data-label=\"Status\" class=\"\(statusClass)\">\(escapedResult)\(statusEmoji)</td><td data-label=\"Duration\">\(htmlEscape(formatCompactDuration(durationSeconds)))</td></tr>"
+                        "<tr\(rowClass) data-status=\"\(statusClass)\"\(flakyAttribute)\(performanceAttribute)\(notesAttributes) data-duration=\"\(durationSeconds)\"><td data-label=\"Test Name\"><a href=\"\(escapedPageName)\">\(escapedTestName)</a>\(performanceBadge)</td><td data-label=\"Status\" class=\"\(statusClass)\">\(escapedResult)\(statusEmoji)</td><td data-label=\"Duration\">\(htmlEscape(formatCompactDuration(durationSeconds)))</td></tr>"
 
                     suiteHTMLQueue.sync {
                         suiteSections[suite]?.append((index: testIndex, html: testRow))
@@ -938,6 +953,12 @@ extension XCTestReport {
                 "skipped_tests": String(overallCounts.skippedTests),
                 "build_results_html": buildResultsHTML,
                 "comparison_info_html": comparisonInfoHTML,
+                "performance_overview_html": renderPerformanceOverview(allTests.compactMap { test in
+                    guard let analysis = test.nodeIdentifier.flatMap({ performanceAnalyses[$0] }) else { return nil }
+                    return PerformanceOverviewEntry(
+                        test: test, pagePath: "\(testPagesDirectoryName)/\(Self.testPageName(for: test))",
+                        analysis: analysis)
+                }),
                 "suite_sections_html": suiteSectionsHTML,
                 "snapshot_gallery_link_html": snapshotGalleryIndexLinkHTML,
                 "snapshot_gallery_nav_html": snapshotGalleryIndexLinkHTML.isEmpty
@@ -959,7 +980,8 @@ extension XCTestReport {
             entries: agentEntriesQueue.sync { agentEntries },
             buildErrorCount: buildErrorCount,
             buildWarningCount: buildWarningCount,
-            previousResultsDate: previousResults?.date)
+            previousResultsDate: previousResults?.date,
+            performance: performanceAnalyses)
 
         try writeFailuresReport(
             summaryTitle: summary.title,

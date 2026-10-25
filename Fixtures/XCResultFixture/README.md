@@ -26,6 +26,15 @@ FIXTURE_DESTINATION='platform=iOS Simulator,name=iPhone 17 Pro,OS=27.0' \
 
 Any installed iPhone/iPad simulator is usable; override `FIXTURE_DESTINATION`
 with its name/OS or `platform=iOS Simulator,id=<UDID>`.
+
+The Performance plan is generated separately, into `output/xcresult-fixtures-perf` by default:
+
+```sh
+Fixtures/XCResultFixture/generate.sh --performance
+```
+
+It writes `Performance.xcresult`, its log, and the exported `summary`, `tests`, `metrics`,
+`test-details`, `activities`, and `insights` JSON beside it.
 The script uses the currently selected Xcode (`xcode-select` / `DEVELOPER_DIR`).
 It runs serially with one simulator and reuses its own DerivedData across plans.
 Verbose simulator sysdiagnoses are disabled to keep the fixtures compact; test
@@ -94,6 +103,55 @@ assets. Test outcomes and attachment content are deterministic; timestamps,
 durations, device metadata, UUIDs, recordings, and Xcode's internal schema vary
 by run/Xcode version. Assert semantic features rather than byte-identical bundles.
 
+## Performance plan
+
+`Performance` runs only `PerformanceTests` (unit) and `PerformanceUITests`; Baseline and Mixed
+skip both classes. It has two configurations, `Warm` and `Repeat`, so every test has two runs
+in the metrics export. It intentionally fails four tests. Testing takes about three to four
+minutes, mostly in the UI tests.
+
+| Test | Outcome | Metrics and behavior to exercise |
+| --- | --- | --- |
+| `testLegacyMeasureBlock` | Pass | `measure {}`: `Time`, `com.apple.XCTPerformanceMetric_WallClockTime`, unit `seconds`, 10 values, `maxRegression` 0.1 |
+| `testLegacyManualStartStop` | Pass | `measureMetrics(_:automaticallyStartMeasuring: false)` with start/stop |
+| `testLegacyBaselineWithinTolerance` | Pass | Legacy metric with a baseline |
+| `testHostMetricsWithCustomIterationCount` | Pass | Clock, CPU (time/cycles/instructions), memory (physical/peak), and disk logical writes; four values |
+| `testManualStartStopOptions` | Pass | `invocationOptions = [.manuallyStart, .manuallyStop]` |
+| `testSignpostAndCustomMetrics` | Pass | `XCTOSSignpostMetric` for the test's own interval; a custom `XCTMetric` with unit `routes/s`, "prefers larger", and a baseline it beats |
+| `testBaselineRegression` | Fail | `average is N% worse (max allowed: 10%)` |
+| `testBaselineImprovement` | Pass | Faster than its baseline; baseline `maxPercentRegression` 25 |
+| `testHighRelativeStandardDeviation` | Fail | `standard deviation is N% (max allowed: 5%)` from the baseline's 5% limit |
+| `testOutlierMeasurement` | Fail | `measurement #4 is N% worse than average (max allowed: 40%)` |
+| `testAssertionFailuresInAndAfterMeasure` | Fail | An assertion in the final measured iteration and another after `measure`; metrics are still recorded |
+| `testActivityWrappedMeasureWithIterationActivities` | Pass | `measure` inside an activity, with one child activity and attachment per invocation, including the discarded warm-up |
+| `PerformanceUITests/testLaunchPerformance` | Pass | `XCTApplicationLaunchMetric` with and without `waitUntilResponsive`; launch baseline |
+| `PerformanceUITests/testScrollDeceleration` | Pass | Scroll deceleration, dragging, and dragging-and-deceleration signposts; `XCTHitchMetric` records nothing on simulators |
+| `PerformanceUITests/testNavigationWithAppMetrics` | Pass | Navigation transition, the app's own signpost, and app-targeted CPU/memory metrics named with `FixtureApp` |
+
+The perf-only list screen opens only with the `-FixturePerformanceList` launch argument, so the
+journey screens and screenshots are unchanged. Measure options ask for two to four iterations;
+XCTest runs one more warm-up invocation and does not record it.
+
+### Baselines
+
+The baselines are in `XCResultFixture.xcodeproj/xcshareddata/xcbaselines`, one per test target.
+Xcode applies a baseline only when its run destination matches the host Mac (model, CPU kind,
+and core counts) and the simulator model exactly. Otherwise the test runs without a baseline
+and passes. The committed destination is an Apple M5 Pro `Mac17,8` with an iPhone Air
+(`iPhone18,4`). `generate.sh --performance` copies the project to `PerformanceProject` in the
+output directory and runs `retarget_baselines.py`, which rewrites that copy for this Mac and
+`FIXTURE_DESTINATION`. Source paths in that bundle point into the copy. To use baselines in Xcode
+on another machine, run the script on the project itself, then don't commit that change:
+
+```sh
+python3 Fixtures/XCResultFixture/retarget_baselines.py \
+  Fixtures/XCResultFixture/XCResultFixture.xcodeproj 'platform=iOS Simulator,name=iPhone 17 Pro'
+```
+
+Xcode checks variance only against a baseline. Without one, any spread passes. With one, a
+value outside 4× the relative standard deviation limit is reported as an outlier. Otherwise a
+standard deviation above the limit fails.
+
 ## Generate reports and exercise history
 
 From the repository root, after generating the bundles:
@@ -151,7 +209,19 @@ To recheck existing bundles independently:
 ```sh
 python3 Fixtures/XCResultFixture/verify.py output/xcresult-fixtures/Baseline.xcresult Baseline
 python3 Fixtures/XCResultFixture/verify.py output/xcresult-fixtures/Mixed.xcresult Mixed
+python3 Fixtures/XCResultFixture/verify.py output/xcresult-fixtures-perf/Performance.xcresult Performance
 PYTHONDONTWRITEBYTECODE=1 python3 Fixtures/XCResultFixture/validate_reports.py output/xcresult-fixtures
+```
+
+`validate_performance_report.py` builds a report of `Performance.xcresult` and compares it with
+`xcresulttool`'s own metrics export. Every metric and iteration must appear on its test page, the
+baseline checks XCTest failed must be flagged (and the ones it accepted must not), and HTML-only
+regeneration without the bundle must render the same sections:
+
+```sh
+swift build
+PYTHONDONTWRITEBYTECODE=1 python3 Fixtures/XCResultFixture/validate_performance_report.py \
+  output/xcresult-fixtures-perf/Performance.xcresult .build/debug/xctestreport
 ```
 
 Generated xcresults, reports, logs, and DerivedData live under the ignored
@@ -162,4 +232,5 @@ Generated xcresults, reports, logs, and DerivedData live under the ignored
 Edit `project.yml` and run `xcodegen generate` in this directory if adding targets
 or files. [XcodeGen's project spec](https://github.com/yonaskolb/XcodeGen/blob/master/Docs/ProjectSpec.md)
 documents the format. Commit the generated `.xcodeproj` alongside the spec.
-If renaming targets, update the target identifiers/names in both test plans.
+If renaming targets, update the target identifiers/names in all three test plans and the
+`xcbaselines` directory names, which are the test targets' identifiers.

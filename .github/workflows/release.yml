@@ -1,0 +1,172 @@
+name: Release
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_DIR: ${{ github.workspace }}/release
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+
+    - name: Compute version
+      id: version
+      run: |
+        base="$(tr -d '[:space:]' < VERSION)"
+        [[ "$base" =~ ^[0-9]+\.[0-9]+$ ]] || { echo "VERSION must be MAJOR.MINOR, got '$base'." >&2; exit 1; }
+        # The patch number counts commits since VERSION last changed, so bumping it resets to .0.
+        since="$(git log -1 --format=%H -- VERSION)"
+        patch="$(git rev-list --count "$since..HEAD")"
+        tag="v$base.$patch"
+        printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+        if gh release view "$tag" > /dev/null 2>&1; then
+          echo "Release $tag already exists; nothing to publish."
+          printf 'exists=true\n' >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Stamp version
+      if: steps.version.outputs.exists != 'true'
+      env:
+        TAG: ${{ steps.version.outputs.tag }}
+      run: printf '// Stamped by the release workflow.\nlet xctestreportVersion = "%s"\n' "$TAG" > Sources/xctestreport/Version.swift
+
+    - name: Import Developer ID certificate
+      id: codesign
+      if: steps.version.outputs.exists != 'true'
+      env:
+        CERTIFICATE_P12: ${{ secrets.DEVELOPER_ID_CERTIFICATE_P12 }}
+        CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+      run: |
+        if [[ -z "$CERTIFICATE_P12" ]]; then
+          echo "No Developer ID certificate configured; the executable keeps its ad-hoc signature."
+          exit 0
+        fi
+        keychain="$RUNNER_TEMP/release.keychain-db"
+        keychain_password="$(uuidgen)"
+        printf '%s' "$CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+        security create-keychain -p "$keychain_password" "$keychain"
+        security set-keychain-settings -lut 3600 "$keychain"
+        security unlock-keychain -p "$keychain_password" "$keychain"
+        security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+        security set-key-partition-list -S apple-tool:,apple: -k "$keychain_password" "$keychain" > /dev/null
+        existing_keychains=()
+        while IFS= read -r line; do existing_keychains+=("$(xargs <<< "$line")"); done < <(security list-keychains -d user)
+        security list-keychains -d user -s "$keychain" "${existing_keychains[@]}"
+        rm "$RUNNER_TEMP/certificate.p12"
+        identity="$(security find-identity -v -p codesigning "$keychain" | awk -F'"' '/Developer ID Application/ { print $2; exit }')"
+        [[ -n "$identity" ]] || { echo "The certificate has no Developer ID Application identity." >&2; exit 1; }
+        printf 'XCTESTREPORT_CODESIGN_IDENTITY=%s\n' "$identity" >> "$GITHUB_ENV"
+        printf 'signed=true\n' >> "$GITHUB_OUTPUT"
+
+    - name: Build universal package
+      if: steps.version.outputs.exists != 'true'
+      run: Scripts/package-release.sh "${{ steps.version.outputs.tag }}" "$RELEASE_DIR"
+
+    - name: Notarize
+      if: steps.codesign.outputs.signed == 'true'
+      env:
+        NOTARY_KEY: ${{ secrets.NOTARY_API_KEY_P8 }}
+        NOTARY_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+        NOTARY_ISSUER: ${{ secrets.NOTARY_API_ISSUER_ID }}
+      run: |
+        if [[ -z "$NOTARY_KEY" ]]; then
+          echo "No notarization API key configured; skipping notarization."
+          exit 0
+        fi
+        printf '%s' "$NOTARY_KEY" > "$RUNNER_TEMP/notary.p8"
+        work="$RUNNER_TEMP/notarize"
+        mkdir -p "$work"
+        tar -xzf "$RELEASE_DIR/xctestreport-macos-universal.tar.gz" -C "$work"
+        ditto -c -k --keepParent "$work/xctestreport/xctestreport" "$work/xctestreport.zip"
+        xcrun notarytool submit "$work/xctestreport.zip" --wait \
+          --key "$RUNNER_TEMP/notary.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER"
+        rm "$RUNNER_TEMP/notary.p8"
+
+    - name: Smoke test the packaged release
+      if: steps.version.outputs.exists != 'true'
+      run: |
+        smoke="$RUNNER_TEMP/release-smoke"
+        mkdir -p "$smoke"
+        tar -xzf "$RELEASE_DIR/xctestreport-macos-universal.tar.gz" -C "$smoke"
+        # Resources must resolve from the extracted package, not the build directory.
+        rm -rf .build/release-universal
+        node ui-tests/scripts/generate-report.js "$smoke/xctestreport/xctestreport" "$smoke/report"
+        test -s "$smoke/report/index.html"
+
+    - name: Write and sign checksums
+      if: steps.version.outputs.exists != 'true'
+      env:
+        SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+      run: |
+        [[ -n "$SIGNING_KEY" ]] || { echo "RELEASE_SIGNING_KEY is not configured." >&2; exit 1; }
+        cp Scripts/install-release.sh "$RELEASE_DIR/install.sh"
+        cp .github/release-signing.allowed_signers "$RELEASE_DIR/allowed_signers"
+        cd "$RELEASE_DIR"
+        shasum -a 256 xctestreport-macos-universal.tar.gz install.sh > SHA256SUMS
+        key="$RUNNER_TEMP/release-signing-key"
+        (umask 077; printf '%s\n' "$SIGNING_KEY" > "$key")
+        ssh-keygen -Y sign -q -f "$key" -n xctestreport-release SHA256SUMS
+        rm "$key"
+        ssh-keygen -Y verify -f allowed_signers -I xctestreport-release -n xctestreport-release \
+          -s SHA256SUMS.sig < SHA256SUMS
+
+    - name: Attest build provenance
+      if: steps.version.outputs.exists != 'true'
+      uses: actions/attest-build-provenance@v4
+      with:
+        subject-path: |
+          ${{ env.RELEASE_DIR }}/xctestreport-macos-universal.tar.gz
+          ${{ env.RELEASE_DIR }}/install.sh
+          ${{ env.RELEASE_DIR }}/SHA256SUMS
+
+    - name: Publish release
+      if: steps.version.outputs.exists != 'true'
+      env:
+        TAG: ${{ steps.version.outputs.tag }}
+      run: |
+        cat > "$RUNNER_TEMP/notes.md" <<EOF
+        Install or update:
+
+        \`\`\`bash
+        curl -fsSL https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/install.sh | bash -s -- --version ${TAG}
+        \`\`\`
+
+        Verify manually:
+
+        \`\`\`bash
+        ssh-keygen -Y verify -f allowed_signers -I xctestreport-release -n xctestreport-release -s SHA256SUMS.sig < SHA256SUMS
+        shasum -a 256 -c SHA256SUMS
+        gh attestation verify xctestreport-macos-universal.tar.gz --repo ${GITHUB_REPOSITORY}
+        \`\`\`
+        EOF
+        gh release create "$TAG" \
+          --target "$GITHUB_SHA" \
+          --title "xctestreport $TAG" \
+          --notes-file "$RUNNER_TEMP/notes.md" \
+          --generate-notes \
+          --latest \
+          "$RELEASE_DIR/xctestreport-macos-universal.tar.gz" \
+          "$RELEASE_DIR/install.sh" \
+          "$RELEASE_DIR/SHA256SUMS" \
+          "$RELEASE_DIR/SHA256SUMS.sig" \
+          "$RELEASE_DIR/allowed_signers"
+
+    - name: Remove signing keychain
+      if: always() && steps.codesign.outputs.signed == 'true'
+      run: security delete-keychain "$RUNNER_TEMP/release.keychain-db"

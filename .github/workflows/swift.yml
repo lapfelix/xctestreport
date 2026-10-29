@@ -118,3 +118,13 @@ jobs:
           ${{ runner.temp }}/xctestreport-performance-fixtures/*.xcresult/
         if-no-files-found: ignore
         retention-days: 7
+
+  release:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/release.yml
+    secrets: inherit

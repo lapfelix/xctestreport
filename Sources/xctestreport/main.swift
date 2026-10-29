@@ -5,7 +5,8 @@ import ArgumentParser
 struct XCTestReport: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "xctestreport",
-        abstract: "A utility to generate simple HTML reports from XCTest results."
+        abstract: "A utility to generate simple HTML reports from XCTest results.",
+        version: xctestreportVersion
     )
 
     @Argument(help: "Path to the .xcresult file.")

@@ -76,11 +76,59 @@ older version 1 backups as well as the current version 2 format.
 
 ## Requirements
 - macOS with Xcode 16 or newer installed and selected with `xcode-select` (`xcrun xcresulttool`).
-- Swift 6.0+ to build, required by the pinned Swift Argument Parser dependency. The package uses Swift 5 language mode.
+- Swift 6.0+ only when building from source. The package uses Swift 5 language mode.
 - Optional: `ffmpeg` for `--compress-video`.
 - Optional: `gzip` for extra payload compression (fallbacks are automatic).
 
-## Install
+## Quick start
+
+Run the latest release without installing anything (cached per version under
+`~/Library/Caches/xctestreport`, so later runs only check for a newer release):
+
+```bash
+curl -fsSL https://github.com/lapfelix/xctestreport/releases/latest/download/install.sh | bash -s -- --run App.xcresult report
+```
+
+Or install it into `~/.local/bin` (rerun to update):
+
+```bash
+curl -fsSL https://github.com/lapfelix/xctestreport/releases/latest/download/install.sh | bash
+```
+
+Options go after `bash -s --`: `--prefix <dir>` installs into `<dir>/bin`, and `--version v1.0.42`
+pins a release (or set `XCTESTREPORT_VERSION`). `xctestreport --version` shows the installed release.
+
+## Releases
+
+Every push to `main` that passes CI publishes a universal (Apple silicon and Intel) release tagged
+`vMAJOR.MINOR.PATCH`. `MAJOR.MINOR` comes from the `VERSION` file; the patch number counts commits
+since that file last changed, so editing `VERSION` starts a new series at `.0`.
+
+Each release is verifiable two independent ways, and the installer checks them before running anything:
+
+- **Signed checksums.** `SHA256SUMS` lists the archive and installer and is signed with the release SSH key
+  pinned in the installer and in [`.github/release-signing.allowed_signers`](.github/release-signing.allowed_signers).
+  macOS's built-in `ssh-keygen` verifies it; no extra tools needed.
+- **Build provenance.** GitHub signs a [Sigstore attestation](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations)
+  tying the archive to the exact commit and workflow run that built it. The installer checks it
+  automatically when the GitHub CLI is signed in.
+
+To verify a download by hand:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/lapfelix/xctestreport/main/.github/release-signing.allowed_signers
+ssh-keygen -Y verify -f release-signing.allowed_signers -I xctestreport-release -n xctestreport-release \
+  -s SHA256SUMS.sig < SHA256SUMS
+shasum -a 256 -c SHA256SUMS
+gh attestation verify xctestreport-macos-universal.tar.gz --repo lapfelix/xctestreport
+```
+
+When the repository has a Developer ID certificate configured (`DEVELOPER_ID_CERTIFICATE_P12`,
+`DEVELOPER_ID_CERTIFICATE_PASSWORD`, and optionally the App Store Connect API key secrets
+`NOTARY_API_KEY_P8`, `NOTARY_API_KEY_ID` and `NOTARY_API_ISSUER_ID`), the executable is also
+Developer ID signed and notarized.
+
+## Build from source
 ```bash
 git clone https://github.com/lapfelix/xctestreport.git
 cd xctestreport
@@ -89,7 +137,7 @@ Scripts/install.sh
 # For another writable prefix: Scripts/install.sh /path/to/prefix
 ```
 
-The installer copies the SwiftPM resource bundle alongside the executable. Keep both together
+The installers copy the SwiftPM resource bundle alongside the executable. Keep both together
 when moving an installation; the HTML templates and web assets live in that bundle.
 
 ## CLI

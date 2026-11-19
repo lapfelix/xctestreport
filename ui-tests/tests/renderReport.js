@@ -91,7 +91,7 @@ ${rows}
 }
 
 /**
- * @param {{ title?: string, headerNote?: string, suites?: Array<{name: string, tests: Array<{name: string, status: string, duration?: number, flaky?: boolean, performance?: boolean}>}> }} opts
+ * @param {{ title?: string, headerNote?: string, runDestinationsHTML?: string, suites?: Array<{name: string, tests: Array<{name: string, status: string, duration?: number, flaky?: boolean, performance?: boolean}>}> }} opts
  * @returns {Promise<string>} HTTP URL to the rendered index.html
  */
 async function renderReport(opts = {}) {
@@ -105,6 +105,7 @@ async function renderReport(opts = {}) {
   const values = {
     report_title: htmlEscape(title),
     header_note_html: headerNoteHTML,
+    run_destinations_html: opts.runDestinationsHTML || '',
     total_tests: String(counts.filter((t) => t.status !== 'skipped').length),
     passed_tests: String(counts.filter((t) => t.status === 'passed').length),
     failed_tests: String(counts.filter((t) => t.status === 'failed').length),

@@ -32,6 +32,19 @@ test('header note is HTML-escaped', async ({ page }) => {
   await expect(page.locator('.header-note script')).toHaveCount(0);
 });
 
+test('run destinations render as wrapping pills under the title', async ({ page }) => {
+  const runDestinationsHTML = '<div class="run-destinations"><span class="run-destinations-label">Destinations</span>'
+    + '<ul><li>iPhone 17 Pro · iOS Simulator 27.0 (24A434)</li><li>Apple Watch Series 11 (46mm) · watchOS Simulator 27.0</li></ul></div>';
+  await page.setViewportSize({ width: 375, height: 800 });
+  await page.goto(await renderReport({ runDestinationsHTML, suites }));
+  await expect(page.locator('.run-destinations li')).toHaveText([
+    'iPhone 17 Pro · iOS Simulator 27.0 (24A434)',
+    'Apple Watch Series 11 (46mm) · watchOS Simulator 27.0',
+  ]);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBe(0);
+});
+
 for (const javaScriptEnabled of [true, false]) {
   test(`snapshot navigation appears beside test results (JavaScript ${javaScriptEnabled})`, async ({ browser }) => {
     const context = await browser.newContext({ javaScriptEnabled });

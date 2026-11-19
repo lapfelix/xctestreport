@@ -91,3 +91,37 @@ extension XCTestReport {
             """
     }
 }
+
+extension XCTestReport {
+    /// One label per distinct destination ("iPhone 17 Pro · iOS Simulator 27.0 (24A434)"), in run order.
+    /// Uses `modelName` because a watchOS simulator's `deviceName` names its paired iPhone.
+    static func runDestinationLabels(_ devices: [Device], separator: String = " · ") -> [String] {
+        var seen = Set<String>()
+        return devices.compactMap { device in
+            func nonEmpty(_ value: String?) -> String? {
+                guard let value = value?.trimmingCharacters(in: .whitespaces), !value.isEmpty else {
+                    return nil
+                }
+                return value
+            }
+            var runtime = [nonEmpty(device.platform), nonEmpty(device.osVersion)]
+                .compactMap { $0 }.joined(separator: " ")
+            if let build = nonEmpty(device.osBuildNumber) {
+                runtime += runtime.isEmpty ? build : " (\(build))"
+            }
+            let parts = [nonEmpty(device.modelName) ?? nonEmpty(device.deviceName), nonEmpty(runtime)]
+                .compactMap { $0 }
+            guard !parts.isEmpty else { return nil }
+            let label = parts.joined(separator: separator)
+            return seen.insert(label).inserted ? label : nil
+        }
+    }
+
+    func renderRunDestinationsHTML(_ labels: [String]) -> String {
+        guard !labels.isEmpty else { return "" }
+        let items = labels.map { "<li>\(htmlEscape($0))</li>" }.joined()
+        let heading = labels.count == 1 ? "Destination" : "Destinations"
+        return
+            "<div class=\"run-destinations\"><span class=\"run-destinations-label\">\(heading)</span><ul>\(items)</ul></div>"
+    }
+}

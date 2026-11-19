@@ -24,6 +24,27 @@ final class ReportIndexTests: XCTestCase {
         XCTAssertEqual(formatCompactDuration(3599.7), "1h")
     }
 
+    func testRunDestinationLabelsDeduplicateAndUseModelName() {
+        func device(_ deviceName: String, _ model: String, _ platform: String?, _ os: String, _ build: String?)
+            -> XCTestReport.Device
+        {
+            XCTestReport.Device(
+                deviceId: nil, deviceName: deviceName, architecture: "arm64", modelName: model,
+                platform: platform, osVersion: os, osBuildNumber: build)
+        }
+        let labels = XCTestReport.runDestinationLabels([
+            device("iPhone 17 Pro A", "iPhone 17 Pro", "iOS Simulator", "27.0", "24A434"),
+            device("iPhone 17 Pro A", "iPhone 17 Pro", "iOS Simulator", "27.0", "24A434"),
+            device("iPhone 17 Pro A", "Apple Watch Series 11 (46mm)", "watchOS Simulator", "27.0", nil),
+            device("My Mac", "", nil, "", nil),
+        ])
+        XCTAssertEqual(labels, [
+            "iPhone 17 Pro · iOS Simulator 27.0 (24A434)",
+            "Apple Watch Series 11 (46mm) · watchOS Simulator 27.0",
+            "My Mac",
+        ])
+    }
+
     func testFlakyTestPassedAfterFailedAttempt() {
         let retried = [makeRun("Failed"), makeRun("Passed")]
         XCTAssertTrue(XCTestReport.isFlakyTest(result: "Passed", testRuns: retried))

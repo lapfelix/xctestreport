@@ -464,6 +464,7 @@ extension XCTestReport {
         buildErrorCount: Int?,
         buildWarningCount: Int?,
         previousResultsDate: Date?,
+        destinations: [String] = [],
         performance: [String: PerformanceTestAnalysis] = [:]
     ) throws {
         var lines = [String]()
@@ -486,6 +487,10 @@ extension XCTestReport {
         lines.append("")
 
         lines.append("- **Result:** \(result)")
+        if !destinations.isEmpty {
+            let heading = destinations.count == 1 ? "Destination" : "Destinations"
+            lines.append("- **\(heading):** \(destinations.joined(separator: "; "))")
+        }
         lines.append("- **Total:** \(counts.totalTests) | **Passed:** \(counts.passedTests) | **Failed:** \(counts.failedTests) | **Skipped:** \(counts.skippedTests)")
         lines.append("- **Pass rate:** \(String(format: "%.1f", counts.percentagePassed))%")
         if let errors = buildErrorCount, let warnings = buildWarningCount {
@@ -677,7 +682,8 @@ extension XCTestReport {
         entries: [AgentTestEntry],
         buildErrorCount: Int?,
         buildWarningCount: Int?,
-        previousResultsDate: Date?
+        previousResultsDate: Date?,
+        destinations: [String] = []
     ) throws {
         var lines = [String]()
         lines.append("# \(summaryTitle) - Failed Tests")
@@ -686,6 +692,10 @@ extension XCTestReport {
         lines.append("")
 
         lines.append("- **Result:** \(result)")
+        if !destinations.isEmpty {
+            let heading = destinations.count == 1 ? "Destination" : "Destinations"
+            lines.append("- **\(heading):** \(destinations.joined(separator: "; "))")
+        }
         lines.append("- **Total:** \(counts.totalTests) | **Passed:** \(counts.passedTests) | **Failed:** \(counts.failedTests) | **Skipped:** \(counts.skippedTests)")
         lines.append("- **Pass rate:** \(String(format: "%.1f", counts.percentagePassed))%")
         if let errors = buildErrorCount, let warnings = buildWarningCount {

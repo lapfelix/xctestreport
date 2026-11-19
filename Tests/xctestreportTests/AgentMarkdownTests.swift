@@ -71,10 +71,13 @@ final class AgentMarkdownTests: XCTestCase {
             entries: entries,
             buildErrorCount: 0,
             buildWarningCount: 2,
-            previousResultsDate: nil)
+            previousResultsDate: nil,
+            destinations: ["iPhone 17 Pro - iOS Simulator 27.0", "Apple Watch Series 11 - watchOS Simulator 27.0"])
 
         let markdown = try String(
             contentsOf: directory.appendingPathComponent("report.md"), encoding: .utf8)
+        XCTAssertTrue(markdown.contains(
+            "- **Destinations:** iPhone 17 Pro - iOS Simulator 27.0; Apple Watch Series 11 - watchOS Simulator 27.0"))
         XCTAssertTrue(markdown.contains("## Failed tests (1)"))
         XCTAssertTrue(markdown.contains("[testFoo()](agent-tests.md#Suite_testFoo__)"))
         XCTAssertTrue(markdown.contains("boom failed"))

@@ -942,11 +942,14 @@ extension XCTestReport {
             headerNoteHTML = "<p class=\"header-note\">\(htmlEscape(note))</p>"
         }
 
+        let runDevices = summary.devicesAndConfigurations.map(\.device)
         let indexHTML = try renderTemplate(
             indexTemplate,
             values: [
                 "report_title": htmlEscape(summary.title),
                 "header_note_html": headerNoteHTML,
+                "run_destinations_html": renderRunDestinationsHTML(
+                    Self.runDestinationLabels(runDevices)),
                 "total_tests": String(overallCounts.totalTests),
                 "passed_tests": String(overallCounts.passedTests),
                 "failed_tests": String(overallCounts.failedTests),
@@ -981,6 +984,7 @@ extension XCTestReport {
             buildErrorCount: buildErrorCount,
             buildWarningCount: buildWarningCount,
             previousResultsDate: previousResults?.date,
+            destinations: Self.runDestinationLabels(runDevices, separator: " - "),
             performance: performanceAnalyses)
 
         try writeFailuresReport(
@@ -990,7 +994,8 @@ extension XCTestReport {
             entries: agentEntriesQueue.sync { agentEntries },
             buildErrorCount: buildErrorCount,
             buildWarningCount: buildWarningCount,
-            previousResultsDate: previousResults?.date)
+            previousResultsDate: previousResults?.date,
+            destinations: Self.runDestinationLabels(runDevices, separator: " - "))
 
         let overallDuration = Date().timeIntervalSince(overallStartTime)
         pruneLooseAttachments(

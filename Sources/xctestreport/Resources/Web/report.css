@@ -4260,6 +4260,10 @@ a { color: var(--report-accent); }
 .report-heading h1 { font-size: 30px; letter-spacing: -1px; line-height: 1.2; margin: 16px 0 8px; }
 .report-heading h1 span { display: inline; margin-left: 12px; color: var(--report-muted); font-weight: 400; font-size: 20px; letter-spacing: -.3px; overflow-wrap: anywhere; }
 .report-heading .header-note { margin: 8px 0; color: var(--report-muted); }
+.run-destinations { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 8px 0; font-size: 14px; color: var(--report-muted); }
+.run-destinations-label { font-weight: 600; }
+.run-destinations ul { display: contents; list-style: none; }
+.run-destinations li { padding: 2px 10px; border: 1px solid var(--report-line); border-radius: 999px; background: var(--report-surface); color: var(--report-ink); overflow-wrap: anywhere; }
 .report-nav { display: flex; gap: 24px; border-bottom: 1px solid var(--report-line); margin: 20px 0 24px; }
 .report-nav a { padding: 0 0 12px; font-size: 14px; color: var(--report-muted); }
 .report-nav a[aria-current] { color: var(--report-accent); border-bottom: 2px solid currentColor; font-weight: 600; }

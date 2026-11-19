@@ -333,6 +333,22 @@ test('mixed-device labels fit a narrow viewport', async ({page}) => {
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
 
+test('a zoom chosen while images load survives the load', async ({page}) => {
+  await page.setViewportSize({width:390,height:844});
+  await page.goto(server.url);
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  await page.route('**/*.png', async route => { await gate; await route.continue(); });
+  await page.getByRole('button',{name:'Inspect NearbyRouteDisplayName-text',exact:true}).click();
+  await expect(page.locator('.snapdiff-stage')).toBeVisible();
+  await page.getByRole('combobox',{name:'Zoom level'}).selectOption('2');
+  await expect(page.locator('.snapdiff-zoomlabel')).toHaveText('200%');
+  release();
+  await expect.poll(()=>page.locator('.snapdiff-layer-expected').first().evaluate(img=>img.complete && img.naturalWidth>0)).toBe(true);
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  await expect(page.locator('.snapdiff-zoomlabel')).toHaveText('200%');
+});
+
 for (const width of [320, 390, 667]) {
   test(`compact inspector defaults and touch controls at ${width}px`, async ({page}) => {
     await page.setViewportSize({width,height:width === 667 ? 375 : 844});

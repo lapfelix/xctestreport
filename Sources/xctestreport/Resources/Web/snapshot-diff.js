@@ -825,7 +825,8 @@
             applyMode(state);
             requestAnimationFrame(function() {
                 sizeStage(state);
-                fitView(state);
+                // Keep a zoom chosen while the images were still loading.
+                if (!state.userZoomed) { fitView(state); } else { applyTransform(state); }
             });
         }
 

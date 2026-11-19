@@ -15,7 +15,8 @@ import tempfile
 from urllib.parse import unquote, urlsplit
 import zipfile
 
-from verify import EXPECTED_CASES, MIXED_FAILURES, attachment_name, canonical, require, walk
+from verify import (EXPECTED_CASES, FRAME_STEP, GESTURE_KEY, GESTURE_TOLERANCE, MIXED_FAILURES, VIDEO_LAG,
+                    attachment_name, canonical, require, sample_frames, walk)
 
 
 class Element:
@@ -147,29 +148,6 @@ def markdown_identifiers(content):
 # The fixture app logs when it actually received each touch and shows a magenta bar while a
 # finger is down. Overlay gestures must match the log, and the video must show the bar where
 # the overlay says the touch is; the video lags by a frame or two of render/capture latency.
-GESTURE_KEY = "JourneyUITests/testGestureTiming()"
-GESTURE_TOLERANCE = 0.08
-VIDEO_LAG = (-0.03, 0.15)
-# Recordings use variable frame timing; on a loaded CI machine a tap can be one 10 ms frame.
-FRAME_STEP = 0.004
-
-
-def sample_frames(video, times):
-    script = Path(__file__).with_name("sample_frames.swift")
-    with tempfile.TemporaryDirectory(prefix="xctestreport-frames-") as module_cache:
-        result = subprocess.run(
-            ["xcrun", "swift", "-module-cache-path", module_cache, str(script), str(video)]
-            + [f"{time:.3f}" for time in times],
-            capture_output=True, text=True, check=True)
-    samples = {}
-    for line in result.stdout.splitlines():
-        time, *rgb = line.split()
-        if rgb[0] != "none":
-            red, green, blue = map(int, rgb)
-            samples[round(float(time), 3)] = red > 180 and green < 90 and blue > 180
-    return samples
-
-
 def verify_gesture_timing(report, pages, manifest, mixed):
     touches = json.loads(payload(report, pages, manifest, GESTURE_KEY, "touch-log.json")[1])
     require(len(touches) == 5 and all("up" in touch for touch in touches), "Fixture touch log is incomplete")

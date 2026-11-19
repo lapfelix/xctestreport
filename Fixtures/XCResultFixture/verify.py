@@ -72,6 +72,40 @@ EXPECTED_ACTIVITY_TITLES = {
 }
 
 
+GESTURE_KEY = "JourneyUITests/testGestureTiming()"
+# The report check allows overlay times this far from the logged touches.
+GESTURE_TOLERANCE = 0.08
+VIDEO_LAG = (-0.03, 0.15)
+# Recordings use variable frame timing; on a loaded CI machine a tap can be one 10 ms frame.
+FRAME_STEP = 0.004
+
+
+def sample_frames(video, times):
+    """Whether the fixture's magenta touch indicator fills the top of the frame at each time."""
+    script = Path(__file__).with_name("sample_frames.swift")
+    with tempfile.TemporaryDirectory(prefix="xctestreport-frames-") as module_cache:
+        result = subprocess.run(
+            ["xcrun", "swift", "-module-cache-path", module_cache, str(script), str(video)]
+            + [f"{time:.3f}" for time in times],
+            capture_output=True, text=True, check=True)
+    samples = {}
+    for line in result.stdout.splitlines():
+        time, *rgb = line.split()
+        if rgb[0] != "none":
+            red, green, blue = map(int, rgb)
+            samples[round(float(time), 3)] = red > 180 and green < 90 and blue > 180
+    return samples
+
+
+def unlit_windows(video, windows):
+    """The (start, end) windows, in video seconds, where no sampled frame shows a touch."""
+    times = sorted({round(low + index * FRAME_STEP, 3) for low, high in windows
+                    for index in range(int((high - low) / FRAME_STEP) + 1)})
+    samples = sample_frames(video, times)
+    return [(low, high) for low, high in windows
+            if not any(on for time, on in samples.items() if low <= time <= high)]
+
+
 def require(condition, message):
     if not condition:
         raise ValueError(message)
@@ -268,6 +302,19 @@ def verify(bundle, plan):
             require(payload("AliasedCard.difference.png").startswith(b"\x89PNG"), "Missing supplied diff")
             require(payload("RouteCard.expected.png") != payload("RouteCard.actual.png"), "Snapshot did not change")
             require("accessibility-hierarchy.txt" in attachments, "Missing UI hierarchy text")
+            # The simulator recorder can stall for seconds; a recording that misses a tap fails
+            # the report check later, so reject it here before it is cached.
+            touches = json.loads(payload("touch-log.json"))
+            recording = next(item for entry in manifest if canonical(entry["testIdentifier"]) == GESTURE_KEY
+                             for item in entry["attachments"]
+                             if Path(item["exportedFileName"]).suffix.lower() in {".mp4", ".mov", ".m4v"})
+            start = recording["timestamp"]
+            # Narrower than the report check's window by its overlay tolerance, so a pass here holds there.
+            windows = [(touch["down"] - start - 0.1 + GESTURE_TOLERANCE,
+                        touch["up"] - start + VIDEO_LAG[1] - GESTURE_TOLERANCE) for touch in touches]
+            missed = unlit_windows(Path(temp) / recording["exportedFileName"], windows)
+            require(not missed, "Gesture recording never shows the touch at "
+                    + ", ".join(f"{low:.3f}s" for low, _ in missed))
         else:
             require(payload("RouteCard.expected.png") == payload("RouteCard.actual.png"), "Baseline snapshot differs")
 

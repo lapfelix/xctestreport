@@ -74,6 +74,7 @@ final class SQLActivityParser {
         let activityId: Int64
         let name: String
         let timestamp: Double?
+        let payloadId: String?
     }
 
     private struct ActivityFailureIssue {
@@ -216,7 +217,7 @@ final class SQLActivityParser {
         func buildActivity(_ row: ActivityRow) -> XCTestReport.TestActivity {
             let attachmentRows = attachmentsByActivity[row.id] ?? []
             let attachments = attachmentRows.map {
-                XCTestReport.TestActivityAttachment(name: $0.name, timestamp: $0.timestamp, payloadId: nil)
+                XCTestReport.TestActivityAttachment(name: $0.name, timestamp: $0.timestamp, payloadId: $0.payloadId)
             }
             let childRows = sortRows(rowsByParent[row.id] ?? [])
             var children = childRows.map { buildActivity($0) }
@@ -417,7 +418,7 @@ final class SQLActivityParser {
                 FROM Activities child
                 JOIN activity_tree parent ON child.parent_fk = parent.id
             )
-            SELECT a.activity_fk, a.name, a.timestamp
+            SELECT a.activity_fk, a.name, a.timestamp, a.xcResultKitPayloadRefId
             FROM Attachments a
             JOIN activity_tree tree ON a.activity_fk = tree.id
             WHERE a.name IS NOT NULL
@@ -438,12 +439,15 @@ final class SQLActivityParser {
             let timestamp = sqlite3_column_type(stmt, 2) == SQLITE_NULL
                 ? nil
                 : sqlite3_column_double(stmt, 2)
+            // Same-named attachments can share a millisecond; the payload ID tells them apart.
+            let payloadId = sqlite3_column_text(stmt, 3).map { String(cString: $0) }
 
             attachmentsByActivity[activityId, default: []].append(
                 ActivityAttachmentRow(
                     activityId: activityId,
                     name: name,
-                    timestamp: normalizeTimestamp(timestamp)
+                    timestamp: normalizeTimestamp(timestamp),
+                    payloadId: payloadId
                 )
             )
         }

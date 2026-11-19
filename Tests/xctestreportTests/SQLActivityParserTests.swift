@@ -20,7 +20,7 @@ final class SQLActivityParserTests: XCTestCase {
                     orderInParent INTEGER,
                     testCaseRun_fk INTEGER
                 );
-                CREATE TABLE Attachments (activity_fk INTEGER, name TEXT, timestamp REAL);
+                CREATE TABLE Attachments (activity_fk INTEGER, name TEXT, timestamp REAL, xcResultKitPayloadRefId TEXT);
                 CREATE TABLE TestIssues (
                     uuid TEXT,
                     compactDescription TEXT,
@@ -53,7 +53,7 @@ final class SQLActivityParserTests: XCTestCase {
             )
             try exec(
                 db,
-                "INSERT INTO Attachments (activity_fk, name, timestamp) VALUES (100, 'Debug Description', 10.5);"
+                "INSERT INTO Attachments (activity_fk, name, timestamp, xcResultKitPayloadRefId) VALUES (100, 'Debug Description', 10.5, '0~payload');"
             )
             try exec(
                 db,
@@ -94,6 +94,7 @@ final class SQLActivityParserTests: XCTestCase {
         XCTAssertEqual(root.title, "Parent Step")
         XCTAssertEqual(root.isAssociatedWithFailure, true)
         XCTAssertEqual(root.attachments?.count, 1)
+        XCTAssertEqual(root.attachments?.first?.payloadId, "0~payload")
 
         let children = root.childActivities ?? []
         XCTAssertEqual(children.count, 2)
@@ -124,7 +125,7 @@ final class SQLActivityParserTests: XCTestCase {
                     orderInParent INTEGER,
                     testCaseRun_fk INTEGER
                 );
-                CREATE TABLE Attachments (activity_fk INTEGER, name TEXT, timestamp REAL);
+                CREATE TABLE Attachments (activity_fk INTEGER, name TEXT, timestamp REAL, xcResultKitPayloadRefId TEXT);
                 CREATE TABLE TestIssues (
                     uuid TEXT,
                     compactDescription TEXT,
